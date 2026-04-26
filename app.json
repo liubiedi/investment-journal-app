@@ -1,0 +1,48 @@
+{
+  "expo": {
+    "name": "投资日志",
+    "slug": "investment-journal",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#f5f1e8"
+    },
+    "assetBundlePatterns": ["**/*"],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.you.investmentjournal",
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "This app uses the microphone for voice journaling.",
+        "NSSpeechRecognitionUsageDescription": "This app uses speech recognition to convert your spoken journal entries to text."
+      }
+    },
+    "android": {
+      "package": "com.you.investmentjournal",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/icon.png",
+        "backgroundColor": "#f5f1e8"
+      },
+      "permissions": ["RECORD_AUDIO", "INTERNET"]
+    },
+    "plugins": [
+      "expo-font",
+      "expo-secure-store",
+      [
+        "@react-native-voice/voice",
+        {
+          "microphonePermission": "This app uses the microphone for voice journaling.",
+          "speechRecognitionPermission": "This app uses speech recognition to convert your spoken journal entries to text."
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": ""
+      }
+    }
+  }
+}

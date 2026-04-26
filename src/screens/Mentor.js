@@ -1,0 +1,291 @@
+// Mentor screen — chat with AI mentor. Auto-refreshes prices on mount if stale.
+import React, { useState, useEffect, useMemo, useRef } from "react";
+import {
+  View, ScrollView, Pressable, ActivityIndicator, KeyboardAvoidingView, Platform, TextInput,
+} from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import {
+  MessageCircle, Send, RotateCcw, Loader2, AlertCircle, Mic, MicOff,
+} from "lucide-react-native";
+
+import { colors, fonts } from "../theme";
+import { useApp } from "../../App";
+import { ago } from "../utils";
+import { chatMessage, fetchLivePrices } from "../api";
+import { useSpeech } from "../voice";
+import * as db from "../db";
+import {
+  TSerif, TSerifBold, TSerifItalic, TMono, Kicker, PaperInput,
+} from "../components";
+
+const PRICE_STALE_MS = 15 * 60 * 1000;
+
+export default function MentorScreen() {
+  const app = useApp();
+  const insets = useSafeAreaInsets();
+  const [history, setHistory] = useState([]);
+  const [input, setInput] = useState("");
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState("");
+  const [syncing, setSyncing] = useState(false);
+  const [syncError, setSyncError] = useState("");
+  const scrollRef = useRef(null);
+  const { listening, supported, start, stop } = useSpeech(setInput);
+
+  // Load chat history on mount
+  useEffect(() => {
+    (async () => {
+      const h = await db.listChat();
+      setHistory(h);
+    })();
+  }, []);
+
+  // Auto price refresh on mount if stale
+  useEffect(() => {
+    if (app.holdings.length === 0) return;
+    const stale = !app.prices?.lastUpdated || Date.now() - app.prices.lastUpdated > PRICE_STALE_MS;
+    if (!stale) return;
+    (async () => {
+      setSyncing(true); setSyncError("");
+      try {
+        const symbols = [...new Set(app.holdings.map((h) => h.symbol))];
+        const map = await fetchLivePrices(symbols);
+        await app.savePricesData(map);
+      } catch {
+        setSyncError("行情同步失败");
+      } finally {
+        setSyncing(false);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Auto-scroll to bottom on new message
+  useEffect(() => {
+    if (scrollRef.current) {
+      setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 50);
+    }
+  }, [history, sending]);
+
+  const manualSync = async () => {
+    if (syncing || app.holdings.length === 0) return;
+    setSyncing(true); setSyncError("");
+    try {
+      const symbols = [...new Set(app.holdings.map((h) => h.symbol))];
+      const map = await fetchLivePrices(symbols);
+      await app.savePricesData(map);
+    } catch {
+      setSyncError("行情同步失败");
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const send = async () => {
+    const text = input.trim();
+    if (!text || sending) return;
+    setInput(""); setError("");
+    const userMsg = { role: "user", content: text };
+    const newHistory = [...history, userMsg];
+    setHistory(newHistory);
+    await db.appendChat("user", text);
+    setSending(true);
+    try {
+      const reply = await chatMessage(history, text, app.profile, "default");
+      const updated = [...newHistory, { role: "assistant", content: reply }];
+      setHistory(updated);
+      await db.appendChat("assistant", reply);
+    } catch (e) {
+      setError(e.message === "NO_API_KEY" ? "请先在设置中配置 API key" : "导师暂时失联，请稍后再试");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const reset = async () => {
+    if (history.length === 0) return;
+    await db.clearChat();
+    setHistory([]);
+  };
+
+  const priceFreshness = useMemo(() => ago(app.prices?.lastUpdated), [app.prices]);
+  const ctxSummary = `${app.trades.length} 交易 · ${app.holdings.length} 持仓 · ${Object.keys(app.weeklyNotes).length} 周记 · ${Object.keys(app.monthlyReviews).length} 月评`;
+
+  const hasHoldings = app.holdings.length > 0;
+
+  const STARTERS = [
+    "帮我看看最近几笔交易有什么规律？",
+    "我焦虑的时候做的决定，结果通常怎样？",
+    "我的哪条规则最容易被我自己违反？",
+    "下个月我应该重点关注什么？",
+  ];
+
+  return (
+    <View style={{ flex: 1, backgroundColor: colors.bg }}>
+      {/* Header */}
+      <View style={{
+        paddingHorizontal: 20, paddingTop: 24, paddingBottom: 14,
+        borderBottomWidth: 1, borderBottomColor: colors.divider,
+      }}>
+        <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+          <Kicker>AI MENTOR</Kicker>
+          {history.length > 0 && (
+            <Pressable onPress={reset} style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+              <RotateCcw size={10} color={colors.inkFaint} />
+              <TMono style={{ fontSize: 10 }}>RESET</TMono>
+            </Pressable>
+          )}
+        </View>
+        <TSerifBold style={{ fontSize: 26, letterSpacing: -0.5 }}>投资导师</TSerifBold>
+        <TMono style={{ fontSize: 10, marginTop: 4, color: colors.inkMuted }}>已同步 · {ctxSummary}</TMono>
+
+        {hasHoldings && (
+          <View style={{ marginTop: 8, flexDirection: "row", alignItems: "center", gap: 8 }}>
+            {syncing ? (
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                <Loader2 size={10} color={colors.accent} />
+                <TMono style={{ fontSize: 10, color: colors.accent }}>正在同步实时行情…</TMono>
+              </View>
+            ) : priceFreshness ? (
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: colors.good }} />
+                <TMono style={{ fontSize: 10, color: colors.inkMuted }}>行情 {priceFreshness}</TMono>
+                <Pressable onPress={manualSync}>
+                  <TMono style={{ fontSize: 10, color: colors.inkMuted, textDecorationLine: "underline" }}>刷新</TMono>
+                </Pressable>
+              </View>
+            ) : (
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                <AlertCircle size={10} color={colors.warn} />
+                <TMono style={{ fontSize: 10, color: colors.warn }}>尚无实时行情</TMono>
+                <Pressable onPress={manualSync}>
+                  <TMono style={{ fontSize: 10, color: colors.inkMuted, textDecorationLine: "underline" }}>同步</TMono>
+                </Pressable>
+              </View>
+            )}
+            {syncError ? <TMono style={{ fontSize: 10, color: colors.bad }}>{syncError}</TMono> : null}
+          </View>
+        )}
+      </View>
+
+      {/* Messages */}
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        keyboardVerticalOffset={64}
+      >
+        <ScrollView
+          ref={scrollRef}
+          style={{ flex: 1 }}
+          contentContainerStyle={{ padding: 20, paddingBottom: 20 }}
+        >
+          {history.length === 0 && (
+            <View>
+              <TSerifItalic style={{ fontSize: 15, color: colors.inkMuted, lineHeight: 24, marginBottom: 24 }}>
+                "我读过你的每一页日志。你的哲学、规则、心念、每一笔的纠结与笃定 —— 都在我这里。"
+              </TSerifItalic>
+              <Kicker style={{ marginBottom: 12 }}>STARTERS · 建议提问</Kicker>
+              {STARTERS.map((s, i) => (
+                <Pressable key={i} onPress={() => setInput(s)}
+                  style={{
+                    padding: 12, marginBottom: 8,
+                    borderWidth: 1, borderColor: colors.divider,
+                    backgroundColor: colors.bgElev,
+                  }}>
+                  <TSerif style={{ fontSize: 14 }}>{s}</TSerif>
+                </Pressable>
+              ))}
+            </View>
+          )}
+
+          {history.map((m, i) => (
+            <MessageBubble key={i} role={m.role} content={m.content} />
+          ))}
+
+          {sending && (
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 8 }}>
+              <ActivityIndicator size="small" color={colors.inkFaint} />
+              <TSerifItalic style={{ fontSize: 13 }}>导师正在思考…</TSerifItalic>
+            </View>
+          )}
+
+          {error ? <TMono style={{ color: colors.bad, fontSize: 11, paddingVertical: 6 }}>{error}</TMono> : null}
+        </ScrollView>
+
+        {/* Input row */}
+        <View style={{
+          paddingHorizontal: 12, paddingTop: 10,
+          paddingBottom: Math.max(10, insets.bottom - 20),
+          borderTopWidth: 1, borderTopColor: colors.divider,
+          backgroundColor: colors.bg,
+          flexDirection: "row", alignItems: "flex-end", gap: 8,
+        }}>
+          {supported && (
+            <Pressable
+              onPress={() => listening ? stop() : start(input)}
+              style={{
+                width: 42, height: 42,
+                alignItems: "center", justifyContent: "center",
+                backgroundColor: listening ? colors.bad : "transparent",
+                borderWidth: listening ? 0 : 1, borderColor: colors.divider,
+              }}
+            >
+              {listening ? <MicOff size={15} color={colors.bg} /> : <Mic size={15} color={colors.inkMuted} />}
+            </Pressable>
+          )}
+          <TextInput
+            value={input}
+            onChangeText={setInput}
+            placeholder="问导师一个问题…"
+            placeholderTextColor={colors.inkFaint}
+            multiline
+            style={{
+              flex: 1,
+              fontFamily: fonts.serif, color: colors.ink, fontSize: 15,
+              paddingHorizontal: 12, paddingVertical: 10,
+              borderWidth: 1, borderColor: colors.divider,
+              maxHeight: 100,
+              textAlignVertical: "top",
+              minHeight: 42,
+            }}
+          />
+          <Pressable onPress={send} disabled={!input.trim() || sending}
+            style={{
+              width: 42, height: 42,
+              alignItems: "center", justifyContent: "center",
+              backgroundColor: colors.ink,
+              opacity: (!input.trim() || sending) ? 0.3 : 1,
+            }}>
+            {sending ? <Loader2 size={15} color={colors.bg} /> : <Send size={15} color={colors.bg} />}
+          </Pressable>
+        </View>
+      </KeyboardAvoidingView>
+    </View>
+  );
+}
+
+function MessageBubble({ role, content }) {
+  if (role === "user") {
+    return (
+      <View style={{ flexDirection: "row", justifyContent: "flex-end", marginBottom: 14 }}>
+        <View style={{
+          maxWidth: "85%", padding: 12,
+          backgroundColor: colors.ink,
+        }}>
+          <TSerif style={{ color: colors.bg, fontSize: 14, lineHeight: 22 }}>{content}</TSerif>
+        </View>
+      </View>
+    );
+  }
+  return (
+    <View style={{ marginBottom: 18 }}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 6 }}>
+        <View style={{ width: 18, height: 18, backgroundColor: colors.ink, alignItems: "center", justifyContent: "center" }}>
+          <MessageCircle size={10} color={colors.accent} />
+        </View>
+        <Kicker>MENTOR</Kicker>
+      </View>
+      <TSerif style={{ fontSize: 15, lineHeight: 24 }}>{content}</TSerif>
+    </View>
+  );
+}
