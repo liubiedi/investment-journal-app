@@ -53,10 +53,40 @@ npx expo run:android   # requires Android Studio SDK installed
 npm install -g eas-cli
 eas login                          # sign in with your Expo account
 eas build:configure                # creates eas.json (already included here, skip if asked)
-eas build -p android --profile preview
+eas build -p android --profile production
 ```
 
 Wait ~10-15 minutes. When finished, EAS gives you a URL to download `.apk`. Transfer to your phone and install (enable "Install from unknown sources" in Android settings).
+
+## Branching and release workflow
+
+- `dev` branch: daily development and testing with Expo Go.
+- `main` branch: stable release-ready code used to produce installable APKs.
+
+Recommended flow:
+
+```bash
+# Daily work
+git checkout dev
+git pull
+# code + test
+git add .
+git commit -m "your change"
+git push
+
+# Test on phone using Expo Go (dev branch)
+npx expo start
+# then scan QR code with Expo Go app
+
+# After testing is OK, merge into main
+git checkout main
+git pull
+git merge --no-ff dev
+git push
+
+# Build release APK from main
+eas build -p android --profile production
+```
 
 ### Option B — Local build (faster iteration, needs Android Studio)
 
