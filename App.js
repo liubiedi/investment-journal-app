@@ -1,10 +1,12 @@
 // App.js — root entry with navigation, font loading, global state
 import React, { useEffect, useState, useCallback, useMemo } from "react";
-import { View, Text, ActivityIndicator } from "react-native";
+import { View, Text, ActivityIndicator, Modal, TouchableOpacity, Pressable, StyleSheet } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
-import { NavigationContainer } from "@react-navigation/native";
+import { NavigationContainer, createNavigationContainerRef } from "@react-navigation/native";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
+
+export const navigationRef = createNavigationContainerRef();
 import * as SplashScreen from "expo-splash-screen";
 import {
   useFonts,
@@ -50,6 +52,14 @@ export default function App() {
   });
 
   const [bootstrapped, setBootstrapped] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
+
+  const navigateTo = useCallback((screen) => {
+    setMoreOpen(false);
+    setTimeout(() => {
+      if (navigationRef.isReady()) navigationRef.navigate(screen);
+    }, 150);
+  }, []);
 
   // Core state, all mirrored to SQLite
   const [philosophy, setPhilosophy] = useState("");
@@ -199,73 +209,186 @@ export default function App() {
     );
   }
 
+  const tabScreenOptions = {
+    headerShown: false,
+    tabBarStyle: {
+      backgroundColor: colors.bg,
+      borderTopColor: colors.divider,
+      borderTopWidth: 1,
+      height: 64,
+      paddingTop: 6,
+      paddingBottom: 8,
+    },
+    tabBarActiveTintColor: colors.ink,
+    tabBarInactiveTintColor: colors.inkFaint,
+    tabBarLabelStyle: {
+      fontSize: 9,
+      fontFamily: fonts.mono,
+      letterSpacing: 0.5,
+      marginTop: 2,
+    },
+  };
+
   return (
     <SafeAreaProvider>
       <AppCtx.Provider value={ctx}>
         <StatusBar style="dark" />
-        <NavigationContainer theme={navTheme}>
-          <Tab.Navigator
-            screenOptions={{
-              headerShown: false,
-              tabBarStyle: {
-                backgroundColor: colors.bg,
-                borderTopColor: colors.divider,
-                borderTopWidth: 1,
-                height: 64,
-                paddingTop: 6,
-                paddingBottom: 8,
-              },
-              tabBarActiveTintColor: colors.ink,
-              tabBarInactiveTintColor: colors.inkFaint,
-              tabBarLabelStyle: {
-                fontSize: 9,
-                fontFamily: fonts.mono,
-                letterSpacing: 0.5,
-                marginTop: 2,
-              },
-            }}
-          >
+        <NavigationContainer ref={navigationRef} theme={navTheme}>
+          <Tab.Navigator screenOptions={tabScreenOptions}>
             <Tab.Screen
-              name="home" options={{ tabBarLabel: "主页", tabBarIcon: ({ color }) => <Compass size={17} color={color} /> }}
+              name="home" options={{ tabBarLabel: "主页", tabBarIcon: ({ color }) => <Compass size={20} color={color} /> }}
             >
               {() => <HomeScreen />}
             </Tab.Screen>
             <Tab.Screen
-              name="weekly" options={{ tabBarLabel: "周记", tabBarIcon: ({ color }) => <BookOpen size={17} color={color} /> }}
+              name="weekly" options={{ tabBarLabel: "周记", tabBarIcon: ({ color }) => <BookOpen size={20} color={color} /> }}
             >
               {() => <WeeklyScreen />}
             </Tab.Screen>
             <Tab.Screen
-              name="monthly" options={{ tabBarLabel: "月评", tabBarIcon: ({ color }) => <Sparkles size={17} color={color} /> }}
+              name="monthly" options={{ tabBarLabel: "月评", tabBarIcon: ({ color }) => <Sparkles size={20} color={color} /> }}
             >
               {() => <MonthlyScreen />}
             </Tab.Screen>
             <Tab.Screen
-              name="log" options={{ tabBarLabel: "记录", tabBarIcon: ({ color }) => <FileText size={17} color={color} /> }}
+              name="log" options={{ tabBarLabel: "记录", tabBarIcon: ({ color }) => <FileText size={20} color={color} /> }}
             >
               {() => <LogScreen />}
             </Tab.Screen>
+
+            {/* Hidden tabs — accessible via navigationRef.navigate() */}
             <Tab.Screen
-              name="holdings" options={{ tabBarLabel: "持仓", tabBarIcon: ({ color }) => <Briefcase size={17} color={color} /> }}
+              name="holdings"
+              options={{ tabBarButton: () => null }}
             >
               {() => <HoldingsScreen />}
             </Tab.Screen>
             <Tab.Screen
-              name="mentor" options={{ tabBarLabel: "导师", tabBarIcon: ({ color }) => <MessageCircle size={17} color={color} /> }}
+              name="mentor"
+              options={{ tabBarButton: () => null }}
             >
               {() => <MentorScreen />}
             </Tab.Screen>
             <Tab.Screen
-              name="settings" options={{ tabBarLabel: "设置", tabBarIcon: ({ color }) => <SettingsIcon size={17} color={color} /> }}
+              name="settings"
+              options={{ tabBarButton: () => null }}
             >
               {() => <SettingsScreen />}
             </Tab.Screen>
+
+            {/* More tab — intercepts press to open drawer */}
+            <Tab.Screen
+              name="more"
+              component={() => null}
+              options={{
+                tabBarLabel: "更多",
+                tabBarIcon: ({ color }) => (
+                  <View style={{ flexDirection: "row", gap: 3, alignItems: "center" }}>
+                    {[0,1,2].map(i => (
+                      <View key={i} style={{ width: 4, height: 4, borderRadius: 2, backgroundColor: color }} />
+                    ))}
+                  </View>
+                ),
+              }}
+              listeners={{
+                tabPress: (e) => {
+                  e.preventDefault();
+                  setMoreOpen(true);
+                },
+              }}
+            />
           </Tab.Navigator>
         </NavigationContainer>
+
+        {/* More drawer */}
+        <Modal
+          transparent
+          visible={moreOpen}
+          animationType="slide"
+          onRequestClose={() => setMoreOpen(false)}
+        >
+          <Pressable style={drawerStyles.overlay} onPress={() => setMoreOpen(false)}>
+            <Pressable style={drawerStyles.sheet} onPress={() => {}}>
+              <View style={drawerStyles.handle} />
+              <Text style={drawerStyles.title}>更多</Text>
+              <View style={drawerStyles.grid}>
+                <TouchableOpacity style={drawerStyles.item} onPress={() => navigateTo("holdings")}>
+                  <View style={drawerStyles.iconWrap}><Briefcase size={22} color={colors.inkSoft} /></View>
+                  <Text style={drawerStyles.label}>持仓</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={drawerStyles.item} onPress={() => navigateTo("mentor")}>
+                  <View style={drawerStyles.iconWrap}><MessageCircle size={22} color={colors.inkSoft} /></View>
+                  <Text style={drawerStyles.label}>导师</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={drawerStyles.item} onPress={() => navigateTo("settings")}>
+                  <View style={drawerStyles.iconWrap}><SettingsIcon size={22} color={colors.inkSoft} /></View>
+                  <Text style={drawerStyles.label}>设置</Text>
+                </TouchableOpacity>
+              </View>
+            </Pressable>
+          </Pressable>
+        </Modal>
       </AppCtx.Provider>
     </SafeAreaProvider>
   );
 }
+
+const drawerStyles = StyleSheet.create({
+  overlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.35)",
+    justifyContent: "flex-end",
+  },
+  sheet: {
+    backgroundColor: colors.bg,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingTop: 12,
+    paddingBottom: 36,
+    paddingHorizontal: 24,
+  },
+  handle: {
+    width: 36,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: colors.divider,
+    alignSelf: "center",
+    marginBottom: 16,
+  },
+  title: {
+    fontFamily: fonts.mono,
+    fontSize: 11,
+    letterSpacing: 1.5,
+    color: colors.inkFaint,
+    textTransform: "uppercase",
+    marginBottom: 20,
+  },
+  grid: {
+    flexDirection: "row",
+    justifyContent: "space-around",
+  },
+  item: {
+    alignItems: "center",
+    gap: 8,
+    minWidth: 72,
+  },
+  iconWrap: {
+    width: 56,
+    height: 56,
+    borderRadius: 16,
+    backgroundColor: colors.bgCard,
+    borderWidth: 1,
+    borderColor: colors.divider,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  label: {
+    fontFamily: fonts.mono,
+    fontSize: 11,
+    color: colors.inkSoft,
+    letterSpacing: 0.5,
+  },
+});
 
 const navTheme = {
   dark: false,
