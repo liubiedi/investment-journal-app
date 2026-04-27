@@ -38,6 +38,7 @@ import SettingsScreen from "./src/screens/Settings";
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
 const Tab = createBottomTabNavigator();
+const EmptyScreen = () => null;
 
 // ---------- App context (simple — pass state down as screen props) ----------
 export const AppCtx = React.createContext(null);
@@ -279,7 +280,7 @@ export default function App() {
             {/* More tab — intercepts press to open drawer */}
             <Tab.Screen
               name="more"
-              component={() => null}
+              component={EmptyScreen}
               options={{
                 tabBarLabel: "更多",
                 tabBarIcon: ({ color }) => (
