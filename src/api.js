@@ -69,10 +69,18 @@ async function callClaude({ system, messages, model = MODELS.smart, max_tokens =
 
   if (!res.ok) {
     const txt = await res.text();
-    throw new Error(`Gemini ${res.status}: ${txt.slice(0, 200)}`);
+    const msg = `Gemini ${res.status}: ${txt.slice(0, 400)}`;
+    console.error("[callClaude]", msg);
+    throw new Error(msg);
   }
   const data = await res.json();
-  return data.candidates[0].content.parts.map((p) => p.text).join("");
+  console.log("[callClaude] response:", JSON.stringify(data).slice(0, 300));
+  const candidate = data.candidates?.[0];
+  if (!candidate?.content?.parts) {
+    const reason = candidate?.finishReason || "UNKNOWN";
+    throw new Error(`Gemini blocked: ${reason}`);
+  }
+  return candidate.content.parts.map((p) => p.text).join("");
 }
 
 // ========== Profile context builder ==========

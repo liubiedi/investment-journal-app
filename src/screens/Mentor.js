@@ -96,7 +96,8 @@ export default function MentorScreen() {
       setHistory(updated);
       await db.appendChat("assistant", reply);
     } catch (e) {
-      setError(e.message === "NO_API_KEY" ? "请先在设置中配置 API key" : "导师暂时失联，请稍后再试");
+      console.error("[Mentor send]", e.message);
+      setError(e.message === "NO_API_KEY" ? "请先在设置中配置 API key" : `导师暂时失联：${e.message}`);
     } finally {
       setSending(false);
     }
