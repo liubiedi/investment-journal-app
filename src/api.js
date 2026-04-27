@@ -1,10 +1,9 @@
-// api.js — Claude API (with prompt caching) + Yahoo Finance (free, fast)
+// api.js — Gemini API + Yahoo Finance (free, fast)
 //
 // Token economy principles:
-//   1. Prompt caching on the investor_profile portion (5 min ephemeral cache)
-//   2. Haiku for structured extraction; Sonnet for nuanced mentor advice
-//   3. Context trimming — only send what's relevant for the call
-//   4. Yahoo Finance directly, not through Claude's web_search
+//   1. Flash-lite for structured extraction; Flash for nuanced mentor advice
+//   2. Context trimming — only send what's relevant for the call
+//   3. Yahoo Finance directly, no LLM web_search
 //
 // API key is passed in from the caller (stored in SecureStore at app level).
 
@@ -12,18 +11,18 @@ import * as SecureStore from "expo-secure-store";
 import { MASTER_STYLES, getMaster } from "./constants";
 import { monthLabel } from "./utils";
 
-const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
-const API_VERSION = "2023-06-01";
+const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
 
-// Current models (as of Apr 2026).
-// Claude Haiku 4.5 is ~1/10 cost of Sonnet — good for parsing.
+// Free-tier Gemini models (as of Apr 2026).
+// Flash-lite: 30 RPM free — good for fast parsing.
+// Flash: 15 RPM free — used for mentor advice and reports.
 const MODELS = {
-  fast: "claude-haiku-4-5-20251001",
-  smart: "claude-sonnet-4-6",
+  fast: "gemini-2.0-flash-lite",
+  smart: "gemini-2.0-flash",
 };
 
 // ========== API key management ==========
-const API_KEY_STORE = "anthropic_api_key";
+const API_KEY_STORE = "gemini_api_key";
 
 export async function getApiKey() {
   try { return await SecureStore.getItemAsync(API_KEY_STORE); }
@@ -38,33 +37,42 @@ export async function clearApiKey() {
   await SecureStore.deleteItemAsync(API_KEY_STORE);
 }
 
-// ========== Core Claude call ==========
+// ========== Core Gemini call ==========
 async function callClaude({ system, messages, model = MODELS.smart, max_tokens = 1024 }) {
   const apiKey = await getApiKey();
   if (!apiKey) throw new Error("NO_API_KEY");
 
-  const body = { model, max_tokens, messages };
-  if (system) body.system = system;
+  // system can be a string or Anthropic-style array with cache_control — flatten to plain text
+  let systemInstruction;
+  if (system) {
+    const systemText = Array.isArray(system)
+      ? system.map((b) => b.text).join("\n\n")
+      : system;
+    systemInstruction = { parts: [{ text: systemText }] };
+  }
 
-  const res = await fetch(ANTHROPIC_URL, {
+  // Convert messages: "assistant" → "model" for Gemini; content string → parts array
+  const contents = messages.map((m) => ({
+    role: m.role === "assistant" ? "model" : m.role,
+    parts: [{ text: m.content }],
+  }));
+
+  const body = { contents, generationConfig: { maxOutputTokens: max_tokens } };
+  if (systemInstruction) body.systemInstruction = systemInstruction;
+
+  const url = `${GEMINI_BASE}/${model}:generateContent?key=${apiKey}`;
+  const res = await fetch(url, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": apiKey,
-      "anthropic-version": API_VERSION,
-    },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
 
   if (!res.ok) {
     const txt = await res.text();
-    throw new Error(`Claude ${res.status}: ${txt.slice(0, 200)}`);
+    throw new Error(`Gemini ${res.status}: ${txt.slice(0, 200)}`);
   }
   const data = await res.json();
-  return data.content
-    .filter((c) => c.type === "text")
-    .map((c) => c.text)
-    .join("");
+  return data.candidates[0].content.parts.map((p) => p.text).join("");
 }
 
 // ========== Profile context builder ==========
