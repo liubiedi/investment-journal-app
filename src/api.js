@@ -212,9 +212,8 @@ Infer emotion from tone. Match input language exactly.`;
 }
 
 // Generate mentor feedback for a single trade or thought.
-// `profile` should be a SLIMMED-DOWN version (recent trades only, no deep history).
 export async function generateEntryFeedback(entry, entryType, masterId, profile) {
-  const system = buildCachedSystem(masterId, profile);
+  const system = buildCachedSystem(masterId, { ...profile, maxTrades: 5, maxWeekly: 2, maxMonthly: 1 });
   let desc;
   if (entryType === "trade") {
     desc = `The investor just logged this trade:
@@ -243,7 +242,7 @@ Give your immediate, specific reaction. Reference their history, rules, or philo
 
 // Monthly commentary for a given master over a month's trades.
 export async function generateMonthlyCommentary(month, monthTrades, masterId, profile) {
-  const system = buildCachedSystem(masterId, profile);
+  const system = buildCachedSystem(masterId, { ...profile, maxTrades: 5, maxWeekly: 2, maxMonthly: 1 });
   const tradesList = monthTrades
     .map((t) => `- ${new Date(t.date).toISOString().slice(0, 10)} | ${t.action.toUpperCase()} | ${t.stock} | emotion: ${t.emotion} | ${t.reason}`)
     .join("\n");
@@ -260,14 +259,12 @@ Give your analysis of this month's trading activity. Look for patterns, emotiona
   });
 }
 
-// Mentor chat — cached system prompt, recent history only.
+// Mentor chat — minimal profile context to stay within free tier token limits.
 export async function chatMessage(history, newUserMessage, profile, masterId = "default") {
-  const system = buildCachedSystem(masterId, profile);
-  // Trim history to last 10 turns (5 exchanges) to keep messages small;
-  // the profile comes from cached system prompt.
-  const trimmed = history.slice(-10);
+  const system = buildCachedSystem(masterId, { ...profile, maxTrades: 5, maxWeekly: 2, maxMonthly: 1 });
+  const trimmed = history.slice(-6); // last 3 exchanges
   const messages = [...trimmed, { role: "user", content: newUserMessage }];
-  return await callClaude({ system, messages, max_tokens: 900 });
+  return await callClaude({ system, messages, max_tokens: 600 });
 }
 
 // ============================================================
