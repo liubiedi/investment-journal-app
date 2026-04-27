@@ -1,4 +1,4 @@
-﻿// Weekly notes screen with voice input
+// Weekly notes screen with voice input
 import React, { useState, useEffect } from "react";
 import { View, ScrollView, Pressable } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -27,12 +27,12 @@ export default function WeeklyScreen() {
       style={{ flex: 1, backgroundColor: colors.bg }}
       contentContainerStyle={{ paddingBottom: 40 + insets.bottom }}
     >
-      <Masthead kicker="WEEKLY" title="å‘¨è®°" subtitle="ä¸€å‘¨ä¸€è¡Œï¼Œåªå†™æœ€é‡è¦çš„ä¸€ä»¶äº‹" />
+      <Masthead kicker="WEEKLY" title="周记" subtitle="一周一行，只写最重要的一件事" />
 
       <View style={{ paddingHorizontal: 20, paddingTop: 24 }}>
         <View style={{ flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 10 }}>
           <View>
-            <Kicker color={colors.accent}>THIS WEEK Â· æœ¬å‘¨</Kicker>
+            <Kicker color={colors.accent}>THIS WEEK · 本周</Kicker>
             <TSerifBold style={{ fontSize: 17, marginTop: 2 }}>{activeWeek}</TSerifBold>
             <TMono style={{ fontSize: 11, marginTop: 2 }}>{weekRange(activeWeek)}</TMono>
           </View>
@@ -43,7 +43,7 @@ export default function WeeklyScreen() {
           multiline
           value={draft}
           onChangeText={setDraft}
-          placeholder="è¿™å‘¨å¸‚åœºè®©æˆ‘çœ‹åˆ°äº†ä»€ä¹ˆï¼Ÿæˆ‘åšäº†ä»€ä¹ˆï¼Ÿä¸€å¥è¯æ€»ç»“ã€‚ï¼ˆä¹Ÿå¯ç‚¹å³ä¸Šè§’è¯­éŸ³è¾“å…¥ï¼‰"
+          placeholder="这周市场让我看到了什么？我做了什么？一句话总结。（也可点右上角语音输入）"
           style={{ minHeight: 110, fontSize: 15 }}
         />
 
@@ -52,13 +52,13 @@ export default function WeeklyScreen() {
           disabled={unchanged}
           style={{ marginTop: 12 }}
         >
-          {app.weeklyNotes[activeWeek] ? "æ›´æ–°æœ¬å‘¨è®°å½•" : "å†™å…¥æœ¬å‘¨"}
+          {app.weeklyNotes[activeWeek] ? "更新本周记录" : "写入本周"}
         </FilledButton>
       </View>
 
       {sortedWeeks.length > 0 && (
         <View style={{ paddingHorizontal: 20, paddingTop: 32 }}>
-          <Kicker style={{ marginBottom: 12 }}>ARCHIVE Â· è¿‡å¾€</Kicker>
+          <Kicker style={{ marginBottom: 12 }}>ARCHIVE · 过往</Kicker>
           <View style={{ borderTopWidth: 1, borderTopColor: colors.divider }}>
             {sortedWeeks.map((wk) => (
               <Pressable key={wk} onPress={() => setActiveWeek(wk)}

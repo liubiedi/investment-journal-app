@@ -1,4 +1,4 @@
-﻿// Home screen â€” philosophy, rules, default mentor, stats
+// Home screen — philosophy, rules, default mentor, stats
 import React, { useState, useEffect } from "react";
 import { View, ScrollView, Pressable } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -33,19 +33,19 @@ export default function HomeScreen() {
       <Masthead
         kicker={`VOL. ${new Date().getFullYear()}`}
         title={"The Investor's\nLedger"}
-        subtitle="ç§äººæŠ•èµ„æ—¥å¿— Â· Personal Journal"
+        subtitle="私人投资日志 · Personal Journal"
         right={<Kicker style={{ fontSize: 9, letterSpacing: 3 }}>{fmtDate(new Date().toISOString())}</Kicker>}
       />
 
       {!app.apiKeyPresent && (
         <View style={{ marginHorizontal: 20, marginTop: 16, padding: 14, backgroundColor: colors.ink }}>
-          <Kicker color={colors.accent}>API KEY æœªé…ç½®</Kicker>
+          <Kicker color={colors.accent}>API KEY 未配置</Kicker>
           <TSerif style={{ color: colors.bg, fontSize: 14, marginTop: 4, lineHeight: 20 }}>
-            AI å¯¼å¸ˆåŠŸèƒ½éœ€è¦ Anthropic API keyã€‚å‰å¾€"è®¾ç½®"tab é…ç½®ã€‚
+            AI 导师功能需要 Anthropic API key。前往"设置"tab 配置。
           </TSerif>
           <Pressable onPress={() => nav.navigate("settings")}
             style={{ marginTop: 10, paddingVertical: 8, backgroundColor: colors.accent, alignItems: "center" }}>
-            <TSerifBold style={{ color: colors.ink, fontSize: 13 }}>å‰å¾€è®¾ç½®</TSerifBold>
+            <TSerifBold style={{ color: colors.ink, fontSize: 13 }}>前往设置</TSerifBold>
           </Pressable>
         </View>
       )}
@@ -56,11 +56,11 @@ export default function HomeScreen() {
             <View style={{ flex: 1 }}>
               <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 4 }}>
                 <Sparkles size={12} color={colors.accent} />
-                <Kicker color={colors.accent} style={{ fontSize: 9, letterSpacing: 2.5 }}>æœˆæœ«å°†è‡³</Kicker>
+                <Kicker color={colors.accent} style={{ fontSize: 9, letterSpacing: 2.5 }}>月末将至</Kicker>
               </View>
-              <TSerif style={{ color: colors.bg, fontSize: 18 }}>è¯¥å†™æœˆè¯„äº†</TSerif>
+              <TSerif style={{ color: colors.bg, fontSize: 18 }}>该写月评了</TSerif>
               <TMono style={{ color: colors.bg, opacity: 0.7, fontSize: 12, marginTop: 4 }}>
-                æœ¬æœˆå·²æœ‰ {currentMonthTrades.length} ç¬”äº¤æ˜“å¾…å¤ç›˜
+                本月已有 {currentMonthTrades.length} 笔交易待复盘
               </TMono>
             </View>
             <Pressable onPress={() => setReviewDismissed(true)} hitSlop={10}>
@@ -74,7 +74,7 @@ export default function HomeScreen() {
               alignItems: "center",
               flexDirection: "row", justifyContent: "center", gap: 6,
             }}>
-            <TSerifBold style={{ color: colors.ink, fontSize: 13 }}>å¼€å§‹å†™æœˆè¯„</TSerifBold>
+            <TSerifBold style={{ color: colors.ink, fontSize: 13 }}>开始写月评</TSerifBold>
             <ChevronRight size={14} color={colors.ink} />
           </Pressable>
         </View>
@@ -92,35 +92,35 @@ export default function HomeScreen() {
             <MessageCircle size={16} color={colors.accent} />
           </View>
           <View style={{ flex: 1 }}>
-            <TSerifBold style={{ fontSize: 15 }}>ä¸ŽæŠ•èµ„å¯¼å¸ˆå¯¹è¯</TSerifBold>
-            <TMono style={{ fontSize: 11, marginTop: 2 }}>ä¸€ä½ç†ŸçŸ¥ä½ å…¨éƒ¨æ—¥å¿—çš„ AI mentor</TMono>
+            <TSerifBold style={{ fontSize: 15 }}>与投资导师对话</TSerifBold>
+            <TMono style={{ fontSize: 11, marginTop: 2 }}>一位熟知你全部日志的 AI mentor</TMono>
           </View>
           <ChevronRight size={16} color={colors.inkFaint} />
         </Pressable>
       </View>
 
-      <Section label="My Investment Philosophy" sub="æ¯å¹´åªæ”¹ä¸€æ¬¡" pin>
+      <Section label="My Investment Philosophy" sub="每年只改一次" pin>
         <PhilosophyEditor value={app.philosophy} onSave={app.savePhilosophy} />
       </Section>
 
-      <Section label="My Rules" sub="æœ€å¤š 5 æ¡">
+      <Section label="My Rules" sub="最多 5 条">
         <RulesEditor rules={app.rules} onSave={app.saveRules} />
       </Section>
 
-      <Section label="Default Mentor" sub="é»˜è®¤ç‚¹è¯„è§†è§’">
+      <Section label="Default Mentor" sub="默认点评视角">
         <TSerifItalic style={{ fontSize: 12, marginBottom: 12 }}>
-          æ–°æ¡ç›®éœ€è¦ç‚¹è¯„æ—¶ï¼Œé»˜è®¤è¯·å“ªä¸€ä½ï¼Ÿ
+          新条目需要点评时，默认请哪一位？
         </TSerifItalic>
         <MasterChips active={app.defaultMaster} onSelect={app.saveDefaultMaster} />
       </Section>
 
-      <Section label="At a Glance" sub="æ•°æ®ä¸€è§ˆ">
+      <Section label="At a Glance" sub="数据一览">
         <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
-          <Stat value={app.holdings.length} label="æŒä»“" />
-          <Stat value={app.trades.length} label="äº¤æ˜“" />
-          <Stat value={app.thoughts.length} label="å¿ƒå¿µ" />
-          <Stat value={Object.keys(app.weeklyNotes).length} label="å‘¨è®°" />
-          <Stat value={Object.keys(app.monthlyReviews).length} label="æœˆè¯„" />
+          <Stat value={app.holdings.length} label="持仓" />
+          <Stat value={app.trades.length} label="交易" />
+          <Stat value={app.thoughts.length} label="心念" />
+          <Stat value={Object.keys(app.weeklyNotes).length} label="周记" />
+          <Stat value={Object.keys(app.monthlyReviews).length} label="月评" />
         </View>
       </Section>
     </ScrollView>
@@ -140,7 +140,7 @@ function PhilosophyEditor({ value, onSave }) {
             <TSerifItalic style={{ fontSize: 17, color: colors.ink, lineHeight: 26 }}>"{value}"</TSerifItalic>
           </View>
         ) : (
-          <TSerifItalic style={{ fontSize: 15 }}>ç‚¹å‡»æ­¤å¤„å†™ä¸‹ä½ çš„æŠ•èµ„ä¿¡æ¡ï¼ˆä¸€å¥è¯ï¼‰â€¦</TSerifItalic>
+          <TSerifItalic style={{ fontSize: 15 }}>点击此处写下你的投资信条（一句话）…</TSerifItalic>
         )}
       </Pressable>
     );
@@ -151,13 +151,13 @@ function PhilosophyEditor({ value, onSave }) {
       <PaperInput
         multiline autoFocus
         value={draft} onChangeText={setDraft}
-        placeholder="ä¾‹ï¼šä»¥åˆç†ä»·æ ¼è´­ä¹°ä¼˜ç§€ä¼ä¸šï¼Œå¹¶é•¿æœŸæŒæœ‰ã€‚"
+        placeholder="例：以合理价格购买优秀企业，并长期持有。"
         style={{ fontStyle: "italic", fontSize: 17, minHeight: 80 }}
       />
       <View style={{ flexDirection: "row", gap: 8, marginTop: 12 }}>
-        <OutlineButton onPress={() => { setDraft(value); setEditing(false); }}>å–æ¶ˆ</OutlineButton>
+        <OutlineButton onPress={() => { setDraft(value); setEditing(false); }}>取消</OutlineButton>
         <FilledButton onPress={() => { onSave(draft); setEditing(false); }} style={{ flex: 1 }}>
-          ä¿å­˜ä¿¡æ¡
+          保存信条
         </FilledButton>
       </View>
     </View>
@@ -214,9 +214,9 @@ function RulesEditor({ rules, onSave }) {
         </Pressable>
       )}
       <View style={{ flexDirection: "row", gap: 8, marginTop: 14 }}>
-        <OutlineButton onPress={() => { setDraft(rules); setEditing(false); }}>å–æ¶ˆ</OutlineButton>
+        <OutlineButton onPress={() => { setDraft(rules); setEditing(false); }}>取消</OutlineButton>
         <FilledButton onPress={() => { onSave(draft.filter((r) => r.trim())); setEditing(false); }} style={{ flex: 1 }}>
-          ä¿å­˜è§„åˆ™
+          保存规则
         </FilledButton>
       </View>
     </View>
