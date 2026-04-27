@@ -1,6 +1,6 @@
-// Log screen — trades + thoughts with on-demand mentor feedback.
+﻿// Log screen â€” trades + thoughts with on-demand mentor feedback.
 // IMPORTANT: feedback is NOT auto-generated on save (to save tokens).
-// User must tap "求教 xx" to request feedback from a specific master.
+// User must tap "æ±‚æ•™ xx" to request feedback from a specific master.
 
 import React, { useState } from "react";
 import { View, ScrollView, Pressable, ActivityIndicator } from "react-native";
@@ -14,7 +14,7 @@ import {
 } from "lucide-react-native";
 
 import { colors, fonts } from "../theme";
-import { useApp } from "../../App";
+import { useApp } from "../context";
 import { ACTIONS, EMOTIONS, getAction, getEmotion } from "../constants";
 import { fmtDate } from "../utils";
 import { parseTradeText, generateEntryFeedback } from "../api";
@@ -40,7 +40,7 @@ export default function LogScreen() {
       <ScrollView contentContainerStyle={{ paddingBottom: 40 + insets.bottom }}>
         <Masthead
           kicker="LOG"
-          title="记录"
+          title="è®°å½•"
           subtitle="Write before you trade. Think out loud."
           right={<Kicker style={{ fontSize: 9, letterSpacing: 3 }}>
             {subTab === "trades" ? `${app.trades.length} TRADES` : `${app.thoughts.length} THOUGHTS`}
@@ -52,17 +52,17 @@ export default function LogScreen() {
           <View style={{ flexDirection: "row", padding: 4, backgroundColor: colors.bgMuted, gap: 4 }}>
             <SubTabButton active={subTab === "trades"} onPress={() => { setSubTab("trades"); setAdding(false); }}
               icon={<FileText size={12} color={subTab === "trades" ? colors.bg : colors.inkMuted} />}
-              label="交易 Trades" />
+              label="äº¤æ˜“ Trades" />
             <SubTabButton active={subTab === "thoughts"} onPress={() => { setSubTab("thoughts"); setAdding(false); }}
               icon={<Lightbulb size={12} color={subTab === "thoughts" ? colors.bg : colors.inkMuted} />}
-              label="心念 Thoughts" />
+              label="å¿ƒå¿µ Thoughts" />
           </View>
         </View>
 
         {subTab === "thoughts" && (
           <View style={{ paddingHorizontal: 20, paddingTop: 8 }}>
             <TSerifItalic style={{ fontSize: 12 }}>
-              心念：拿不定主意时的私人记录。不是交易。
+              å¿ƒå¿µï¼šæ‹¿ä¸å®šä¸»æ„æ—¶çš„ç§äººè®°å½•ã€‚ä¸æ˜¯äº¤æ˜“ã€‚
             </TSerifItalic>
           </View>
         )}
@@ -72,7 +72,7 @@ export default function LogScreen() {
             <FilledButton onPress={() => setAdding(true)}>
               <Plus size={16} color={colors.bg} />
               <TSerifBold style={{ color: colors.bg, fontSize: 15 }}>
-                {subTab === "trades" ? "新建交易" : "记下心念"}
+                {subTab === "trades" ? "æ–°å»ºäº¤æ˜“" : "è®°ä¸‹å¿ƒå¿µ"}
               </TSerifBold>
             </FilledButton>
           </View>
@@ -97,7 +97,7 @@ export default function LogScreen() {
             <>
               {app.trades.length === 0 && !adding && (
                 <EmptyState icon={<FileText size={28} strokeWidth={1} color={colors.inkFaint} />}
-                  text="还没有交易记录" />
+                  text="è¿˜æ²¡æœ‰äº¤æ˜“è®°å½•" />
               )}
               {app.trades.map((t) => (
                 <TradeRow key={t.id} trade={t}
@@ -115,8 +115,8 @@ export default function LogScreen() {
             <>
               {app.thoughts.length === 0 && !adding && (
                 <EmptyState icon={<Lightbulb size={28} strokeWidth={1} color={colors.inkFaint} />}
-                  text="还没有心念记录"
-                  hint="心念可以是一个疑问、一个纠结、一段直觉。" />
+                  text="è¿˜æ²¡æœ‰å¿ƒå¿µè®°å½•"
+                  hint="å¿ƒå¿µå¯ä»¥æ˜¯ä¸€ä¸ªç–‘é—®ã€ä¸€ä¸ªçº ç»“ã€ä¸€æ®µç›´è§‰ã€‚" />
               )}
               {app.thoughts.map((t) => (
                 <ThoughtRow key={t.id} thought={t}
@@ -192,13 +192,13 @@ function TradeRow({ trade, onDelete, onRequestFeedback, defaultMaster }) {
           <View style={{ marginTop: 6, marginLeft: 80, flexDirection: "row", alignItems: "center", gap: 6 }}>
             <Quote size={9} color={colors.accent} />
             <TMono style={{ color: colors.accent, fontSize: 10 }}>
-              {trade.feedback.length} 位导师点评 · 点击展开
+              {trade.feedback.length} ä½å¯¼å¸ˆç‚¹è¯„ Â· ç‚¹å‡»å±•å¼€
             </TMono>
           </View>
         )}
         {!hasFeedback && !expanded && (
           <View style={{ marginTop: 6, marginLeft: 80 }}>
-            <TMono style={{ color: colors.inkFaint, fontSize: 10 }}>点击展开以求教导师</TMono>
+            <TMono style={{ color: colors.inkFaint, fontSize: 10 }}>ç‚¹å‡»å±•å¼€ä»¥æ±‚æ•™å¯¼å¸ˆ</TMono>
           </View>
         )}
       </Pressable>
@@ -269,14 +269,14 @@ function ThoughtRow({ thought, onDelete, onRequestFeedback, defaultMaster }) {
           <TMono style={{ fontSize: 10, minWidth: 68 }}>{fmtDate(thought.date)}</TMono>
           <HelpCircle size={12} color={colors.inkFaint} strokeWidth={2} />
           <TSerif style={{ flex: 1, fontSize: 14, lineHeight: 22 }}>
-            {expanded ? thought.content : thought.content.length > 80 ? thought.content.slice(0, 80) + "…" : thought.content}
+            {expanded ? thought.content : thought.content.length > 80 ? thought.content.slice(0, 80) + "â€¦" : thought.content}
           </TSerif>
         </View>
         {hasFeedback && !expanded && (
           <View style={{ marginTop: 6, marginLeft: 80, flexDirection: "row", alignItems: "center", gap: 6 }}>
             <Quote size={9} color={colors.accent} />
             <TMono style={{ color: colors.accent, fontSize: 10 }}>
-              {thought.feedback.length} 位导师回应
+              {thought.feedback.length} ä½å¯¼å¸ˆå›žåº”
             </TMono>
           </View>
         )}
@@ -336,7 +336,7 @@ function TradeForm({ rules, onSave, onCancel }) {
       setEmotion(res.emotion || "neutral");
       setParsed(true);
     } catch (e) {
-      setError(e.message === "NO_API_KEY" ? "请先在设置中配置 API key" : "AI 解析失败，请手动填写");
+      setError(e.message === "NO_API_KEY" ? "è¯·å…ˆåœ¨è®¾ç½®ä¸­é…ç½® API key" : "AI è§£æžå¤±è´¥ï¼Œè¯·æ‰‹åŠ¨å¡«å†™");
     } finally {
       setParsing(false);
     }
@@ -354,20 +354,20 @@ function TradeForm({ rules, onSave, onCancel }) {
           style={{ flex: 1, paddingVertical: 8, alignItems: "center", justifyContent: "center",
             flexDirection: "row", gap: 6, backgroundColor: mode === "smart" ? colors.ink : "transparent" }}>
           <Wand2 size={12} color={mode === "smart" ? colors.bg : colors.inkMuted} />
-          <TMono style={{ fontSize: 11, color: mode === "smart" ? colors.bg : colors.inkMuted }}>AI 智能输入</TMono>
+          <TMono style={{ fontSize: 11, color: mode === "smart" ? colors.bg : colors.inkMuted }}>AI æ™ºèƒ½è¾“å…¥</TMono>
         </Pressable>
         <Pressable onPress={() => setMode("manual")}
           style={{ flex: 1, paddingVertical: 8, alignItems: "center", justifyContent: "center",
             flexDirection: "row", gap: 6, backgroundColor: mode === "manual" ? colors.ink : "transparent" }}>
           <Pencil size={12} color={mode === "manual" ? colors.bg : colors.inkMuted} />
-          <TMono style={{ fontSize: 11, color: mode === "manual" ? colors.bg : colors.inkMuted }}>手动填写</TMono>
+          <TMono style={{ fontSize: 11, color: mode === "manual" ? colors.bg : colors.inkMuted }}>æ‰‹åŠ¨å¡«å†™</TMono>
         </Pressable>
       </View>
 
       {mode === "smart" && (
         <View style={{ marginBottom: 24, padding: 14, backgroundColor: colors.bgElev, borderWidth: 1, borderColor: colors.accent, borderStyle: "dashed" }}>
           <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-            <Kicker>语音或文字 · 说说你做了什么</Kicker>
+            <Kicker>è¯­éŸ³æˆ–æ–‡å­— Â· è¯´è¯´ä½ åšäº†ä»€ä¹ˆ</Kicker>
             {listening && (
               <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
                 <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: colors.bad }} />
@@ -377,7 +377,7 @@ function TradeForm({ rules, onSave, onCancel }) {
           </View>
           <PaperInput
             multiline value={rawInput} onChangeText={setRawInput}
-            placeholder="例：今天买了 200 股苹果，均价 175。服务收入增长好，股价回调 15%，估值合理。"
+            placeholder="ä¾‹ï¼šä»Šå¤©ä¹°äº† 200 è‚¡è‹¹æžœï¼Œå‡ä»· 175ã€‚æœåŠ¡æ”¶å…¥å¢žé•¿å¥½ï¼Œè‚¡ä»·å›žè°ƒ 15%ï¼Œä¼°å€¼åˆç†ã€‚"
             style={{ minHeight: 90, fontSize: 15, borderWidth: 0 }}
           />
           <View style={{ flexDirection: "row", gap: 8, marginTop: 12 }}>
@@ -389,7 +389,7 @@ function TradeForm({ rules, onSave, onCancel }) {
                   borderWidth: listening ? 0 : 1, borderColor: colors.divider }}>
                 {listening ? <MicOff size={12} color={colors.bg} /> : <Mic size={12} color={colors.ink} />}
                 <TMono style={{ fontSize: 11, color: listening ? colors.bg : colors.ink, fontWeight: "500" }}>
-                  {listening ? "停止" : "语音"}
+                  {listening ? "åœæ­¢" : "è¯­éŸ³"}
                 </TMono>
               </Pressable>
             )}
@@ -399,19 +399,19 @@ function TradeForm({ rules, onSave, onCancel }) {
                 opacity: (!rawInput.trim() || parsing) ? 0.3 : 1 }}>
               {parsing ? <ActivityIndicator size="small" color={colors.ink} /> : <Sparkles size={12} color={colors.ink} />}
               <TSerifBold style={{ fontSize: 12, color: colors.ink }}>
-                {parsing ? "生成中…" : "AI 生成交易摘要"}
+                {parsing ? "ç”Ÿæˆä¸­â€¦" : "AI ç”Ÿæˆäº¤æ˜“æ‘˜è¦"}
               </TSerifBold>
             </Pressable>
           </View>
           {error ? <TMono style={{ color: colors.bad, fontSize: 11, marginTop: 8 }}>{error}</TMono> :
             parsed && <View style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: 8 }}>
               <Check size={11} color={colors.good} strokeWidth={3} />
-              <TMono style={{ color: colors.good, fontSize: 11 }}>已填入表单，检查后保存</TMono>
+              <TMono style={{ color: colors.good, fontSize: 11 }}>å·²å¡«å…¥è¡¨å•ï¼Œæ£€æŸ¥åŽä¿å­˜</TMono>
             </View>}
         </View>
       )}
 
-      <Field label="ACTION · 动作">
+      <Field label="ACTION Â· åŠ¨ä½œ">
         <View style={{ flexDirection: "row", gap: 8 }}>
           {ACTIONS.map((a) => {
             const AI = ACTION_ICONS[a.id];
@@ -429,22 +429,22 @@ function TradeForm({ rules, onSave, onCancel }) {
         </View>
       </Field>
 
-      <Field label="STOCK · 标的">
-        <PaperInput value={stock} onChangeText={setStock} placeholder="AAPL / 腾讯 / BTC…" style={{ fontSize: 17 }} />
+      <Field label="STOCK Â· æ ‡çš„">
+        <PaperInput value={stock} onChangeText={setStock} placeholder="AAPL / è…¾è®¯ / BTCâ€¦" style={{ fontSize: 17 }} />
       </Field>
 
-      <Field label="DATE · 日期">
+      <Field label="DATE Â· æ—¥æœŸ">
         <PaperInput value={date} onChangeText={setDate} placeholder="YYYY-MM-DD"
           style={{ fontFamily: fonts.mono, fontSize: 14 }} />
       </Field>
 
-      <Field label="REASON · 为什么">
+      <Field label="REASON Â· ä¸ºä»€ä¹ˆ">
         <PaperInput multiline value={reason} onChangeText={setReason}
-          placeholder="写在交易之前。为什么是这只？为什么是现在？预期什么会发生？"
+          placeholder="å†™åœ¨äº¤æ˜“ä¹‹å‰ã€‚ä¸ºä»€ä¹ˆæ˜¯è¿™åªï¼Ÿä¸ºä»€ä¹ˆæ˜¯çŽ°åœ¨ï¼Ÿé¢„æœŸä»€ä¹ˆä¼šå‘ç”Ÿï¼Ÿ"
           style={{ minHeight: 100, fontSize: 15 }} />
       </Field>
 
-      <Field label="EMOTION · 情绪">
+      <Field label="EMOTION Â· æƒ…ç»ª">
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
           {EMOTIONS.map((e) => {
             const EI = EMOTION_ICONS[e.id];
@@ -465,7 +465,7 @@ function TradeForm({ rules, onSave, onCancel }) {
       </Field>
 
       {rules.length > 0 && (
-        <Field label="RULES CHECK · 规则自检" hint="勾选你已遵守的规则">
+        <Field label="RULES CHECK Â· è§„åˆ™è‡ªæ£€" hint="å‹¾é€‰ä½ å·²éµå®ˆçš„è§„åˆ™">
           {rules.map((r, i) => {
             const checked = rulesChecked.includes(r);
             return (
@@ -496,10 +496,10 @@ function TradeForm({ rules, onSave, onCancel }) {
         disabled={!canSave}
         style={{ marginTop: 16, paddingVertical: 16 }}
       >
-        写入交易日志
+        å†™å…¥äº¤æ˜“æ—¥å¿—
       </FilledButton>
       <TSerifItalic style={{ fontSize: 11, textAlign: "center", marginTop: 8 }}>
-        在详情页可按需求教任一位导师点评
+        åœ¨è¯¦æƒ…é¡µå¯æŒ‰éœ€æ±‚æ•™ä»»ä¸€ä½å¯¼å¸ˆç‚¹è¯„
       </TSerifItalic>
     </ScrollView>
   );
@@ -516,12 +516,12 @@ function ThoughtForm({ onSave, onCancel }) {
       <FormHeader title="NEW THOUGHT" onCancel={onCancel} />
 
       <TSerifItalic style={{ fontSize: 14, marginBottom: 16 }}>
-        把心里的纠结、疑问、直觉写/说出来。
+        æŠŠå¿ƒé‡Œçš„çº ç»“ã€ç–‘é—®ã€ç›´è§‰å†™/è¯´å‡ºæ¥ã€‚
       </TSerifItalic>
 
       <View style={{ marginBottom: 12 }}>
         <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-          <Kicker>MY THOUGHT · 我的心念</Kicker>
+          <Kicker>MY THOUGHT Â· æˆ‘çš„å¿ƒå¿µ</Kicker>
           {listening && (
             <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
               <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: colors.bad }} />
@@ -530,7 +530,7 @@ function ThoughtForm({ onSave, onCancel }) {
           )}
         </View>
         <PaperInput multiline autoFocus value={text} onChangeText={setText}
-          placeholder="例：我现在在纠结要不要加仓苹果。一方面业绩扎实，另一方面占比已经快 30%，违反我自己的规则…"
+          placeholder="ä¾‹ï¼šæˆ‘çŽ°åœ¨åœ¨çº ç»“è¦ä¸è¦åŠ ä»“è‹¹æžœã€‚ä¸€æ–¹é¢ä¸šç»©æ‰Žå®žï¼Œå¦ä¸€æ–¹é¢å æ¯”å·²ç»å¿« 30%ï¼Œè¿åæˆ‘è‡ªå·±çš„è§„åˆ™â€¦"
           style={{ minHeight: 160, fontSize: 15 }} />
       </View>
 
@@ -542,7 +542,7 @@ function ThoughtForm({ onSave, onCancel }) {
               borderWidth: listening ? 0 : 1, borderColor: colors.divider }}>
             {listening ? <MicOff size={12} color={colors.bg} /> : <Mic size={12} color={colors.ink} />}
             <TMono style={{ fontSize: 11, color: listening ? colors.bg : colors.ink, fontWeight: "500" }}>
-              {listening ? "停止" : "语音输入"}
+              {listening ? "åœæ­¢" : "è¯­éŸ³è¾“å…¥"}
             </TMono>
           </Pressable>
         )}
@@ -553,11 +553,11 @@ function ThoughtForm({ onSave, onCancel }) {
           style={{ flex: 1 }}
         >
           <Check size={12} color={colors.bg} />
-          <TSerifBold style={{ color: colors.bg, fontSize: 13 }}>记下</TSerifBold>
+          <TSerifBold style={{ color: colors.bg, fontSize: 13 }}>è®°ä¸‹</TSerifBold>
         </FilledButton>
       </View>
       <TSerifItalic style={{ fontSize: 11, textAlign: "center", marginTop: 12 }}>
-        保存后在详情页按需求教导师回应
+        ä¿å­˜åŽåœ¨è¯¦æƒ…é¡µæŒ‰éœ€æ±‚æ•™å¯¼å¸ˆå›žåº”
       </TSerifItalic>
     </ScrollView>
   );

@@ -1,4 +1,4 @@
-// Holdings screen — positions, live prices from Yahoo, currency-grouped totals
+﻿// Holdings screen â€” positions, live prices from Yahoo, currency-grouped totals
 import React, { useState, useMemo } from "react";
 import { View, ScrollView, Pressable, ActivityIndicator } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -7,7 +7,7 @@ import {
 } from "lucide-react-native";
 
 import { colors, fonts } from "../theme";
-import { useApp } from "../../App";
+import { useApp } from "../context";
 import { fmtCurrency, ago } from "../utils";
 import { fetchLivePrices } from "../api";
 import {
@@ -31,7 +31,7 @@ export default function HoldingsScreen() {
       const map = await fetchLivePrices(symbols);
       await app.savePricesData(map);
     } catch {
-      setRefreshError("刷新失败，请检查网络");
+      setRefreshError("åˆ·æ–°å¤±è´¥ï¼Œè¯·æ£€æŸ¥ç½‘ç»œ");
     } finally {
       setRefreshing(false);
     }
@@ -60,7 +60,7 @@ export default function HoldingsScreen() {
     >
       <Masthead
         kicker="HOLDINGS"
-        title="当前持仓"
+        title="å½“å‰æŒä»“"
         subtitle="What I own, at what cost, at what price."
         right={<Kicker style={{ fontSize: 9, letterSpacing: 3 }}>{app.holdings.length} POSITIONS</Kicker>}
       />
@@ -76,8 +76,8 @@ export default function HoldingsScreen() {
             <View style={{ flex: 1 }}>
               <Kicker>MARKET DATA</Kicker>
               <TSerif style={{ fontSize: 14, marginTop: 2 }}>
-                {freshness ? <>更新于 <TMono style={{ fontSize: 12 }}>{freshness}</TMono></> :
-                  <TSerifItalic style={{ fontSize: 13 }}>尚未获取实时价格</TSerifItalic>}
+                {freshness ? <>æ›´æ–°äºŽ <TMono style={{ fontSize: 12 }}>{freshness}</TMono></> :
+                  <TSerifItalic style={{ fontSize: 13 }}>å°šæœªèŽ·å–å®žæ—¶ä»·æ ¼</TSerifItalic>}
               </TSerif>
             </View>
             <Pressable onPress={doRefresh} disabled={refreshing}
@@ -89,19 +89,19 @@ export default function HoldingsScreen() {
               }}>
               {refreshing ? <Loader2 size={12} color={colors.bg} /> : <RefreshCw size={12} color={colors.bg} />}
               <TSerifBold style={{ color: colors.bg, fontSize: 12 }}>
-                {refreshing ? "获取中" : "刷新"}
+                {refreshing ? "èŽ·å–ä¸­" : "åˆ·æ–°"}
               </TSerifBold>
             </Pressable>
           </View>
           {refreshError ? <TMono style={{ color: colors.bad, fontSize: 11, marginTop: 6 }}>{refreshError}</TMono> : null}
-          {refreshing && <TSerifItalic style={{ fontSize: 10, marginTop: 6 }}>正在抓取全球市场行情…</TSerifItalic>}
+          {refreshing && <TSerifItalic style={{ fontSize: 10, marginTop: 6 }}>æ­£åœ¨æŠ“å–å…¨çƒå¸‚åœºè¡Œæƒ…â€¦</TSerifItalic>}
         </View>
       )}
 
       {/* Totals by currency */}
       {Object.keys(totals).length > 0 && (
         <View style={{ paddingHorizontal: 20, paddingTop: 16 }}>
-          <Kicker style={{ marginBottom: 8 }}>TOTALS · 汇总</Kicker>
+          <Kicker style={{ marginBottom: 8 }}>TOTALS Â· æ±‡æ€»</Kicker>
           {Object.entries(totals).map(([ccy, t]) => {
             const pnl = t.market - t.cost;
             const pnlPct = t.cost > 0 ? (pnl / t.cost) * 100 : 0;
@@ -113,16 +113,16 @@ export default function HoldingsScreen() {
                 backgroundColor: colors.bgElev,
               }}>
                 <View style={{ flex: 1 }}>
-                  <TMono style={{ fontSize: 10 }}>{ccy} · 成本</TMono>
+                  <TMono style={{ fontSize: 10 }}>{ccy} Â· æˆæœ¬</TMono>
                   <TSerifBold style={{ fontSize: 17, marginTop: 2 }}>{fmtCurrency(t.cost, ccy)}</TSerifBold>
                 </View>
                 <View style={{ flex: 1, alignItems: "flex-end" }}>
-                  <TMono style={{ fontSize: 10 }}>市值</TMono>
+                  <TMono style={{ fontSize: 10 }}>å¸‚å€¼</TMono>
                   <TSerifBold style={{ fontSize: 17, marginTop: 2 }}>{fmtCurrency(t.market, ccy)}</TSerifBold>
                 </View>
                 {t.hasLive && (
                   <View style={{ flex: 1, alignItems: "flex-end" }}>
-                    <TMono style={{ fontSize: 10 }}>浮盈亏</TMono>
+                    <TMono style={{ fontSize: 10 }}>æµ®ç›ˆäº</TMono>
                     <TSerifBold style={{ fontSize: 17, marginTop: 2, color: pos ? colors.good : colors.bad }}>
                       {pos ? "+" : ""}{pnlPct.toFixed(1)}%
                     </TSerifBold>
@@ -139,7 +139,7 @@ export default function HoldingsScreen() {
         <View style={{ paddingHorizontal: 20, paddingTop: 16 }}>
           <FilledButton onPress={() => setAdding(true)}>
             <Plus size={14} color={colors.bg} />
-            <TSerifBold style={{ color: colors.bg, fontSize: 15 }}>新增持仓</TSerifBold>
+            <TSerifBold style={{ color: colors.bg, fontSize: 15 }}>æ–°å¢žæŒä»“</TSerifBold>
           </FilledButton>
         </View>
       )}
@@ -156,8 +156,8 @@ export default function HoldingsScreen() {
         {app.holdings.length === 0 && !adding && (
           <View style={{ paddingVertical: 48, alignItems: "center" }}>
             <Wallet size={28} strokeWidth={1} color={colors.inkFaint} />
-            <TSerifItalic style={{ fontSize: 13, marginTop: 12 }}>还没有记录任何持仓</TSerifItalic>
-            <TSerifItalic style={{ fontSize: 11, marginTop: 4 }}>添加后导师就能看到你当前的仓位</TSerifItalic>
+            <TSerifItalic style={{ fontSize: 13, marginTop: 12 }}>è¿˜æ²¡æœ‰è®°å½•ä»»ä½•æŒä»“</TSerifItalic>
+            <TSerifItalic style={{ fontSize: 11, marginTop: 4 }}>æ·»åŠ åŽå¯¼å¸ˆå°±èƒ½çœ‹åˆ°ä½ å½“å‰çš„ä»“ä½</TSerifItalic>
           </View>
         )}
         {app.holdings.map((h) => (
@@ -200,7 +200,7 @@ function HoldingRow({ holding, price, onEdit }) {
             )}
           </View>
           <TMono style={{ fontSize: 11, marginTop: 2, color: colors.inkMuted }}>
-            {holding.shares} 股 · 成本 {fmtCurrency(holding.costBasis, ccy)}
+            {holding.shares} è‚¡ Â· æˆæœ¬ {fmtCurrency(holding.costBasis, ccy)}
           </TMono>
         </View>
         <View style={{ alignItems: "flex-end" }}>
@@ -208,11 +208,11 @@ function HoldingRow({ holding, price, onEdit }) {
             <>
               <TSerifBold style={{ fontSize: 17 }}>{fmtCurrency(price.price, price.currency)}</TSerifBold>
               <TMono style={{ fontSize: 10, marginTop: 2, color: price.changePercent >= 0 ? colors.good : colors.bad }}>
-                今日 {price.changePercent >= 0 ? "+" : ""}{price.changePercent?.toFixed?.(2) ?? "?"}%
+                ä»Šæ—¥ {price.changePercent >= 0 ? "+" : ""}{price.changePercent?.toFixed?.(2) ?? "?"}%
               </TMono>
             </>
           ) : (
-            <TSerifItalic style={{ fontSize: 11 }}>暂无实时价</TSerifItalic>
+            <TSerifItalic style={{ fontSize: 11 }}>æš‚æ— å®žæ—¶ä»·</TSerifItalic>
           )}
         </View>
       </View>
@@ -224,7 +224,7 @@ function HoldingRow({ holding, price, onEdit }) {
           flexDirection: "row", justifyContent: "space-between", alignItems: "center",
         }}>
           <View style={{ flexDirection: "row", alignItems: "baseline", gap: 6 }}>
-            <TMono style={{ fontSize: 9, letterSpacing: 1 }}>市值</TMono>
+            <TMono style={{ fontSize: 9, letterSpacing: 1 }}>å¸‚å€¼</TMono>
             <TSerif style={{ fontSize: 13, fontFamily: fonts.serifBold }}>{fmtCurrency(market, ccy)}</TSerif>
           </View>
           <TSerifBold style={{ fontSize: 13, color: pos ? colors.good : colors.bad }}>
@@ -234,7 +234,7 @@ function HoldingRow({ holding, price, onEdit }) {
       )}
       {price?.asOf && (
         <TMono style={{ fontSize: 9, marginTop: 4, color: colors.inkFaint }}>
-          {price.asOf}{price.resolvedTicker && price.resolvedTicker !== holding.symbol ? ` · ${price.resolvedTicker}` : ""}
+          {price.asOf}{price.resolvedTicker && price.resolvedTicker !== holding.symbol ? ` Â· ${price.resolvedTicker}` : ""}
         </TMono>
       )}
     </Pressable>
@@ -267,31 +267,31 @@ function HoldingForm({ initial, onSave, onCancel, onDelete }) {
     <View style={{ padding: 20 }}>
       <FormHeader title={initial ? "EDIT POSITION" : "NEW POSITION"} onCancel={onCancel} />
 
-      <Field label="SYMBOL · 代码" hint="美股用代码（AAPL）· 港股 xxxx.HK · A 股 xxxxxx.SS/.SZ · 加密 BTC-USD">
-        <PaperInput value={symbol} onChangeText={setSymbol} placeholder="AAPL / 0700.HK / BTC-USD…"
+      <Field label="SYMBOL Â· ä»£ç " hint="ç¾Žè‚¡ç”¨ä»£ç ï¼ˆAAPLï¼‰Â· æ¸¯è‚¡ xxxx.HK Â· A è‚¡ xxxxxx.SS/.SZ Â· åŠ å¯† BTC-USD">
+        <PaperInput value={symbol} onChangeText={setSymbol} placeholder="AAPL / 0700.HK / BTC-USDâ€¦"
           autoFocus={!initial} style={{ fontSize: 17 }} />
       </Field>
 
-      <Field label="DISPLAY NAME · 显示名（可选）">
-        <PaperInput value={displayName} onChangeText={setDisplayName} placeholder="Apple / 腾讯 / 比特币…" />
+      <Field label="DISPLAY NAME Â· æ˜¾ç¤ºåï¼ˆå¯é€‰ï¼‰">
+        <PaperInput value={displayName} onChangeText={setDisplayName} placeholder="Apple / è…¾è®¯ / æ¯”ç‰¹å¸â€¦" />
       </Field>
 
       <View style={{ flexDirection: "row", gap: 12 }}>
         <View style={{ flex: 1 }}>
-          <Field label="SHARES · 数量">
+          <Field label="SHARES Â· æ•°é‡">
             <PaperInput value={shares} onChangeText={setShares} placeholder="200"
               keyboardType="decimal-pad" style={{ fontFamily: fonts.mono, fontSize: 15 }} />
           </Field>
         </View>
         <View style={{ flex: 1 }}>
-          <Field label="COST · 成本单价">
+          <Field label="COST Â· æˆæœ¬å•ä»·">
             <PaperInput value={costBasis} onChangeText={setCostBasis} placeholder="175.50"
               keyboardType="decimal-pad" style={{ fontFamily: fonts.mono, fontSize: 15 }} />
           </Field>
         </View>
       </View>
 
-      <Field label="CURRENCY · 币种">
+      <Field label="CURRENCY Â· å¸ç§">
         <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
           {["USD", "CNY", "HKD", "EUR", "JPY"].map((c) => (
             <Pressable key={c} onPress={() => setCurrency(c)}
@@ -306,14 +306,14 @@ function HoldingForm({ initial, onSave, onCancel, onDelete }) {
         </View>
       </Field>
 
-      <Field label="NOTES · 备注（可选）">
+      <Field label="NOTES Â· å¤‡æ³¨ï¼ˆå¯é€‰ï¼‰">
         <PaperInput multiline value={notes} onChangeText={setNotes}
-          placeholder="建仓时的简短思考，或者止损/止盈位…"
+          placeholder="å»ºä»“æ—¶çš„ç®€çŸ­æ€è€ƒï¼Œæˆ–è€…æ­¢æŸ/æ­¢ç›ˆä½â€¦"
           style={{ minHeight: 60, fontSize: 14 }} />
       </Field>
 
       <FilledButton onPress={handleSave} disabled={!canSave} style={{ marginTop: 16 }}>
-        {initial ? "保存修改" : "加入持仓"}
+        {initial ? "ä¿å­˜ä¿®æ”¹" : "åŠ å…¥æŒä»“"}
       </FilledButton>
 
       {initial && onDelete && (
@@ -321,17 +321,17 @@ function HoldingForm({ initial, onSave, onCancel, onDelete }) {
           {confirm ? (
             <View style={{ flexDirection: "row", gap: 16, justifyContent: "center" }}>
               <Pressable onPress={onDelete}>
-                <TMono style={{ color: colors.bad, fontSize: 11, fontWeight: "600" }}>确认删除此持仓</TMono>
+                <TMono style={{ color: colors.bad, fontSize: 11, fontWeight: "600" }}>ç¡®è®¤åˆ é™¤æ­¤æŒä»“</TMono>
               </Pressable>
               <Pressable onPress={() => setConfirm(false)}>
-                <TMono style={{ fontSize: 11 }}>取消</TMono>
+                <TMono style={{ fontSize: 11 }}>å–æ¶ˆ</TMono>
               </Pressable>
             </View>
           ) : (
             <Pressable onPress={() => setConfirm(true)}
               style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 10 }}>
               <Trash2 size={11} color={colors.inkFaint} />
-              <TMono style={{ fontSize: 11 }}>删除此持仓</TMono>
+              <TMono style={{ fontSize: 11 }}>åˆ é™¤æ­¤æŒä»“</TMono>
             </Pressable>
           )}
         </View>

@@ -1,11 +1,11 @@
-// Monthly review screen: bullets (with voice) + mentor commentary by master
+﻿// Monthly review screen: bullets (with voice) + mentor commentary by master
 import React, { useState, useEffect, useMemo } from "react";
 import { View, ScrollView, Pressable, ActivityIndicator } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Sparkles, Plus, Quote } from "lucide-react-native";
 
 import { colors, fonts } from "../theme";
-import { useApp } from "../../App";
+import { useApp } from "../context";
 import { monthKey, monthLabel } from "../utils";
 import { ACTIONS, getMaster } from "../constants";
 import { generateMonthlyCommentary } from "../api";
@@ -35,7 +35,7 @@ export default function MonthlyScreen() {
       style={{ flex: 1, backgroundColor: colors.bg }}
       contentContainerStyle={{ paddingBottom: 40 + insets.bottom }}
     >
-      <Masthead kicker="MONTHLY" title="月评" subtitle="4-5 条要点，凝结一个月的思考" />
+      <Masthead kicker="MONTHLY" title="æœˆè¯„" subtitle="4-5 æ¡è¦ç‚¹ï¼Œå‡ç»“ä¸€ä¸ªæœˆçš„æ€è€ƒ" />
 
       <View style={{ paddingHorizontal: 20, paddingTop: 20, paddingBottom: 16 }}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
@@ -102,22 +102,22 @@ function MonthlyEditor({ month, initial, trades, onSave, hasReview, profile, def
             ))}
           </View>
         ) : (
-          <TSerifItalic style={{ fontSize: 13 }}>本月无交易记录</TSerifItalic>
+          <TSerifItalic style={{ fontSize: 13 }}>æœ¬æœˆæ— äº¤æ˜“è®°å½•</TSerifItalic>
         )}
       </View>
 
       {trades.length > 0 && <MonthlyMentor month={month} trades={trades} profile={profile} defaultMaster={defaultMaster} />}
 
       <View style={{ paddingTop: 24 }}>
-        <Kicker style={{ marginBottom: 12 }}>REVIEW BULLETS · 复盘要点</Kicker>
+        <Kicker style={{ marginBottom: 12 }}>REVIEW BULLETS Â· å¤ç›˜è¦ç‚¹</Kicker>
         {draft.map((b, i) => (
           <View key={i} style={{ flexDirection: "row", alignItems: "flex-start", gap: 8, marginBottom: 12 }}>
-            <TSerifBold style={{ color: colors.accent, fontSize: 20, marginTop: 6, width: 12 }}>•</TSerifBold>
+            <TSerifBold style={{ color: colors.accent, fontSize: 20, marginTop: 6, width: 12 }}>â€¢</TSerifBold>
             <PaperInput
               multiline
               value={b}
               onChangeText={(v) => { const next = [...draft]; next[i] = v; setDraft(next); }}
-              placeholder={["最成功的一笔决策？", "最想重来的一笔？", "这个月学到了什么？", "下月要改什么？", "其他观察…"][i]}
+              placeholder={["æœ€æˆåŠŸçš„ä¸€ç¬”å†³ç­–ï¼Ÿ", "æœ€æƒ³é‡æ¥çš„ä¸€ç¬”ï¼Ÿ", "è¿™ä¸ªæœˆå­¦åˆ°äº†ä»€ä¹ˆï¼Ÿ", "ä¸‹æœˆè¦æ”¹ä»€ä¹ˆï¼Ÿ", "å…¶ä»–è§‚å¯Ÿâ€¦"][i]}
               style={{ flex: 1, minHeight: 60, fontSize: 15 }}
             />
             <View style={{ marginTop: 4 }}>
@@ -136,7 +136,7 @@ function MonthlyEditor({ month, initial, trades, onSave, hasReview, profile, def
         )}
 
         <FilledButton onPress={() => onSave(draft.filter((b) => b.trim()))} style={{ marginTop: 24 }}>
-          {hasReview ? "更新月评" : "归档月评"}
+          {hasReview ? "æ›´æ–°æœˆè¯„" : "å½’æ¡£æœˆè¯„"}
         </FilledButton>
       </View>
     </View>
@@ -170,7 +170,7 @@ function MonthlyMentor({ month, trades, profile, defaultMaster }) {
       setCache((prev) => ({ ...prev, [masterId]: text }));
       await db.setMonthlyMentor(month, masterId, text);
     } catch (e) {
-      setError(e.message === "NO_API_KEY" ? "请先在设置中配置 API key" : "生成失败");
+      setError(e.message === "NO_API_KEY" ? "è¯·å…ˆåœ¨è®¾ç½®ä¸­é…ç½® API key" : "ç”Ÿæˆå¤±è´¥");
     } finally {
       setLoading(null);
     }
@@ -183,10 +183,10 @@ function MonthlyMentor({ month, trades, profile, defaultMaster }) {
     <View style={{ paddingTop: 20, borderTopWidth: 1, borderTopColor: colors.divider }}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 6 }}>
         <Quote size={12} color={colors.accent} />
-        <Kicker>MONTHLY VIEW · 导师月度点评</Kicker>
+        <Kicker>MONTHLY VIEW Â· å¯¼å¸ˆæœˆåº¦ç‚¹è¯„</Kicker>
       </View>
       <TSerifItalic style={{ fontSize: 12, marginBottom: 12 }}>
-        从不同视角，回看这个月的全部交易。
+        ä»Žä¸åŒè§†è§’ï¼Œå›žçœ‹è¿™ä¸ªæœˆçš„å…¨éƒ¨äº¤æ˜“ã€‚
       </TSerifItalic>
 
       <MasterChips active={active} onSelect={request} />
@@ -195,7 +195,7 @@ function MonthlyMentor({ month, trades, profile, defaultMaster }) {
         {isLoading ? (
           <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
             <ActivityIndicator size="small" color={colors.inkFaint} />
-            <TSerifItalic style={{ fontSize: 12 }}>{getMaster(active).zh}正在复盘本月…</TSerifItalic>
+            <TSerifItalic style={{ fontSize: 12 }}>{getMaster(active).zh}æ­£åœ¨å¤ç›˜æœ¬æœˆâ€¦</TSerifItalic>
           </View>
         ) : current ? (
           <TSerif style={{ fontSize: 13, lineHeight: 22 }}>{current}</TSerif>
@@ -203,7 +203,7 @@ function MonthlyMentor({ month, trades, profile, defaultMaster }) {
           <Pressable onPress={() => request(active)}
             style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
             <Sparkles size={12} color={colors.accent} />
-            <TSerifBold style={{ fontSize: 13 }}>请 {getMaster(active).zh} 点评本月</TSerifBold>
+            <TSerifBold style={{ fontSize: 13 }}>è¯· {getMaster(active).zh} ç‚¹è¯„æœ¬æœˆ</TSerifBold>
           </Pressable>
         )}
         {error && <TMono style={{ color: colors.bad, fontSize: 11, marginTop: 8 }}>{error}</TMono>}

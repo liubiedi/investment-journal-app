@@ -40,8 +40,8 @@ SplashScreen.preventAutoHideAsync().catch(() => {});
 const Tab = createBottomTabNavigator();
 const EmptyScreen = () => null;
 
-// ---------- App context (simple — pass state down as screen props) ----------
-export const AppCtx = React.createContext(null);
+import { AppCtx } from "./src/context";
+export { useApp } from "./src/context";
 
 export default function App() {
   const [fontsLoaded] = useFonts({
@@ -401,10 +401,4 @@ const navTheme = {
     border: colors.divider,
     notification: colors.accent,
   },
-};
-
-export const useApp = () => {
-  const c = React.useContext(AppCtx);
-  if (!c) throw new Error("useApp must be inside AppCtx.Provider");
-  return c;
 };

@@ -1,4 +1,4 @@
-// Mentor screen — chat with AI mentor. Auto-refreshes prices on mount if stale.
+﻿// Mentor screen â€” chat with AI mentor. Auto-refreshes prices on mount if stale.
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
   View, ScrollView, Pressable, ActivityIndicator, KeyboardAvoidingView, Platform, TextInput,
@@ -9,7 +9,7 @@ import {
 } from "lucide-react-native";
 
 import { colors, fonts } from "../theme";
-import { useApp } from "../../App";
+import { useApp } from "../context";
 import { ago } from "../utils";
 import { chatMessage, fetchLivePrices } from "../api";
 import { useSpeech } from "../voice";
@@ -52,7 +52,7 @@ export default function MentorScreen() {
         const map = await fetchLivePrices(symbols);
         await app.savePricesData(map);
       } catch {
-        setSyncError("行情同步失败");
+        setSyncError("è¡Œæƒ…åŒæ­¥å¤±è´¥");
       } finally {
         setSyncing(false);
       }
@@ -75,7 +75,7 @@ export default function MentorScreen() {
       const map = await fetchLivePrices(symbols);
       await app.savePricesData(map);
     } catch {
-      setSyncError("行情同步失败");
+      setSyncError("è¡Œæƒ…åŒæ­¥å¤±è´¥");
     } finally {
       setSyncing(false);
     }
@@ -96,7 +96,7 @@ export default function MentorScreen() {
       setHistory(updated);
       await db.appendChat("assistant", reply);
     } catch (e) {
-      setError(e.message === "NO_API_KEY" ? "请先在设置中配置 API key" : "导师暂时失联，请稍后再试");
+      setError(e.message === "NO_API_KEY" ? "è¯·å…ˆåœ¨è®¾ç½®ä¸­é…ç½® API key" : "å¯¼å¸ˆæš‚æ—¶å¤±è”ï¼Œè¯·ç¨åŽå†è¯•");
     } finally {
       setSending(false);
     }
@@ -109,15 +109,15 @@ export default function MentorScreen() {
   };
 
   const priceFreshness = useMemo(() => ago(app.prices?.lastUpdated), [app.prices]);
-  const ctxSummary = `${app.trades.length} 交易 · ${app.holdings.length} 持仓 · ${Object.keys(app.weeklyNotes).length} 周记 · ${Object.keys(app.monthlyReviews).length} 月评`;
+  const ctxSummary = `${app.trades.length} äº¤æ˜“ Â· ${app.holdings.length} æŒä»“ Â· ${Object.keys(app.weeklyNotes).length} å‘¨è®° Â· ${Object.keys(app.monthlyReviews).length} æœˆè¯„`;
 
   const hasHoldings = app.holdings.length > 0;
 
   const STARTERS = [
-    "帮我看看最近几笔交易有什么规律？",
-    "我焦虑的时候做的决定，结果通常怎样？",
-    "我的哪条规则最容易被我自己违反？",
-    "下个月我应该重点关注什么？",
+    "å¸®æˆ‘çœ‹çœ‹æœ€è¿‘å‡ ç¬”äº¤æ˜“æœ‰ä»€ä¹ˆè§„å¾‹ï¼Ÿ",
+    "æˆ‘ç„¦è™‘çš„æ—¶å€™åšçš„å†³å®šï¼Œç»“æžœé€šå¸¸æ€Žæ ·ï¼Ÿ",
+    "æˆ‘çš„å“ªæ¡è§„åˆ™æœ€å®¹æ˜“è¢«æˆ‘è‡ªå·±è¿åï¼Ÿ",
+    "ä¸‹ä¸ªæœˆæˆ‘åº”è¯¥é‡ç‚¹å…³æ³¨ä»€ä¹ˆï¼Ÿ",
   ];
 
   return (
@@ -136,30 +136,30 @@ export default function MentorScreen() {
             </Pressable>
           )}
         </View>
-        <TSerifBold style={{ fontSize: 26, letterSpacing: -0.5 }}>投资导师</TSerifBold>
-        <TMono style={{ fontSize: 10, marginTop: 4, color: colors.inkMuted }}>已同步 · {ctxSummary}</TMono>
+        <TSerifBold style={{ fontSize: 26, letterSpacing: -0.5 }}>æŠ•èµ„å¯¼å¸ˆ</TSerifBold>
+        <TMono style={{ fontSize: 10, marginTop: 4, color: colors.inkMuted }}>å·²åŒæ­¥ Â· {ctxSummary}</TMono>
 
         {hasHoldings && (
           <View style={{ marginTop: 8, flexDirection: "row", alignItems: "center", gap: 8 }}>
             {syncing ? (
               <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
                 <Loader2 size={10} color={colors.accent} />
-                <TMono style={{ fontSize: 10, color: colors.accent }}>正在同步实时行情…</TMono>
+                <TMono style={{ fontSize: 10, color: colors.accent }}>æ­£åœ¨åŒæ­¥å®žæ—¶è¡Œæƒ…â€¦</TMono>
               </View>
             ) : priceFreshness ? (
               <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
                 <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: colors.good }} />
-                <TMono style={{ fontSize: 10, color: colors.inkMuted }}>行情 {priceFreshness}</TMono>
+                <TMono style={{ fontSize: 10, color: colors.inkMuted }}>è¡Œæƒ… {priceFreshness}</TMono>
                 <Pressable onPress={manualSync}>
-                  <TMono style={{ fontSize: 10, color: colors.inkMuted, textDecorationLine: "underline" }}>刷新</TMono>
+                  <TMono style={{ fontSize: 10, color: colors.inkMuted, textDecorationLine: "underline" }}>åˆ·æ–°</TMono>
                 </Pressable>
               </View>
             ) : (
               <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
                 <AlertCircle size={10} color={colors.warn} />
-                <TMono style={{ fontSize: 10, color: colors.warn }}>尚无实时行情</TMono>
+                <TMono style={{ fontSize: 10, color: colors.warn }}>å°šæ— å®žæ—¶è¡Œæƒ…</TMono>
                 <Pressable onPress={manualSync}>
-                  <TMono style={{ fontSize: 10, color: colors.inkMuted, textDecorationLine: "underline" }}>同步</TMono>
+                  <TMono style={{ fontSize: 10, color: colors.inkMuted, textDecorationLine: "underline" }}>åŒæ­¥</TMono>
                 </Pressable>
               </View>
             )}
@@ -182,9 +182,9 @@ export default function MentorScreen() {
           {history.length === 0 && (
             <View>
               <TSerifItalic style={{ fontSize: 15, color: colors.inkMuted, lineHeight: 24, marginBottom: 24 }}>
-                "我读过你的每一页日志。你的哲学、规则、心念、每一笔的纠结与笃定 —— 都在我这里。"
+                "æˆ‘è¯»è¿‡ä½ çš„æ¯ä¸€é¡µæ—¥å¿—ã€‚ä½ çš„å“²å­¦ã€è§„åˆ™ã€å¿ƒå¿µã€æ¯ä¸€ç¬”çš„çº ç»“ä¸Žç¬ƒå®š â€”â€” éƒ½åœ¨æˆ‘è¿™é‡Œã€‚"
               </TSerifItalic>
-              <Kicker style={{ marginBottom: 12 }}>STARTERS · 建议提问</Kicker>
+              <Kicker style={{ marginBottom: 12 }}>STARTERS Â· å»ºè®®æé—®</Kicker>
               {STARTERS.map((s, i) => (
                 <Pressable key={i} onPress={() => setInput(s)}
                   style={{
@@ -205,7 +205,7 @@ export default function MentorScreen() {
           {sending && (
             <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 8 }}>
               <ActivityIndicator size="small" color={colors.inkFaint} />
-              <TSerifItalic style={{ fontSize: 13 }}>导师正在思考…</TSerifItalic>
+              <TSerifItalic style={{ fontSize: 13 }}>å¯¼å¸ˆæ­£åœ¨æ€è€ƒâ€¦</TSerifItalic>
             </View>
           )}
 
@@ -236,7 +236,7 @@ export default function MentorScreen() {
           <TextInput
             value={input}
             onChangeText={setInput}
-            placeholder="问导师一个问题…"
+            placeholder="é—®å¯¼å¸ˆä¸€ä¸ªé—®é¢˜â€¦"
             placeholderTextColor={colors.inkFaint}
             multiline
             style={{
