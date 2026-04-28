@@ -15,10 +15,10 @@ import { monthLabel } from "./utils";
 const DEEPSEEK_URL = "https://api.deepseek.com/v1/chat/completions";
 
 // Current models (as of Apr 2026).
-// deepseek-chat is the cheap/fast tier — good for parsing.
+// deepseek-v4-flash is the cheap/fast tier — good for parsing.
 // deepseek-v4-pro is the flagship — used for mentor reasoning.
 const MODELS = {
-  fast: "deepseek-chat",
+  fast: "deepseek-v4-flash",
   smart: "deepseek-v4-pro",
 };
 
@@ -144,14 +144,15 @@ export function buildProfileContext({
     holdingsBlock = holdings.map((h) => {
       const p = priceMap[h.symbol];
       const cost = h.shares * h.costBasis;
+      const reasonLine = h.buyReason ? `\n    reason: ${h.buyReason}` : "";
       if (p) {
         const mv = h.shares * p.price;
         const pnl = mv - cost;
         const pct = cost > 0 ? (pnl / cost) * 100 : 0;
         const dailyPct = p.changePercent;
-        return `  ${h.symbol}${h.displayName && h.displayName !== h.symbol ? ` (${h.displayName})` : ""} | ${h.shares}@${h.costBasis}${h.currency || ""} | now ${p.price}${p.currency} (day ${dailyPct >= 0 ? "+" : ""}${dailyPct?.toFixed?.(2) ?? "?"}%) | P&L ${pnl >= 0 ? "+" : ""}${pnl.toFixed(2)} (${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%)`;
+        return `  ${h.symbol}${h.displayName && h.displayName !== h.symbol ? ` (${h.displayName})` : ""} | ${h.shares}@${h.costBasis}${h.currency || ""} | now ${p.price}${p.currency} (day ${dailyPct >= 0 ? "+" : ""}${dailyPct?.toFixed?.(2) ?? "?"}%) | P&L ${pnl >= 0 ? "+" : ""}${pnl.toFixed(2)} (${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%)${reasonLine}`;
       }
-      return `  ${h.symbol} | ${h.shares}@${h.costBasis}${h.currency || ""} | (no live price)`;
+      return `  ${h.symbol} | ${h.shares}@${h.costBasis}${h.currency || ""} | (no live price)${reasonLine}`;
     }).join("\n") + "\n" + staleness;
   }
 
@@ -212,7 +213,7 @@ ${buildProfileContext(profile)}
 
 // ========== Use cases ==========
 
-// Parse a freeform trade description into structured fields (deepseek-chat — fast + cheap).
+// Parse a freeform trade description into structured fields (deepseek-v4-flash — fast + cheap).
 export async function parseTradeText(text) {
   const prompt = `Parse this trade description into JSON. Return ONLY the JSON object — no markdown fences, no explanation.
 
@@ -243,7 +244,8 @@ Infer emotion from tone. Match input language exactly.`;
 // `profile` should be a SLIMMED-DOWN version (recent trades only, no deep history).
 // `onChunk` is optional — if provided, streams text progressively.
 export async function generateEntryFeedback(entry, entryType, masterId, profile, onChunk) {
-  const system = buildSystem(masterId, profile);
+  // Aggressively trim profile context — entry feedback only needs recent signal.
+  const system = buildSystem(masterId, { ...profile, maxTrades: 5, maxWeekly: 2, maxMonthly: 1 });
   let desc;
   if (entryType === "trade") {
     desc = `The investor just logged this trade:
@@ -270,7 +272,8 @@ Give your immediate, specific reaction. Reference their history, rules, or philo
 
 // Monthly commentary for a given master over a month's trades.
 export async function generateMonthlyCommentary(month, monthTrades, masterId, profile) {
-  const system = buildSystem(masterId, profile);
+  // The month's trades are passed in the user message; the system context is trimmed.
+  const system = buildSystem(masterId, { ...profile, maxTrades: 5, maxWeekly: 2, maxMonthly: 1 });
   const tradesList = monthTrades
     .map((t) => `- ${new Date(t.date).toISOString().slice(0, 10)} | ${t.action.toUpperCase()} | ${t.stock} | emotion: ${t.emotion} | ${t.reason}`)
     .join("\n");
@@ -289,7 +292,7 @@ Give your analysis of this month's trading activity. Look for patterns, emotiona
 
 // Mentor chat — system prompt + recent history only.
 export async function chatMessage(history, newUserMessage, profile, masterId = "default") {
-  const system = buildSystem(masterId, profile);
+  const system = buildSystem(masterId, { ...profile, maxTrades: 5, maxWeekly: 2, maxMonthly: 1 });
   // Trim history to last 10 turns (5 exchanges) to keep messages small;
   // DeepSeek auto-caches the system prefix server-side.
   const trimmed = history.slice(-10);
