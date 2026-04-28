@@ -1,7 +1,7 @@
-// api.js — Gemini API + Yahoo Finance (free, fast)
+// api.js — DeepSeek API + Yahoo Finance (free, fast)
 //
 // Token economy principles:
-//   1. Flash-lite for structured extraction; Flash for nuanced mentor advice
+//   1. deepseek-chat for all calls — cost-effective flagship model
 //   2. Context trimming — only send what's relevant for the call
 //   3. Yahoo Finance directly, no LLM web_search
 //
@@ -11,18 +11,16 @@ import * as SecureStore from "expo-secure-store";
 import { MASTER_STYLES, getMaster } from "./constants";
 import { monthLabel } from "./utils";
 
-const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
+const DEEPSEEK_URL = "https://api.deepseek.com/chat/completions";
 
-// Free-tier Gemini models (as of Apr 2026).
-// Flash-lite: 30 RPM free — good for fast parsing.
-// Flash: 15 RPM free — used for mentor advice and reports.
+// DeepSeek-V4 flagship model for all calls.
 const MODELS = {
-  fast: "gemini-2.0-flash-lite",
-  smart: "gemini-2.0-flash",
+  fast: "deepseek-chat",
+  smart: "deepseek-chat",
 };
 
 // ========== API key management ==========
-const API_KEY_STORE = "gemini_api_key";
+const API_KEY_STORE = "deepseek_api_key";
 
 export async function getApiKey() {
   try { return await SecureStore.getItemAsync(API_KEY_STORE); }
@@ -37,50 +35,31 @@ export async function clearApiKey() {
   await SecureStore.deleteItemAsync(API_KEY_STORE);
 }
 
-// ========== Core Gemini call ==========
+// ========== Core DeepSeek call ==========
 async function callClaude({ system, messages, model = MODELS.smart, max_tokens = 1024 }) {
   const apiKey = await getApiKey();
   if (!apiKey) throw new Error("NO_API_KEY");
 
-  // system can be a string or Anthropic-style array with cache_control — flatten to plain text
-  let systemInstruction;
-  if (system) {
-    const systemText = Array.isArray(system)
-      ? system.map((b) => b.text).join("\n\n")
-      : system;
-    systemInstruction = { parts: [{ text: systemText }] };
-  }
+  const msgs = system
+    ? [{ role: "system", content: system }, ...messages]
+    : messages;
+  const body = { model, max_tokens, messages: msgs };
 
-  // Convert messages: "assistant" → "model" for Gemini; content string → parts array
-  const contents = messages.map((m) => ({
-    role: m.role === "assistant" ? "model" : m.role,
-    parts: [{ text: m.content }],
-  }));
-
-  const body = { contents, generationConfig: { maxOutputTokens: max_tokens } };
-  if (systemInstruction) body.systemInstruction = systemInstruction;
-
-  const url = `${GEMINI_BASE}/${model}:generateContent?key=${apiKey}`;
-  const res = await fetch(url, {
+  const res = await fetch(DEEPSEEK_URL, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${apiKey}`,
+    },
     body: JSON.stringify(body),
   });
 
   if (!res.ok) {
     const txt = await res.text();
-    const msg = `Gemini ${res.status}: ${txt.slice(0, 400)}`;
-    console.error("[callClaude]", msg);
-    throw new Error(msg);
+    throw new Error(`DeepSeek ${res.status}: ${txt.slice(0, 200)}`);
   }
   const data = await res.json();
-  console.log("[callClaude] response:", JSON.stringify(data).slice(0, 300));
-  const candidate = data.candidates?.[0];
-  if (!candidate?.content?.parts) {
-    const reason = candidate?.finishReason || "UNKNOWN";
-    throw new Error(`Gemini blocked: ${reason}`);
-  }
-  return candidate.content.parts.map((p) => p.text).join("");
+  return data.choices[0].message.content;
 }
 
 // ========== Profile context builder ==========
@@ -166,20 +145,12 @@ function buildMasterPersona(masterId) {
 Stay in character as ${master.name}. Speak in their voice, using their frameworks. Keep responses to 2-3 short paragraphs. Match the user's language exactly (Chinese/English/mixed). Do NOT start with "As ${master.name}..." — just speak naturally. Use the investor's actual record to make your advice specific, not generic.`;
 }
 
-// ========== System prompt builder with caching ==========
-// The persona stays the same across requests for a given master.
-// The profile is cached as ephemeral (5 min TTL) so rapid back-and-forth
-// in a mentor chat session costs ~10% on the profile portion.
+// ========== System prompt builder ==========
+// DeepSeek handles KV caching automatically server-side.
 function buildCachedSystem(masterId, profile) {
   const persona = buildMasterPersona(masterId);
-  const profileText = `<investor_profile>
-${buildProfileContext(profile)}
-</investor_profile>`;
-
-  return [
-    { type: "text", text: persona },
-    { type: "text", text: profileText, cache_control: { type: "ephemeral" } },
-  ];
+  const profileText = `<investor_profile>\n${buildProfileContext(profile)}\n</investor_profile>`;
+  return `${persona}\n\n${profileText}`;
 }
 
 // ========== Use cases ==========
