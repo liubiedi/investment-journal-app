@@ -13,10 +13,10 @@ import { monthLabel } from "./utils";
 
 const DEEPSEEK_URL = "https://api.deepseek.com/chat/completions";
 
-// DeepSeek-V4 flagship model for all calls.
+// deepseek-v4-flash for fast/cheap parsing; deepseek-v4-pro for mentor advice.
 const MODELS = {
-  fast: "deepseek-chat",
-  smart: "deepseek-chat",
+  fast: "deepseek-v4-flash",
+  smart: "deepseek-v4-pro",
 };
 
 // ========== API key management ==========
