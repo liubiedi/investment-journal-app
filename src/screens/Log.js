@@ -3,7 +3,7 @@
 // User must tap "求教 xx" to request feedback from a specific master.
 
 import React, { useState } from "react";
-import { View, ScrollView, Pressable, ActivityIndicator } from "react-native";
+import { View, ScrollView, Pressable, ActivityIndicator, Alert } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
   TrendingUp, TrendingDown, Eye, Search,
@@ -28,6 +28,52 @@ import {
 // Name -> icon lookup (RN can't import by name string dynamically)
 const ACTION_ICONS = { buy: TrendingUp, sell: TrendingDown, hold: Eye, watch: Search };
 const EMOTION_ICONS = { calm: Smile, confident: Zap, neutral: Meh, anxious: Cloud, fearful: Frown };
+
+// Sync holdings after a buy/sell trade is saved.
+// Only runs when the trade includes shares + costPerShare.
+function syncHoldings(t, app) {
+  const symbol = t.stock.trim().toUpperCase();
+  const existing = app.holdings.find((h) => h.symbol === symbol);
+
+  if (t.action === "buy" && t.shares > 0 && t.costPerShare > 0) {
+    if (existing) {
+      const newShares = existing.shares + t.shares;
+      const newCost = (existing.shares * existing.costBasis + t.shares * t.costPerShare) / newShares;
+      app.updateHoldingById(existing.id, {
+        shares: Math.round(newShares * 10000) / 10000,
+        costBasis: Math.round(newCost * 10000) / 10000,
+      });
+    } else {
+      Alert.alert(
+        "加入持仓？",
+        `${symbol} 不在当前持仓中，是否立即添加？`,
+        [
+          { text: "稍后手动添加", style: "cancel" },
+          {
+            text: "添加", onPress: () => app.addHolding({
+              symbol,
+              displayName: symbol,
+              shares: t.shares,
+              costBasis: t.costPerShare,
+              currency: "USD",
+              buyReason: t.reason,
+              notes: "",
+            }),
+          },
+        ]
+      );
+    }
+  } else if (t.action === "sell" && t.shares > 0) {
+    if (existing) {
+      const newShares = Math.round((existing.shares - t.shares) * 10000) / 10000;
+      if (newShares <= 0) {
+        app.deleteHoldingById(existing.id);
+      } else {
+        app.updateHoldingById(existing.id, { shares: newShares });
+      }
+    }
+  }
+}
 
 export default function LogScreen() {
   const app = useApp();
@@ -81,7 +127,11 @@ export default function LogScreen() {
         {adding && subTab === "trades" && (
           <TradeForm
             rules={app.rules}
-            onSave={async (t) => { await app.addTrade(t); setAdding(false); }}
+            onSave={async (t) => {
+              await app.addTrade(t);
+              setAdding(false);
+              syncHoldings(t, app);
+            }}
             onCancel={() => setAdding(false)}
           />
         )}
@@ -314,6 +364,8 @@ function TradeForm({ rules, onSave, onCancel }) {
   const [mode, setMode] = useState("smart");
   const [action, setAction] = useState("buy");
   const [stock, setStock] = useState("");
+  const [shares, setShares] = useState("");
+  const [costPerShare, setCostPerShare] = useState("");
   const [reason, setReason] = useState("");
   const [emotion, setEmotion] = useState("calm");
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
@@ -439,6 +491,23 @@ function TradeForm({ rules, onSave, onCancel }) {
         />
       </Field>
 
+      {(action === "buy" || action === "sell") && (
+        <View style={{ flexDirection: "row", gap: 12 }}>
+          <View style={{ flex: 1 }}>
+            <Field label="SHARES · 数量（可选）">
+              <PaperInput value={shares} onChangeText={setShares} placeholder="200"
+                keyboardType="decimal-pad" style={{ fontFamily: fonts.mono, fontSize: 15 }} />
+            </Field>
+          </View>
+          <View style={{ flex: 1 }}>
+            <Field label="COST · 均价（可选）">
+              <PaperInput value={costPerShare} onChangeText={setCostPerShare} placeholder="175.50"
+                keyboardType="decimal-pad" style={{ fontFamily: fonts.mono, fontSize: 15 }} />
+            </Field>
+          </View>
+        </View>
+      )}
+
       <Field label="DATE · 日期">
         <PaperInput value={date} onChangeText={setDate} placeholder="YYYY-MM-DD"
           style={{ fontFamily: fonts.mono, fontSize: 14 }} />
@@ -497,6 +566,8 @@ function TradeForm({ rules, onSave, onCancel }) {
         onPress={() => onSave({
           action, stock: stock.trim(), reason: reason.trim(), emotion,
           date: new Date(date).toISOString(), rulesChecked,
+          shares: parseFloat(shares) || 0,
+          costPerShare: parseFloat(costPerShare) || 0,
           rawInput: mode === "smart" && rawInput.trim() ? rawInput.trim() : undefined,
         })}
         disabled={!canSave}
