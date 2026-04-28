@@ -1,6 +1,6 @@
 // components.js — shared UI primitives matching the editorial aesthetic.
 
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import {
   View, Text, Pressable, TextInput, ScrollView, ActivityIndicator,
   StyleSheet,
@@ -286,6 +286,10 @@ export function StockSearchInput({ value, onChangeText, onSelect, placeholder, s
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
   const debounceRef = useRef(null);
+
+  useEffect(() => {
+    return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
+  }, []);
 
   const handleChange = (text) => {
     onChangeText(text);

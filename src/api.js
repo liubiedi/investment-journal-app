@@ -36,7 +36,7 @@ export async function clearApiKey() {
 }
 
 // ========== Core DeepSeek call ==========
-async function callClaude({ system, messages, model = MODELS.smart, max_tokens = 1024 }) {
+async function callDeepSeek({ system, messages, model = MODELS.smart, max_tokens = 1024 }) {
   const apiKey = await getApiKey();
   if (!apiKey) throw new Error("NO_API_KEY");
 
@@ -157,7 +157,7 @@ function buildCachedSystem(masterId, profile) {
 
 // ========== Use cases ==========
 
-// Parse a freeform trade description into structured fields (Haiku — fast + cheap).
+// Parse a freeform trade description into structured fields (deepseek-v4-flash — fast + cheap).
 export async function parseTradeText(text) {
   const prompt = `Parse this trade description into JSON. Return ONLY the JSON object — no markdown fences, no explanation.
 
@@ -173,7 +173,7 @@ Schema:
 
 Infer emotion from tone. Match input language exactly.`;
 
-  const raw = await callClaude({
+  const raw = await callDeepSeek({
     messages: [{ role: "user", content: prompt }],
     model: MODELS.fast,
     max_tokens: 512,
@@ -206,7 +206,7 @@ They are working through this. They may be torn, uncertain, or simply thinking o
 
 Give your immediate, specific reaction. Reference their history, rules, or philosophy where relevant. Be direct. 2-3 short paragraphs. Match their language.`;
 
-  return await callClaude({
+  return await callDeepSeek({
     system,
     messages: [{ role: "user", content: user }],
     max_tokens: 700,
@@ -225,7 +225,7 @@ ${tradesList}
 
 Give your analysis of this month's trading activity. Look for patterns, emotional triggers, rule violations, or consistencies with their philosophy. Point out what was wise and what deserves scrutiny. Be specific — reference individual trades by ticker. 3-4 short paragraphs. Match their language.`;
 
-  return await callClaude({
+  return await callDeepSeek({
     system,
     messages: [{ role: "user", content: user }],
     max_tokens: 900,
@@ -237,7 +237,7 @@ export async function chatMessage(history, newUserMessage, profile, masterId = "
   const system = buildCachedSystem(masterId, { ...profile, maxTrades: 5, maxWeekly: 2, maxMonthly: 1 });
   const trimmed = history.slice(-6); // last 3 exchanges
   const messages = [...trimmed, { role: "user", content: newUserMessage }];
-  return await callClaude({ system, messages, max_tokens: 600 });
+  return await callDeepSeek({ system, messages, max_tokens: 600 });
 }
 
 // ============================================================
@@ -309,7 +309,7 @@ A single sentence describing this investor's true strategy, written as though fo
 ---
 *This report was generated from ${profile.trades?.length || 0} trades, ${Object.keys(profile.weeklyNotes || {}).length} weekly notes, and ${Object.keys(profile.monthlyReviews || {}).length} monthly reviews.*`;
 
-  return await callClaude({
+  return await callDeepSeek({
     messages: [{ role: "user", content: user }],
     system,
     max_tokens: 3000,
