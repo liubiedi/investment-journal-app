@@ -22,7 +22,7 @@ import { useSpeech } from "../voice";
 import {
   TSerif, TSerifBold, TSerifItalic, TMono, Kicker,
   PaperInput, FilledButton, OutlineButton, MasterChips, FeedbackBlock,
-  Masthead, FormHeader, Field, HR,
+  Masthead, FormHeader, Field, HR, StockSearchInput,
 } from "../components";
 
 // Name -> icon lookup (RN can't import by name string dynamically)
@@ -430,7 +430,13 @@ function TradeForm({ rules, onSave, onCancel }) {
       </Field>
 
       <Field label="STOCK · 标的">
-        <PaperInput value={stock} onChangeText={setStock} placeholder="AAPL / 腾讯 / BTC…" style={{ fontSize: 17 }} />
+        <StockSearchInput
+          value={stock}
+          onChangeText={setStock}
+          placeholder="AAPL / 腾讯 / BTC…"
+          style={{ fontSize: 17 }}
+          onSelect={(item) => setStock(item.symbol)}
+        />
       </Field>
 
       <Field label="DATE · 日期">

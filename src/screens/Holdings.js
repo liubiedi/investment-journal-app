@@ -13,6 +13,7 @@ import { fetchLivePrices } from "../api";
 import {
   TSerif, TSerifBold, TSerifItalic, TMono, Kicker,
   PaperInput, FilledButton, OutlineButton, Masthead, FormHeader, Field,
+  StockSearchInput,
 } from "../components";
 
 export default function HoldingsScreen() {
@@ -269,9 +270,17 @@ function HoldingForm({ initial, onSave, onCancel, onDelete }) {
     <View style={{ padding: 20 }}>
       <FormHeader title={initial ? "EDIT POSITION" : "NEW POSITION"} onCancel={onCancel} />
 
-      <Field label="SYMBOL · 代码" hint="美股用代码（AAPL）· 港股 xxxx.HK · A 股 xxxxxx.SS/.SZ · 加密 BTC-USD">
-        <PaperInput value={symbol} onChangeText={setSymbol} placeholder="AAPL / 0700.HK / BTC-USD…"
-          autoFocus={!initial} style={{ fontSize: 17 }} />
+      <Field label="SYMBOL · 代码" hint="输入代码或名称搜索 · 美股 AAPL · 港股 0700.HK · 加密 BTC-USD">
+        <StockSearchInput
+          value={symbol}
+          onChangeText={setSymbol}
+          placeholder="AAPL / 0700.HK / 腾讯…"
+          style={{ fontSize: 17 }}
+          onSelect={(item) => {
+            setSymbol(item.symbol);
+            if (!displayName || displayName === symbol) setDisplayName(item.name || "");
+          }}
+        />
       </Field>
 
       <Field label="DISPLAY NAME · 显示名（可选）">

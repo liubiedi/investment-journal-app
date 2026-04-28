@@ -1,6 +1,6 @@
 // components.js — shared UI primitives matching the editorial aesthetic.
 
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
 import {
   View, Text, Pressable, TextInput, ScrollView, ActivityIndicator,
   StyleSheet,
@@ -11,6 +11,7 @@ import {
 import { colors, fonts, spacing } from "./theme";
 import { MASTERS, getMaster } from "./constants";
 import { useSpeech } from "./voice";
+import { yahooSearch } from "./api";
 
 // ========== Typography ==========
 export const TSerif = ({ style, ...p }) => <Text {...p} style={[{ fontFamily: fonts.serif, color: colors.ink }, style]} />;
@@ -275,6 +276,96 @@ export function Masthead({ kicker, title, subtitle, right }) {
         letterSpacing: -0.8,
       }}>{title}</Text>
       {subtitle && <TSerifItalic style={{ fontSize: 13, marginTop: 4 }}>{subtitle}</TSerifItalic>}
+    </View>
+  );
+}
+
+// ========== Stock search input with Yahoo Finance autocomplete ==========
+// onSelect(item) fires with { symbol, name, exch, type } when user picks a result.
+export function StockSearchInput({ value, onChangeText, onSelect, placeholder, style }) {
+  const [results, setResults] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const debounceRef = useRef(null);
+
+  const handleChange = (text) => {
+    onChangeText(text);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    if (text.length < 2) { setResults([]); setLoading(false); return; }
+    debounceRef.current = setTimeout(async () => {
+      setLoading(true);
+      try {
+        const r = await yahooSearch(text);
+        setResults(r);
+      } finally {
+        setLoading(false);
+      }
+    }, 400);
+  };
+
+  const handleSelect = (item) => {
+    onChangeText(item.symbol);
+    setResults([]);
+    setLoading(false);
+    if (onSelect) onSelect(item);
+  };
+
+  const handleClear = () => {
+    onChangeText("");
+    setResults([]);
+    setLoading(false);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+  };
+
+  return (
+    <View>
+      <View style={{ flexDirection: "row", alignItems: "center" }}>
+        <PaperInput
+          value={value}
+          onChangeText={handleChange}
+          placeholder={placeholder}
+          autoCapitalize="none"
+          autoCorrect={false}
+          style={[{ flex: 1 }, style]}
+        />
+        {value.length > 0 && (
+          <Pressable onPress={handleClear} hitSlop={8} style={{ paddingLeft: 8, paddingBottom: 4 }}>
+            <X size={14} color={colors.inkFaint} />
+          </Pressable>
+        )}
+      </View>
+
+      {loading && (
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingVertical: 8 }}>
+          <ActivityIndicator size="small" color={colors.inkFaint} />
+          <TMono style={{ fontSize: 11 }}>搜索中…</TMono>
+        </View>
+      )}
+
+      {!loading && results.length > 0 && (
+        <View style={{
+          borderWidth: 1, borderColor: colors.divider,
+          backgroundColor: colors.bgElev,
+          marginTop: 2,
+        }}>
+          {results.map((r, i) => (
+            <Pressable
+              key={r.symbol + i}
+              onPress={() => handleSelect(r)}
+              style={({ pressed }) => ({
+                flexDirection: "row", alignItems: "center", gap: 10,
+                paddingHorizontal: 12, paddingVertical: 10,
+                borderBottomWidth: i < results.length - 1 ? 1 : 0,
+                borderBottomColor: colors.dividerSoft,
+                backgroundColor: pressed ? colors.bgCard : "transparent",
+              })}
+            >
+              <TMono style={{ fontSize: 13, color: colors.ink, minWidth: 70 }}>{r.symbol}</TMono>
+              <TSerif style={{ flex: 1, fontSize: 13 }} numberOfLines={1}>{r.name}</TSerif>
+              <TMono style={{ fontSize: 10 }}>{r.exch}</TMono>
+            </Pressable>
+          ))}
+        </View>
+      )}
     </View>
   );
 }
