@@ -1,10 +1,10 @@
-// api.js — Claude API (with prompt caching) + Yahoo Finance (free, fast)
+// api.js — DeepSeek API (OpenAI-compatible) + Yahoo Finance (free, fast)
 //
 // Token economy principles:
-//   1. Prompt caching on the investor_profile portion (5 min ephemeral cache)
-//   2. Haiku for structured extraction; Sonnet for nuanced mentor advice
+//   1. DeepSeek auto-caches request prefixes server-side (no client cache_control)
+//   2. deepseek-chat for structured extraction; deepseek-v4-pro for nuanced mentor advice
 //   3. Context trimming — only send what's relevant for the call
-//   4. Yahoo Finance directly, not through Claude's web_search
+//   4. Yahoo Finance directly, not through any LLM web_search
 //
 // API key is passed in from the caller (stored in SecureStore at app level).
 
@@ -12,18 +12,18 @@ import * as SecureStore from "expo-secure-store";
 import { MASTER_STYLES, getMaster } from "./constants";
 import { monthLabel } from "./utils";
 
-const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
-const API_VERSION = "2023-06-01";
+const DEEPSEEK_URL = "https://api.deepseek.com/v1/chat/completions";
 
 // Current models (as of Apr 2026).
-// Claude Haiku 4.5 is ~1/10 cost of Sonnet — good for parsing.
+// deepseek-chat is the cheap/fast tier — good for parsing.
+// deepseek-v4-pro is the flagship — used for mentor reasoning.
 const MODELS = {
-  fast: "claude-haiku-4-5-20251001",
-  smart: "claude-sonnet-4-6",
+  fast: "deepseek-chat",
+  smart: "deepseek-v4-pro",
 };
 
 // ========== API key management ==========
-const API_KEY_STORE = "anthropic_api_key";
+const API_KEY_STORE = "deepseek_api_key";
 
 export async function getApiKey() {
   try { return await SecureStore.getItemAsync(API_KEY_STORE); }
@@ -38,56 +38,53 @@ export async function clearApiKey() {
   await SecureStore.deleteItemAsync(API_KEY_STORE);
 }
 
-// ========== Core Claude call ==========
-async function callClaude({ system, messages, model = MODELS.smart, max_tokens = 1024 }) {
+// ========== Core LLM call (DeepSeek, OpenAI-compatible) ==========
+// `system` is a plain string; it gets prepended as a system message.
+function buildBody({ system, messages, model, max_tokens, stream }) {
+  const msgs = system ? [{ role: "system", content: system }, ...messages] : messages;
+  const body = { model, max_tokens, messages: msgs };
+  if (stream) body.stream = true;
+  return body;
+}
+
+async function callLLM({ system, messages, model = MODELS.smart, max_tokens = 1024 }) {
   const apiKey = await getApiKey();
   if (!apiKey) throw new Error("NO_API_KEY");
 
-  const body = { model, max_tokens, messages };
-  if (system) body.system = system;
-
-  const res = await fetch(ANTHROPIC_URL, {
+  const res = await fetch(DEEPSEEK_URL, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "x-api-key": apiKey,
-      "anthropic-version": API_VERSION,
+      "Authorization": `Bearer ${apiKey}`,
     },
-    body: JSON.stringify(body),
+    body: JSON.stringify(buildBody({ system, messages, model, max_tokens })),
   });
 
   if (!res.ok) {
     const txt = await res.text();
-    throw new Error(`Claude ${res.status}: ${txt.slice(0, 200)}`);
+    throw new Error(`DeepSeek ${res.status}: ${txt.slice(0, 200)}`);
   }
   const data = await res.json();
-  return data.content
-    .filter((c) => c.type === "text")
-    .map((c) => c.text)
-    .join("");
+  return data.choices?.[0]?.message?.content || "";
 }
 
 // Streaming variant — calls onChunk(text) for each delta, returns full text.
-async function callClaudeStream({ system, messages, model = MODELS.smart, max_tokens = 1024, onChunk }) {
+async function callLLMStream({ system, messages, model = MODELS.smart, max_tokens = 1024, onChunk }) {
   const apiKey = await getApiKey();
   if (!apiKey) throw new Error("NO_API_KEY");
 
-  const body = { model, max_tokens, stream: true, messages };
-  if (system) body.system = system;
-
-  const res = await fetch(ANTHROPIC_URL, {
+  const res = await fetch(DEEPSEEK_URL, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "x-api-key": apiKey,
-      "anthropic-version": API_VERSION,
+      "Authorization": `Bearer ${apiKey}`,
     },
-    body: JSON.stringify(body),
+    body: JSON.stringify(buildBody({ system, messages, model, max_tokens, stream: true })),
   });
 
   if (!res.ok) {
     const txt = await res.text();
-    throw new Error(`Claude ${res.status}: ${txt.slice(0, 200)}`);
+    throw new Error(`DeepSeek ${res.status}: ${txt.slice(0, 200)}`);
   }
 
   const reader = res.body.getReader();
@@ -104,11 +101,11 @@ async function callClaudeStream({ system, messages, model = MODELS.smart, max_to
     for (const line of lines) {
       if (!line.startsWith("data: ")) continue;
       const json = line.slice(6).trim();
-      if (json === "[DONE]") continue;
+      if (!json || json === "[DONE]") continue;
       try {
         const evt = JSON.parse(json);
-        if (evt.type === "content_block_delta" && evt.delta?.type === "text_delta") {
-          const chunk = evt.delta.text;
+        const chunk = evt.choices?.[0]?.delta?.content;
+        if (chunk) {
           full += chunk;
           onChunk?.(chunk);
         }
@@ -201,25 +198,21 @@ function buildMasterPersona(masterId) {
 Stay in character as ${master.name}. Speak in their voice, using their frameworks. Keep responses to 2-3 short paragraphs. Match the user's language exactly (Chinese/English/mixed). Do NOT start with "As ${master.name}..." — just speak naturally. Use the investor's actual record to make your advice specific, not generic.`;
 }
 
-// ========== System prompt builder with caching ==========
-// The persona stays the same across requests for a given master.
-// The profile is cached as ephemeral (5 min TTL) so rapid back-and-forth
-// in a mentor chat session costs ~10% on the profile portion.
-function buildCachedSystem(masterId, profile) {
+// ========== System prompt builder ==========
+// DeepSeek auto-caches request prefixes server-side, so we just concatenate
+// the persona and profile into a single system string. Putting the persona
+// first keeps the cacheable prefix stable across requests for a given master.
+function buildSystem(masterId, profile) {
   const persona = buildMasterPersona(masterId);
   const profileText = `<investor_profile>
 ${buildProfileContext(profile)}
 </investor_profile>`;
-
-  return [
-    { type: "text", text: persona },
-    { type: "text", text: profileText, cache_control: { type: "ephemeral" } },
-  ];
+  return `${persona}\n\n${profileText}`;
 }
 
 // ========== Use cases ==========
 
-// Parse a freeform trade description into structured fields (Haiku — fast + cheap).
+// Parse a freeform trade description into structured fields (deepseek-chat — fast + cheap).
 export async function parseTradeText(text) {
   const prompt = `Parse this trade description into JSON. Return ONLY the JSON object — no markdown fences, no explanation.
 
@@ -235,7 +228,7 @@ Schema:
 
 Infer emotion from tone. Match input language exactly.`;
 
-  const raw = await callClaude({
+  const raw = await callLLM({
     messages: [{ role: "user", content: prompt }],
     model: MODELS.fast,
     max_tokens: 512,
@@ -250,7 +243,7 @@ Infer emotion from tone. Match input language exactly.`;
 // `profile` should be a SLIMMED-DOWN version (recent trades only, no deep history).
 // `onChunk` is optional — if provided, streams text progressively.
 export async function generateEntryFeedback(entry, entryType, masterId, profile, onChunk) {
-  const system = buildCachedSystem(masterId, profile);
+  const system = buildSystem(masterId, profile);
   let desc;
   if (entryType === "trade") {
     desc = `The investor just logged this trade:
@@ -271,13 +264,13 @@ They are working through this. They may be torn, uncertain, or simply thinking o
 Give your immediate, specific reaction. Reference their history, rules, or philosophy where relevant. Be direct. 2-3 short paragraphs. Match their language.`;
 
   const opts = { system, messages: [{ role: "user", content: user }], max_tokens: 1024 };
-  if (onChunk) return await callClaudeStream({ ...opts, onChunk });
-  return await callClaude(opts);
+  if (onChunk) return await callLLMStream({ ...opts, onChunk });
+  return await callLLM(opts);
 }
 
 // Monthly commentary for a given master over a month's trades.
 export async function generateMonthlyCommentary(month, monthTrades, masterId, profile) {
-  const system = buildCachedSystem(masterId, profile);
+  const system = buildSystem(masterId, profile);
   const tradesList = monthTrades
     .map((t) => `- ${new Date(t.date).toISOString().slice(0, 10)} | ${t.action.toUpperCase()} | ${t.stock} | emotion: ${t.emotion} | ${t.reason}`)
     .join("\n");
@@ -287,21 +280,21 @@ ${tradesList}
 
 Give your analysis of this month's trading activity. Look for patterns, emotional triggers, rule violations, or consistencies with their philosophy. Point out what was wise and what deserves scrutiny. Be specific — reference individual trades by ticker. 3-4 short paragraphs. Match their language.`;
 
-  return await callClaude({
+  return await callLLM({
     system,
     messages: [{ role: "user", content: user }],
     max_tokens: 900,
   });
 }
 
-// Mentor chat — cached system prompt, recent history only.
+// Mentor chat — system prompt + recent history only.
 export async function chatMessage(history, newUserMessage, profile, masterId = "default") {
-  const system = buildCachedSystem(masterId, profile);
+  const system = buildSystem(masterId, profile);
   // Trim history to last 10 turns (5 exchanges) to keep messages small;
-  // the profile comes from cached system prompt.
+  // DeepSeek auto-caches the system prefix server-side.
   const trimmed = history.slice(-10);
   const messages = [...trimmed, { role: "user", content: newUserMessage }];
-  return await callClaude({ system, messages, max_tokens: 900 });
+  return await callLLM({ system, messages, max_tokens: 900 });
 }
 
 // ============================================================
@@ -373,7 +366,7 @@ A single sentence describing this investor's true strategy, written as though fo
 ---
 *This report was generated from ${profile.trades?.length || 0} trades, ${Object.keys(profile.weeklyNotes || {}).length} weekly notes, and ${Object.keys(profile.monthlyReviews || {}).length} monthly reviews.*`;
 
-  return await callClaude({
+  return await callLLM({
     messages: [{ role: "user", content: user }],
     system,
     max_tokens: 3000,
