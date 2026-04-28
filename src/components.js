@@ -182,22 +182,36 @@ export function MasterChips({ active, onSelect }) {
 // ========== Feedback block (shown on entry rows) ==========
 // Props:
 //   feedback: [{ masterId, text, createdAt }]
-//   onRequestMaster: (masterId) => Promise<void>
+//   onRequestMaster: (masterId, onChunk) => Promise<void>
 export function FeedbackBlock({ feedback, onRequestMaster, pending = false, defaultMaster = "default" }) {
   const [activeMaster, setActiveMaster] = useState(feedback?.[0]?.masterId || defaultMaster);
   const [loadingMaster, setLoadingMaster] = useState(null);
+  const [streamingText, setStreamingText] = useState("");
+  const [error, setError] = useState(null);
   const current = feedback?.find((f) => f.masterId === activeMaster);
 
   const handleSelect = async (masterId) => {
     setActiveMaster(masterId);
+    setError(null);
     if (!feedback?.find((f) => f.masterId === masterId)) {
       setLoadingMaster(masterId);
-      try { await onRequestMaster(masterId); }
-      finally { setLoadingMaster(null); }
+      setStreamingText("");
+      try {
+        await onRequestMaster(masterId, (chunk) => {
+          setStreamingText((prev) => prev + chunk);
+        });
+      } catch (e) {
+        setError(e.message === "NO_API_KEY" ? "请先在设置中配置 API key" : "导师暂时失联，点击重试");
+      } finally {
+        setLoadingMaster(null);
+        setStreamingText("");
+      }
     }
   };
 
   const isLoading = loadingMaster === activeMaster || (pending && activeMaster === "default" && !current);
+  // While streaming, show accumulated text immediately (even before save completes)
+  const displayText = isLoading && streamingText ? streamingText : null;
 
   return (
     <View style={{
@@ -213,7 +227,13 @@ export function FeedbackBlock({ feedback, onRequestMaster, pending = false, defa
       </View>
       <MasterChips active={activeMaster} onSelect={handleSelect} />
       <View style={{ marginTop: 12, minHeight: 40 }}>
-        {isLoading ? (
+        {error ? (
+          <Pressable onPress={() => handleSelect(activeMaster)}>
+            <TMono style={{ color: colors.bad, fontSize: 11 }}>{error}</TMono>
+          </Pressable>
+        ) : displayText ? (
+          <TSerif style={{ fontSize: 14, lineHeight: 22 }}>{displayText}</TSerif>
+        ) : isLoading ? (
           <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
             <ActivityIndicator size="small" color={colors.inkFaint} />
             <TSerifItalic style={{ fontSize: 12 }}>{getMaster(activeMaster).zh}正在思考…</TSerifItalic>

@@ -67,6 +67,57 @@ async function callClaude({ system, messages, model = MODELS.smart, max_tokens =
     .join("");
 }
 
+// Streaming variant — calls onChunk(text) for each delta, returns full text.
+async function callClaudeStream({ system, messages, model = MODELS.smart, max_tokens = 1024, onChunk }) {
+  const apiKey = await getApiKey();
+  if (!apiKey) throw new Error("NO_API_KEY");
+
+  const body = { model, max_tokens, stream: true, messages };
+  if (system) body.system = system;
+
+  const res = await fetch(ANTHROPIC_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": apiKey,
+      "anthropic-version": API_VERSION,
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const txt = await res.text();
+    throw new Error(`Claude ${res.status}: ${txt.slice(0, 200)}`);
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let full = "";
+  let buf = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    const lines = buf.split("\n");
+    buf = lines.pop(); // keep incomplete last line
+    for (const line of lines) {
+      if (!line.startsWith("data: ")) continue;
+      const json = line.slice(6).trim();
+      if (json === "[DONE]") continue;
+      try {
+        const evt = JSON.parse(json);
+        if (evt.type === "content_block_delta" && evt.delta?.type === "text_delta") {
+          const chunk = evt.delta.text;
+          full += chunk;
+          onChunk?.(chunk);
+        }
+      } catch { /* skip malformed lines */ }
+    }
+  }
+  return full;
+}
+
 // ========== Profile context builder ==========
 // Only include what matters for the specific call — saves ingress tokens.
 export function buildProfileContext({
@@ -197,7 +248,8 @@ Infer emotion from tone. Match input language exactly.`;
 
 // Generate mentor feedback for a single trade or thought.
 // `profile` should be a SLIMMED-DOWN version (recent trades only, no deep history).
-export async function generateEntryFeedback(entry, entryType, masterId, profile) {
+// `onChunk` is optional — if provided, streams text progressively.
+export async function generateEntryFeedback(entry, entryType, masterId, profile, onChunk) {
   const system = buildCachedSystem(masterId, profile);
   let desc;
   if (entryType === "trade") {
@@ -218,11 +270,9 @@ They are working through this. They may be torn, uncertain, or simply thinking o
 
 Give your immediate, specific reaction. Reference their history, rules, or philosophy where relevant. Be direct. 2-3 short paragraphs. Match their language.`;
 
-  return await callClaude({
-    system,
-    messages: [{ role: "user", content: user }],
-    max_tokens: 700,
-  });
+  const opts = { system, messages: [{ role: "user", content: user }], max_tokens: 1024 };
+  if (onChunk) return await callClaudeStream({ ...opts, onChunk });
+  return await callClaude(opts);
 }
 
 // Monthly commentary for a given master over a month's trades.

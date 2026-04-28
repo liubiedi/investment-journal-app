@@ -102,9 +102,10 @@ export default function LogScreen() {
               {app.trades.map((t) => (
                 <TradeRow key={t.id} trade={t}
                   onDelete={() => app.deleteTradeById(t.id)}
-                  onRequestFeedback={async (masterId) => {
-                    const text = await generateEntryFeedback(t, "trade", masterId, app.profile);
-                    const next = [...(t.feedback || []).filter(f => f.masterId !== masterId), { masterId, text, createdAt: Date.now() }];
+                  onRequestFeedback={async (masterId, onChunk) => {
+                    const text = await generateEntryFeedback(t, "trade", masterId, app.profile, onChunk);
+                    const current = app.trades.find(x => x.id === t.id);
+                    const next = [...(current?.feedback || []).filter(f => f.masterId !== masterId), { masterId, text, createdAt: Date.now() }];
                     await app.updateTradeFeedback(t.id, next);
                   }}
                   defaultMaster={app.defaultMaster}
@@ -121,9 +122,10 @@ export default function LogScreen() {
               {app.thoughts.map((t) => (
                 <ThoughtRow key={t.id} thought={t}
                   onDelete={() => app.deleteThoughtById(t.id)}
-                  onRequestFeedback={async (masterId) => {
-                    const text = await generateEntryFeedback(t, "thought", masterId, app.profile);
-                    const next = [...(t.feedback || []).filter(f => f.masterId !== masterId), { masterId, text, createdAt: Date.now() }];
+                  onRequestFeedback={async (masterId, onChunk) => {
+                    const text = await generateEntryFeedback(t, "thought", masterId, app.profile, onChunk);
+                    const current = app.thoughts.find(x => x.id === t.id);
+                    const next = [...(current?.feedback || []).filter(f => f.masterId !== masterId), { masterId, text, createdAt: Date.now() }];
                     await app.updateThoughtFeedback(t.id, next);
                   }}
                   defaultMaster={app.defaultMaster}
