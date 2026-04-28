@@ -2,8 +2,8 @@
 
 ## 投资日志 · The Investor's Ledger
 
-**Version:** 1.0
-**Date:** 2026-04-20
+**Version:** 1.1
+**Date:** 2026-04-28
 **Format:** Android mobile application
 **Target:** AI coding agents (single-source-of-truth for autonomous implementation)
 
@@ -15,7 +15,7 @@ A personal, offline-first investment journaling Android app that combines struct
 
 **Key differentiators:**
 1. **Template-driven structure** — enforces philosophy → rules → weekly notes → monthly reviews → trade log, rather than freeform journaling.
-2. **AI mentor persona** — Claude with the user's full journal as context, accessible via chat or on-demand feedback on individual entries.
+2. **AI mentor persona** — DeepSeek with the user's full journal as context, accessible via chat or on-demand feedback on individual entries.
 3. **Master personas** — switch perspectives to get Peter Lynch's, Buffett's, etc. reaction on any entry.
 4. **Voice-first input** — every text field supports speech-to-text.
 5. **Local-only data** — SQLite on device, never cloud-synced. User owns their data.
@@ -30,13 +30,13 @@ A personal, offline-first investment journaling Android app that combines struct
 | Framework | **Expo SDK 51+ / React Native 0.74** | Enables APK build via EAS without Android Studio; cross-platform future-proof |
 | Language | **JavaScript (no TypeScript)** | Matches project style; lower cognitive overhead |
 | Database | **expo-sqlite** (async API) | Industry-standard mobile SQLite; works offline |
-| Secure Storage | **expo-secure-store** | For the Anthropic API key only |
+| Secure Storage | **expo-secure-store** | For the DeepSeek API key only |
 | Navigation | **@react-navigation/bottom-tabs** v6 | Standard RN tab navigation |
 | Voice Input (in-app button) | **@react-native-voice/voice** | Native Android/iOS speech-to-text. On devices with iFlytek IME installed, the system STT already routes through it automatically — we get iFlytek accuracy for free. |
 | Voice Input (keyboard mic) | **System IME** (e.g., iFlytek 讯飞输入法) | Users with iFlytek IME installed can tap the keyboard's mic button on any TextInput — transcript is injected like normal typing. Zero integration work. |
 | Icons | **lucide-react-native** | Consistent icon set |
 | Fonts | **@expo-google-fonts/fraunces**, **@expo-google-fonts/jetbrains-mono** | Editorial serif + technical mono |
-| AI API | **Anthropic Claude API direct** (fetch) | No backend; BYOK model |
+| AI API | **DeepSeek API direct** (fetch, OpenAI-compatible) | No backend; BYOK model; cost-effective vs Anthropic |
 | Price Data | **Yahoo Finance public endpoints** (`query1.finance.yahoo.com/v8/finance/chart/`) | Free, no API key, global coverage |
 | Build | **EAS Build** (cloud) with APK profile | Produces installable `.apk` without local Android Studio |
 
@@ -88,6 +88,8 @@ CREATE TABLE trades (
   stock TEXT NOT NULL,
   reason TEXT NOT NULL,
   emotion TEXT NOT NULL,         -- calm|confident|neutral|anxious|fearful
+  shares REAL,                   -- optional; used for holdings sync
+  cost_per_share REAL,           -- optional; used for holdings sync
   rules_checked TEXT,            -- JSON string[] of rule texts
   raw_input TEXT,                -- original voice/text before AI parsing (nullable)
   feedback TEXT,                 -- JSON [{masterId, text, createdAt}]
@@ -112,6 +114,7 @@ CREATE TABLE holdings (
   shares REAL NOT NULL,
   cost_basis REAL NOT NULL,      -- per-share cost
   currency TEXT,                 -- USD|CNY|HKD|EUR|JPY
+  buy_reason TEXT,               -- investment thesis / why this position exists
   notes TEXT,
   added_at INTEGER NOT NULL
 );
@@ -179,7 +182,7 @@ CREATE TABLE prices_meta (
 **Layout top-to-bottom:**
 
 1. **Masthead**: "Vol. {year}" + today's date, then "The Investor's Ledger" (Fraunces serif, 32pt), then "私人投资日志 · Personal Journal" (italic).
-2. **API key warning banner** (conditional): Shows if no API key configured. Dark background (ink color), gold kicker "API KEY 未配置", with button "前往设置" linking to Settings tab.
+2. **API key warning banner** (conditional): Shows if no DeepSeek API key configured. Dark background (ink color), gold kicker "API KEY 未配置", with button "前往设置" linking to Settings tab.
 3. **Monthly review banner** (conditional): Shows only during the **last 7 days of the month** AND when current month has ≥ 1 trade AND no monthly review saved yet AND user hasn't dismissed this month's banner. Dark background, gold accents, "该写月评了" + count of trades, CTA "开始写月评" navigates to Monthly tab. Dismiss (X) persists to KV `reviewDismissed:<YYYY-MM>=true`.
 4. **Mentor shortcut card**: White card, "与投资导师对话" + "一位熟知你全部日志的 AI mentor", tap navigates to Mentor tab.
 5. **Section: My Investment Philosophy** (pin icon): One-sentence quote in italic serif, left border accent-colored. Tap to edit; supports multiline up to 3 rows.
@@ -239,12 +242,17 @@ CREATE TABLE prices_meta (
   - On tap: `parseTradeText(rawInput)` → populates form below.
 - Structured fields (always visible, smart mode fills them):
   - ACTION (4 buttons: buy/sell/hold/watch, colored)
-  - STOCK (serif input, 17pt)
+  - STOCK — `StockSearchInput` with Yahoo Finance autocomplete (debounced 400ms)
   - DATE (mono input, YYYY-MM-DD)
+  - SHARES + COST · 均价 (side by side, numeric, optional) — shown only for buy/sell actions; hidden and reset for hold/watch
   - REASON (multiline, min 100pt)
   - EMOTION (5 chips: calm/confident/neutral/anxious/fearful)
   - RULES CHECK (checkboxes of current rules)
 - Save button: "写入交易日志". Hint below: "在详情页可按需求教任一位导师点评".
+- **Holdings auto-sync on save (buy/sell only):** When saving a trade with shares + cost filled in:
+  - **BUY**: if symbol already in holdings → merge with weighted-average cost basis (`(old_shares × old_cost + new_shares × new_cost) / total`), update shares; if not in holdings → prompt user via Alert to add immediately, pre-filling buy_reason from trade reason.
+  - **SELL**: reduce shares from matching holding; if shares reach ≤ 0 → delete holding entirely.
+  - Precision: 8 decimal places (supports crypto). No action if shares/cost blank.
 
 **Thoughts sub-tab:**
 - "记下心念" button reveals ThoughtForm.
@@ -266,10 +274,11 @@ CREATE TABLE prices_meta (
   - Tap opens HoldingForm in edit mode (with delete option).
 
 **HoldingForm fields:**
-- SYMBOL (serif input, hint about HK/A-share/crypto formatting)
+- SYMBOL — `StockSearchInput` with Yahoo Finance autocomplete (debounced 400ms); selecting a result auto-fills DISPLAY NAME. Hint: "AAPL / 0700.HK / 腾讯…"
 - DISPLAY NAME (optional)
 - SHARES (numeric) + COST (numeric) — side by side
 - CURRENCY (chips: USD/CNY/HKD/EUR/JPY)
+- REASON TO BUY · 购买原因 (multiline, optional) — investment thesis; included in mentor's investor profile context
 - NOTES (multiline, optional)
 
 ### 5.6 Mentor (tab: 导师)
@@ -292,10 +301,10 @@ CREATE TABLE prices_meta (
 ### 5.7 Settings (tab: 设置)
 
 **Sections:**
-1. **Anthropic API Key**:
-   - Password-masked input. "保存" button calls `setApiKey(value)` (SecureStore).
+1. **DeepSeek API Key**:
+   - Password-masked input (`sk-…` format). "保存" button calls `setApiKey(value)` (SecureStore).
    - "清除" button for deletion.
-   - Link to Anthropic console.
+   - Link to `https://platform.deepseek.com/api_keys`.
 2. **语音输入 · Voice Input**:
    - Informational only (no toggles or credentials).
    - Hint: "为获得更好的中文语音识别，建议安装讯飞输入法或搜狗输入法。在任意输入框中，可以点击键盘上的麦克风按钮进行语音输入；或点击 App 内的麦克风图标快捷录入。"
@@ -310,7 +319,7 @@ CREATE TABLE prices_meta (
      - Used for restoring on a new device or as a raw record of all fields including cached mentor feedback.
 4. **About**:
    - App version, token economy explanation (~$1-3/month), privacy note.
-   - Privacy details: Anthropic sees journal context (only when you tap 求教 or chat with mentor). Yahoo Finance sees tickers you hold. Voice audio goes through your chosen Android IME, not through this app. Everything else stays local.
+   - Privacy details: DeepSeek sees journal context (only when you tap 求教 or chat with mentor). Yahoo Finance sees tickers you hold. Voice audio goes through your chosen Android IME, not through this app. Everything else stays local.
 5. **Danger zone**:
    - "清空聊天记录" button with confirmation.
 
@@ -318,7 +327,7 @@ CREATE TABLE prices_meta (
 
 ## 6. Investment Masters
 
-Seven selectable personas. Each has a hard-coded system prompt style (~200 words) that Claude adopts. `MASTERS[0]` is always `"default"` = personal mentor. The other 6 are named masters.
+Seven selectable personas. Each has a hard-coded system prompt style (~200 words) that DeepSeek adopts. `MASTERS[0]` is always `"default"` = personal mentor. The other 6 are named masters.
 
 | id | zh | Core stance |
 |---|---|---|
@@ -339,18 +348,13 @@ All master prompts end with: "Match the user's language exactly (Chinese/English
 **Principle**: minimize API cost without degrading UX.
 
 ### 7.1 Model selection
-- **Haiku (`claude-haiku-4-5-20251001`)** for `parseTradeText` — structured extraction only.
-- **Sonnet (`claude-sonnet-4-6`)** for all mentor output (feedback, chat, monthly commentary).
+- **`deepseek-v4-flash`** for `parseTradeText` — fast, cheap, structured extraction only.
+- **`deepseek-v4-pro`** for all mentor output (entry feedback, chat, monthly commentary, strategy report).
 
 ### 7.2 Prompt caching
-- Mentor system prompts use Anthropic prompt caching:
-  ```js
-  system: [
-    { type: "text", text: persona },                                // uncached (small)
-    { type: "text", text: profileXml, cache_control: { type: "ephemeral" } }  // cached 5 min
-  ]
-  ```
-- The `<investor_profile>` block is the same across rapid calls → subsequent chat messages within 5 min re-use cache (~10% token cost on the cached portion).
+- DeepSeek handles KV caching automatically server-side based on prefix matching — no client-side `cache_control` annotations needed.
+- System prompt is built as a plain string: `persona + "\n\n" + <investor_profile>...</investor_profile>`.
+- The `<investor_profile>` block is identical across rapid calls → subsequent chat messages benefit from server-side prefix cache.
 
 ### 7.3 On-demand feedback
 - **Never auto-generate mentor feedback on trade/thought save.** User must tap to request per-master.
@@ -374,11 +378,14 @@ When building `<investor_profile>`:
 
 ## 8. External APIs
 
-### 8.1 Anthropic API
-- Endpoint: `https://api.anthropic.com/v1/messages`
-- Headers: `x-api-key`, `anthropic-version: 2023-06-01`, `Content-Type: application/json`
-- Key stored in `expo-secure-store` (key name: `anthropic_api_key`).
+### 8.1 DeepSeek API
+- Endpoint: `https://api.deepseek.com/chat/completions` (OpenAI-compatible)
+- Headers: `Authorization: Bearer <key>`, `Content-Type: application/json`
+- Body: `{ model, max_tokens, messages: [{ role: "system", content: system }, ...userMessages] }`
+- Response: `data.choices[0].message.content`
+- Key stored in `expo-secure-store` (key name: `deepseek_api_key`).
 - If no key: throw `Error("NO_API_KEY")` — UI catches and redirects to Settings.
+- **No `cache_control` blocks needed** — DeepSeek caches automatically on the server side.
 
 ### 8.2 Yahoo Finance
 - Endpoint: `https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval=1d&range=2d`
@@ -390,6 +397,12 @@ When building `<investor_profile>`:
   - `changePercent = (price - prevClose) / prevClose * 100`
   - `asOf = new Date(result.meta.regularMarketTime * 1000).toLocaleString()`
 - Parallel fetch with `Promise.allSettled` — failures omitted from output, don't crash.
+**Symbol search (autocomplete):**
+- Endpoint: `https://query1.finance.yahoo.com/v1/finance/search?q=<query>&quotesCount=5`
+- Returns `data.quotes[]` with `{ symbol, longname, shortname, exchange, quoteType }`.
+- Used in `StockSearchInput` component — debounced 400ms, min 2 chars, clears on unmount.
+- Available in both HoldingForm (Holdings tab) and TradeForm (Log tab).
+
 - Ticker conventions user must follow:
   - US stocks: `AAPL`, `TSLA`
   - HK stocks: `0700.HK`
@@ -461,6 +474,7 @@ cool:       "#3a5578"
 - `<FeedbackBlock feedback onRequestMaster pending defaultMaster>` — entry feedback with master switcher
 - `<VoiceMic currentText onChange size>` — microphone toggle button
 - `<FormHeader title onCancel>` — back + kicker row in forms
+- `<StockSearchInput value onChangeText onSelect placeholder style>` — PaperInput with Yahoo Finance autocomplete dropdown; debounced 400ms; fires `onSelect({ symbol, name, exch, type })` on pick; has clear (×) button
 - `<TSerif TSerifBold TSerifItalic TMono Kicker>` — typography primitives
 
 ### 9.4 Navigation bar
@@ -527,7 +541,7 @@ getApiKey(): Promise<string | null>
 setApiKey(key: string): Promise<void>
 clearApiKey(): Promise<void>
 
-// Claude API (throws Error("NO_API_KEY") if key missing)
+// DeepSeek API (throws Error("NO_API_KEY") if key missing)
 parseTradeText(text: string): Promise<{action, stock, reason, emotion}>
 generateEntryFeedback(entry, entryType: "trade"|"thought", masterId, profile): Promise<string>
 generateMonthlyCommentary(month, monthTrades, masterId, profile): Promise<string>
@@ -627,8 +641,15 @@ useSpeech(onFinalText: (text: string) => void): {
 - P&L % is relative to cost basis in same currency.
 
 ### 12.6 Prompt cache staleness
-- When user edits philosophy, rules, or completes a trade, the cached profile block becomes stale naturally (Anthropic's ephemeral cache is content-hash-based). Next call will be a cache miss but re-cache.
+- When user edits philosophy, rules, or completes a trade, the cached profile block becomes stale naturally (DeepSeek's server-side prefix cache is content-based). Next call will be a cache miss but re-cache.
 - Don't attempt manual invalidation.
+
+### 12.7 Holdings sync edge cases
+- Only triggers for `buy` / `sell` actions when `shares > 0`.
+- Weighted average formula: `(old_shares × old_cost + new_shares × new_cost) / (old_shares + new_shares)`.
+- Cost stored to 8 decimal places (`Math.round(x * 100000000) / 100000000`) to support crypto assets like 0.00001 BTC.
+- SELL with more shares than held: removes holding (set to 0 → delete), does not go negative.
+- Symbol matching is case-insensitive (normalized to uppercase before comparison).
 
 ---
 
@@ -699,7 +720,11 @@ An implementation is correct if:
 11. ✅ Exporting JSON produces a complete backup of all user data.
 12. ✅ App works offline for all non-AI features (weekly, monthly bullets, manual trade entry, thought entry). Voice requires network only if the IME does (most do).
 13. ✅ Building via `eas build -p android --profile preview` produces an installable APK.
-14. ✅ No telemetry, no analytics, no external calls except to `api.anthropic.com` and `query1.finance.yahoo.com`.
+14. ✅ No telemetry, no analytics, no external calls except to `api.deepseek.com` and `query1.finance.yahoo.com`.
+15. ✅ Searching "AAPL" in HoldingForm or TradeForm shows a Yahoo Finance autocomplete dropdown within 400ms.
+16. ✅ After logging a BUY trade (with shares + cost), the matching holding in Holdings tab is updated with weighted-average cost basis, or user is prompted to add the symbol if not tracked.
+17. ✅ After logging a SELL trade (with shares), the matching holding's share count decreases; reaching 0 removes the holding.
+18. ✅ Holdings "Reason to Buy" is included in the `<investor_profile>` context sent to mentor AI.
 
 ---
 
@@ -789,7 +814,7 @@ See `src/constants.js` → `MASTER_STYLES` object. Each master gets a ~200-word 
 
 ## Appendix B: Sample AI Prompts
 
-### Trade parsing (Haiku)
+### Trade parsing (deepseek-v4-flash)
 ```
 Parse this trade description into JSON. Return ONLY the JSON object — no markdown fences, no explanation.
 
@@ -806,9 +831,9 @@ Schema:
 Infer emotion from tone. Match input language exactly.
 ```
 
-### Entry feedback (Sonnet, cached system)
+### Entry feedback (deepseek-v4-pro, server-side cached system)
 ```
-System (cached ephemeral):
+System (plain string, cached by DeepSeek prefix matching):
   [persona text]
   <investor_profile>...</investor_profile>
 
@@ -823,7 +848,7 @@ User:
   Give your immediate, specific reaction. Reference their history, rules, or philosophy where relevant. Be direct. 2-3 short paragraphs. Match their language.
 ```
 
-### Monthly commentary (Sonnet)
+### Monthly commentary (deepseek-v4-pro)
 ```
 System (cached): [persona + profile]
 
