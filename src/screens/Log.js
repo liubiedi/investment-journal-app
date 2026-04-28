@@ -40,8 +40,8 @@ function syncHoldings(t, app) {
       const newShares = existing.shares + t.shares;
       const newCost = (existing.shares * existing.costBasis + t.shares * t.costPerShare) / newShares;
       app.updateHoldingById(existing.id, {
-        shares: Math.round(newShares * 10000) / 10000,
-        costBasis: Math.round(newCost * 10000) / 10000,
+        shares: Math.round(newShares * 100000000) / 100000000,
+        costBasis: Math.round(newCost * 100000000) / 100000000,
       });
     } else {
       Alert.alert(
@@ -469,7 +469,7 @@ function TradeForm({ rules, onSave, onCancel }) {
             const AI = ACTION_ICONS[a.id];
             const isActive = action === a.id;
             return (
-              <Pressable key={a.id} onPress={() => setAction(a.id)}
+              <Pressable key={a.id} onPress={() => { setAction(a.id); if (a.id === "hold" || a.id === "watch") { setShares(""); setCostPerShare(""); } }}
                 style={{ flex: 1, paddingVertical: 10, alignItems: "center", gap: 4,
                   backgroundColor: isActive ? a.color : "transparent",
                   borderWidth: isActive ? 0 : 1, borderColor: colors.divider }}>

@@ -29,6 +29,8 @@ async function initSchema(db) {
       stock TEXT NOT NULL,
       reason TEXT NOT NULL,
       emotion TEXT NOT NULL,
+      shares REAL,
+      cost_per_share REAL,
       rules_checked TEXT,
       raw_input TEXT,
       feedback TEXT,
@@ -100,6 +102,8 @@ async function initSchema(db) {
   `);
   // Migrations for existing databases
   try { await db.runAsync("ALTER TABLE holdings ADD COLUMN buy_reason TEXT"); } catch {}
+  try { await db.runAsync("ALTER TABLE trades ADD COLUMN shares REAL"); } catch {}
+  try { await db.runAsync("ALTER TABLE trades ADD COLUMN cost_per_share REAL"); } catch {}
 }
 
 const newId = (prefix) => `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -132,10 +136,11 @@ export async function addTrade(t) {
   const id = newId("trade");
   const now = Date.now();
   await db.runAsync(
-    `INSERT INTO trades (id, date, action, stock, reason, emotion, rules_checked, raw_input, feedback, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO trades (id, date, action, stock, reason, emotion, shares, cost_per_share, rules_checked, raw_input, feedback, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       id, t.date, t.action, t.stock, t.reason, t.emotion,
+      t.shares || null, t.costPerShare || null,
       JSON.stringify(t.rulesChecked || []),
       t.rawInput || null,
       JSON.stringify([]),
@@ -159,6 +164,8 @@ function rowToTrade(r) {
   return {
     id: r.id, date: r.date, action: r.action, stock: r.stock,
     reason: r.reason, emotion: r.emotion,
+    shares: r.shares || undefined,
+    costPerShare: r.cost_per_share || undefined,
     rulesChecked: safeJson(r.rules_checked, []),
     rawInput: r.raw_input || undefined,
     feedback: safeJson(r.feedback, []),
