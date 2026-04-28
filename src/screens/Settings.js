@@ -9,7 +9,7 @@ import * as FileSystem from "expo-file-system";
 import * as Sharing from "expo-sharing";
 
 import { colors, fonts } from "../theme";
-import { useApp } from "../../App";
+import { useApp } from "../context";
 import { getApiKey, setApiKey, clearApiKey, generateStrategyReport } from "../api";
 import * as db from "../db";
 import { exportToObsidianVault } from "../markdown-export";
@@ -62,7 +62,7 @@ export default function SettingsScreen() {
   };
 
   const handleClearKey = async () => {
-    Alert.alert("清除 API Key", "确定要删除已保存的 Anthropic API key 吗？", [
+    Alert.alert("清除 API Key", "确定要删除已保存的 DeepSeek API key 吗？", [
       { text: "取消", style: "cancel" },
       {
         text: "清除", style: "destructive",
@@ -138,7 +138,7 @@ export default function SettingsScreen() {
       <Masthead kicker="SETTINGS" title="设置" subtitle="配置 · 导出 · 关于" />
 
       {/* API Key */}
-      <Section label="Anthropic API Key" sub="AI 导师功能所需">
+      <Section label="DeepSeek API Key" sub="AI 导师功能所需">
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 10 }}>
           <View style={{
             width: 8, height: 8, borderRadius: 4,
@@ -152,7 +152,7 @@ export default function SettingsScreen() {
         <PaperInput
           value={apiKeyInput}
           onChangeText={setApiKeyInput}
-          placeholder={hasKey ? "粘贴新 key 以替换现有的…" : "sk-ant-api03-…"}
+          placeholder={hasKey ? "粘贴新 key 以替换现有的…" : "sk-…"}
           secureTextEntry
           autoCapitalize="none"
           autoCorrect={false}
@@ -180,10 +180,10 @@ export default function SettingsScreen() {
           </FilledButton>
         </View>
 
-        <Pressable onPress={() => Linking.openURL("https://console.anthropic.com/settings/keys")}
+        <Pressable onPress={() => Linking.openURL("https://platform.deepseek.com/api_keys")}
           style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: 12 }}>
           <ExternalLink size={11} color={colors.inkMuted} />
-          <TMono style={{ fontSize: 11 }}>前往 Anthropic 控制台获取 key</TMono>
+          <TMono style={{ fontSize: 11 }}>前往 DeepSeek 平台获取 key</TMono>
         </Pressable>
       </Section>
 
@@ -327,13 +327,13 @@ export default function SettingsScreen() {
       <Section label="About · 关于" sub="隐私与成本">
         <TSerifBold style={{ fontSize: 14, marginBottom: 6 }}>投资日志 v1.0</TSerifBold>
         <TSerif style={{ fontSize: 13, lineHeight: 22, color: colors.inkSoft }}>
-          Token 使用经济：Haiku 负责结构化解析，Sonnet 负责导师点评。通过 prompt caching 复用投资档案上下文。月使用成本通常 $1-3。
+          Token 使用经济：Flash-lite 负责结构化解析，Flash 负责导师点评。免费套餐每天 1500 次请求，测试零成本。
         </TSerif>
         <View style={{ marginTop: 14, padding: 12, backgroundColor: colors.bgCard, borderWidth: 1, borderColor: colors.dividerSoft }}>
           <Kicker style={{ marginBottom: 6 }}>PRIVACY · 隐私</Kicker>
           <TSerif style={{ fontSize: 12, lineHeight: 20, color: colors.inkSoft }}>
             • 所有日志数据本地 SQLite 存储，不上传任何服务器{"\n"}
-            • Anthropic 仅在你求教导师时收到相关档案片段{"\n"}
+            • DeepSeek 仅在你求教导师时收到相关档案片段{"\n"}
             • Yahoo Finance 仅收到你持仓的 ticker 代码{"\n"}
             • 语音经由 Android 输入法处理，不经过本 App
           </TSerif>
