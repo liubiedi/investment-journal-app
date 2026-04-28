@@ -247,6 +247,7 @@ function HoldingForm({ initial, onSave, onCancel, onDelete }) {
   const [shares, setShares] = useState(initial?.shares?.toString() || "");
   const [costBasis, setCostBasis] = useState(initial?.costBasis?.toString() || "");
   const [currency, setCurrency] = useState(initial?.currency || "USD");
+  const [buyReason, setBuyReason] = useState(initial?.buyReason || "");
   const [notes, setNotes] = useState(initial?.notes || "");
   const [confirm, setConfirm] = useState(false);
 
@@ -259,6 +260,7 @@ function HoldingForm({ initial, onSave, onCancel, onDelete }) {
       shares: parseFloat(shares),
       costBasis: parseFloat(costBasis),
       currency,
+      buyReason: buyReason.trim(),
       notes: notes.trim(),
     });
   };
@@ -304,6 +306,12 @@ function HoldingForm({ initial, onSave, onCancel, onDelete }) {
             </Pressable>
           ))}
         </View>
+      </Field>
+
+      <Field label="REASON TO BUY · 购买原因（可选）">
+        <PaperInput multiline value={buyReason} onChangeText={setBuyReason}
+          placeholder="为什么买入这个标的？投资逻辑、核心论点…"
+          style={{ minHeight: 60, fontSize: 14 }} />
       </Field>
 
       <Field label="NOTES · 备注（可选）">

@@ -96,9 +96,11 @@ export function buildProfileContext({
         const pnl = mv - cost;
         const pct = cost > 0 ? (pnl / cost) * 100 : 0;
         const dailyPct = p.changePercent;
-        return `  ${h.symbol}${h.displayName && h.displayName !== h.symbol ? ` (${h.displayName})` : ""} | ${h.shares}@${h.costBasis}${h.currency || ""} | now ${p.price}${p.currency} (day ${dailyPct >= 0 ? "+" : ""}${dailyPct?.toFixed?.(2) ?? "?"}%) | P&L ${pnl >= 0 ? "+" : ""}${pnl.toFixed(2)} (${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%)`;
+        const reasonLine = h.buyReason ? `\n    reason: ${h.buyReason}` : "";
+        return `  ${h.symbol}${h.displayName && h.displayName !== h.symbol ? ` (${h.displayName})` : ""} | ${h.shares}@${h.costBasis}${h.currency || ""} | now ${p.price}${p.currency} (day ${dailyPct >= 0 ? "+" : ""}${dailyPct?.toFixed?.(2) ?? "?"}%) | P&L ${pnl >= 0 ? "+" : ""}${pnl.toFixed(2)} (${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%)${reasonLine}`;
       }
-      return `  ${h.symbol} | ${h.shares}@${h.costBasis}${h.currency || ""} | (no live price)`;
+      const reasonLine = h.buyReason ? `\n    reason: ${h.buyReason}` : "";
+      return `  ${h.symbol} | ${h.shares}@${h.costBasis}${h.currency || ""} | (no live price)${reasonLine}`;
     }).join("\n") + "\n" + staleness;
   }
 
