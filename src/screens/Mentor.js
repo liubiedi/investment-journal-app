@@ -9,7 +9,7 @@ import {
 } from "lucide-react-native";
 
 import { colors, fonts } from "../theme";
-import { useApp } from "../../App";
+import { useApp } from "../context";
 import { ago } from "../utils";
 import { chatMessage, fetchLivePrices } from "../api";
 import { useSpeech } from "../voice";

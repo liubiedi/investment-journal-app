@@ -1,7 +1,8 @@
 // App.js — root entry with navigation, font loading, global state
 import React, { useEffect, useState, useCallback, useMemo } from "react";
 import { View, Text, ActivityIndicator } from "react-native";
-import { SafeAreaProvider } from "react-native-safe-area-context";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
+import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
 import { NavigationContainer } from "@react-navigation/native";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
@@ -20,6 +21,7 @@ import {
   Compass, BookOpen, Sparkles, FileText, Briefcase, MessageCircle, Settings as SettingsIcon,
 } from "lucide-react-native";
 
+import { AppCtx, useApp } from "./src/context";
 import { colors, fonts } from "./src/theme";
 import { DEFAULT_RULES } from "./src/constants";
 import * as db from "./src/db";
@@ -36,9 +38,6 @@ import SettingsScreen from "./src/screens/Settings";
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
 const Tab = createBottomTabNavigator();
-
-// ---------- App context (simple — pass state down as screen props) ----------
-export const AppCtx = React.createContext(null);
 
 export default function App() {
   const [fontsLoaded] = useFonts({
@@ -200,70 +199,79 @@ export default function App() {
   }
 
   return (
-    <SafeAreaProvider>
-      <AppCtx.Provider value={ctx}>
-        <StatusBar style="dark" />
-        <NavigationContainer theme={navTheme}>
-          <Tab.Navigator
-            screenOptions={{
-              headerShown: false,
-              tabBarStyle: {
-                backgroundColor: colors.bg,
-                borderTopColor: colors.divider,
-                borderTopWidth: 1,
-                height: 64,
-                paddingTop: 6,
-                paddingBottom: 8,
-              },
-              tabBarActiveTintColor: colors.ink,
-              tabBarInactiveTintColor: colors.inkFaint,
-              tabBarLabelStyle: {
-                fontSize: 9,
-                fontFamily: fonts.mono,
-                letterSpacing: 0.5,
-                marginTop: 2,
-              },
-            }}
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <SafeAreaProvider>
+        <AppInner ctx={ctx} />
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
+  );
+}
+
+function AppInner({ ctx }) {
+  const insets = useSafeAreaInsets();
+  return (
+    <AppCtx.Provider value={ctx}>
+      <StatusBar style="dark" />
+      <NavigationContainer theme={navTheme}>
+        <Tab.Navigator
+          screenOptions={{
+            headerShown: false,
+            tabBarStyle: {
+              backgroundColor: colors.bg,
+              borderTopColor: colors.divider,
+              borderTopWidth: 1,
+              height: 64 + insets.bottom,
+              paddingTop: 6,
+              paddingBottom: 8 + insets.bottom,
+            },
+            tabBarActiveTintColor: colors.ink,
+            tabBarInactiveTintColor: colors.inkFaint,
+            tabBarLabelStyle: {
+              fontSize: 9,
+              fontFamily: fonts.mono,
+              letterSpacing: 0.5,
+              marginTop: 2,
+            },
+          }}
+        >
+          <Tab.Screen
+            name="home" options={{ tabBarLabel: "主页", tabBarIcon: ({ color }) => <Compass size={17} color={color} /> }}
           >
-            <Tab.Screen
-              name="home" options={{ tabBarLabel: "主页", tabBarIcon: ({ color }) => <Compass size={17} color={color} /> }}
-            >
-              {() => <HomeScreen />}
-            </Tab.Screen>
-            <Tab.Screen
-              name="weekly" options={{ tabBarLabel: "周记", tabBarIcon: ({ color }) => <BookOpen size={17} color={color} /> }}
-            >
-              {() => <WeeklyScreen />}
-            </Tab.Screen>
-            <Tab.Screen
-              name="monthly" options={{ tabBarLabel: "月评", tabBarIcon: ({ color }) => <Sparkles size={17} color={color} /> }}
-            >
-              {() => <MonthlyScreen />}
-            </Tab.Screen>
-            <Tab.Screen
-              name="log" options={{ tabBarLabel: "记录", tabBarIcon: ({ color }) => <FileText size={17} color={color} /> }}
-            >
-              {() => <LogScreen />}
-            </Tab.Screen>
-            <Tab.Screen
-              name="holdings" options={{ tabBarLabel: "持仓", tabBarIcon: ({ color }) => <Briefcase size={17} color={color} /> }}
-            >
-              {() => <HoldingsScreen />}
-            </Tab.Screen>
-            <Tab.Screen
-              name="mentor" options={{ tabBarLabel: "导师", tabBarIcon: ({ color }) => <MessageCircle size={17} color={color} /> }}
-            >
-              {() => <MentorScreen />}
-            </Tab.Screen>
-            <Tab.Screen
-              name="settings" options={{ tabBarLabel: "设置", tabBarIcon: ({ color }) => <SettingsIcon size={17} color={color} /> }}
-            >
-              {() => <SettingsScreen />}
-            </Tab.Screen>
-          </Tab.Navigator>
-        </NavigationContainer>
-      </AppCtx.Provider>
-    </SafeAreaProvider>
+            {() => <HomeScreen />}
+          </Tab.Screen>
+          <Tab.Screen
+            name="weekly" options={{ tabBarLabel: "周记", tabBarIcon: ({ color }) => <BookOpen size={17} color={color} /> }}
+          >
+            {() => <WeeklyScreen />}
+          </Tab.Screen>
+          <Tab.Screen
+            name="monthly" options={{ tabBarLabel: "月评", tabBarIcon: ({ color }) => <Sparkles size={17} color={color} /> }}
+          >
+            {() => <MonthlyScreen />}
+          </Tab.Screen>
+          <Tab.Screen
+            name="log" options={{ tabBarLabel: "记录", tabBarIcon: ({ color }) => <FileText size={17} color={color} /> }}
+          >
+            {() => <LogScreen />}
+          </Tab.Screen>
+          <Tab.Screen
+            name="holdings" options={{ tabBarLabel: "持仓", tabBarIcon: ({ color }) => <Briefcase size={17} color={color} /> }}
+          >
+            {() => <HoldingsScreen />}
+          </Tab.Screen>
+          <Tab.Screen
+            name="mentor" options={{ tabBarLabel: "导师", tabBarIcon: ({ color }) => <MessageCircle size={17} color={color} /> }}
+          >
+            {() => <MentorScreen />}
+          </Tab.Screen>
+          <Tab.Screen
+            name="settings" options={{ tabBarLabel: "设置", tabBarIcon: ({ color }) => <SettingsIcon size={17} color={color} /> }}
+          >
+            {() => <SettingsScreen />}
+          </Tab.Screen>
+        </Tab.Navigator>
+      </NavigationContainer>
+    </AppCtx.Provider>
   );
 }
 
@@ -279,8 +287,4 @@ const navTheme = {
   },
 };
 
-export const useApp = () => {
-  const c = React.useContext(AppCtx);
-  if (!c) throw new Error("useApp must be inside AppCtx.Provider");
-  return c;
-};
+export { useApp };

@@ -15,7 +15,7 @@ A personal, offline-first investment journaling Android app that combines struct
 
 **Key differentiators:**
 1. **Template-driven structure** — enforces philosophy → rules → weekly notes → monthly reviews → trade log, rather than freeform journaling.
-2. **AI mentor persona** — Claude with the user's full journal as context, accessible via chat or on-demand feedback on individual entries.
+2. **AI mentor persona** — DeepSeek with the user's full journal as context, accessible via chat or on-demand feedback on individual entries.
 3. **Master personas** — switch perspectives to get Peter Lynch's, Buffett's, etc. reaction on any entry.
 4. **Voice-first input** — every text field supports speech-to-text.
 5. **Local-only data** — SQLite on device, never cloud-synced. User owns their data.
@@ -30,13 +30,13 @@ A personal, offline-first investment journaling Android app that combines struct
 | Framework | **Expo SDK 51+ / React Native 0.74** | Enables APK build via EAS without Android Studio; cross-platform future-proof |
 | Language | **JavaScript (no TypeScript)** | Matches project style; lower cognitive overhead |
 | Database | **expo-sqlite** (async API) | Industry-standard mobile SQLite; works offline |
-| Secure Storage | **expo-secure-store** | For the Anthropic API key only |
+| Secure Storage | **expo-secure-store** | For the DeepSeek API key only |
 | Navigation | **@react-navigation/bottom-tabs** v6 | Standard RN tab navigation |
 | Voice Input (in-app button) | **@react-native-voice/voice** | Native Android/iOS speech-to-text. On devices with iFlytek IME installed, the system STT already routes through it automatically — we get iFlytek accuracy for free. |
 | Voice Input (keyboard mic) | **System IME** (e.g., iFlytek 讯飞输入法) | Users with iFlytek IME installed can tap the keyboard's mic button on any TextInput — transcript is injected like normal typing. Zero integration work. |
 | Icons | **lucide-react-native** | Consistent icon set |
 | Fonts | **@expo-google-fonts/fraunces**, **@expo-google-fonts/jetbrains-mono** | Editorial serif + technical mono |
-| AI API | **Anthropic Claude API direct** (fetch) | No backend; BYOK model |
+| AI API | **DeepSeek API direct** (fetch) | No backend; BYOK model |
 | Price Data | **Yahoo Finance public endpoints** (`query1.finance.yahoo.com/v8/finance/chart/`) | Free, no API key, global coverage |
 | Build | **EAS Build** (cloud) with APK profile | Produces installable `.apk` without local Android Studio |
 
@@ -292,10 +292,10 @@ CREATE TABLE prices_meta (
 ### 5.7 Settings (tab: 设置)
 
 **Sections:**
-1. **Anthropic API Key**:
+1. **DeepSeek API Key**:
    - Password-masked input. "保存" button calls `setApiKey(value)` (SecureStore).
    - "清除" button for deletion.
-   - Link to Anthropic console.
+   - Link to DeepSeek platform.
 2. **语音输入 · Voice Input**:
    - Informational only (no toggles or credentials).
    - Hint: "为获得更好的中文语音识别，建议安装讯飞输入法或搜狗输入法。在任意输入框中，可以点击键盘上的麦克风按钮进行语音输入；或点击 App 内的麦克风图标快捷录入。"
@@ -310,7 +310,7 @@ CREATE TABLE prices_meta (
      - Used for restoring on a new device or as a raw record of all fields including cached mentor feedback.
 4. **About**:
    - App version, token economy explanation (~$1-3/month), privacy note.
-   - Privacy details: Anthropic sees journal context (only when you tap 求教 or chat with mentor). Yahoo Finance sees tickers you hold. Voice audio goes through your chosen Android IME, not through this app. Everything else stays local.
+   - Privacy details: DeepSeek sees journal context (only when you tap 求教 or chat with mentor). Yahoo Finance sees tickers you hold. Voice audio goes through your chosen Android IME, not through this app. Everything else stays local.
 5. **Danger zone**:
    - "清空聊天记录" button with confirmation.
 
@@ -318,7 +318,7 @@ CREATE TABLE prices_meta (
 
 ## 6. Investment Masters
 
-Seven selectable personas. Each has a hard-coded system prompt style (~200 words) that Claude adopts. `MASTERS[0]` is always `"default"` = personal mentor. The other 6 are named masters.
+Seven selectable personas. Each has a hard-coded system prompt style (~200 words) that DeepSeek adopts. `MASTERS[0]` is always `"default"` = personal mentor. The other 6 are named masters.
 
 | id | zh | Core stance |
 |---|---|---|
@@ -339,11 +339,11 @@ All master prompts end with: "Match the user's language exactly (Chinese/English
 **Principle**: minimize API cost without degrading UX.
 
 ### 7.1 Model selection
-- **Haiku (`claude-haiku-4-5-20251001`)** for `parseTradeText` — structured extraction only.
-- **Sonnet (`claude-sonnet-4-6`)** for all mentor output (feedback, chat, monthly commentary).
+- **`deepseek-chat`** for `parseTradeText` — structured extraction only.
+- **`deepseek-v4-pro`** for all mentor output (feedback, chat, monthly commentary).
 
 ### 7.2 Prompt caching
-- Mentor system prompts use Anthropic prompt caching:
+- Mentor system prompts rely on DeepSeek's automatic prefix caching:
   ```js
   system: [
     { type: "text", text: persona },                                // uncached (small)
@@ -365,8 +365,8 @@ When building `<investor_profile>`:
 - Chat history: trim to last **10 turns** (5 exchanges) before sending.
 
 ### 7.5 Zero-token pricing
-- Never use Claude's web_search for prices. Use Yahoo directly.
-- Yahoo responses come back in ~200ms vs Claude's 15-30s.
+- Never use the LLM for live prices. Use Yahoo directly.
+- Yahoo responses come back in ~200ms vs an LLM round-trip of 15-30s.
 
 **Estimated daily-user cost: $1-3/month** (assumes 3-5 feedback requests per day, 20-30 chat messages, 1-2 monthly reports).
 
@@ -374,10 +374,12 @@ When building `<investor_profile>`:
 
 ## 8. External APIs
 
-### 8.1 Anthropic API
-- Endpoint: `https://api.anthropic.com/v1/messages`
-- Headers: `x-api-key`, `anthropic-version: 2023-06-01`, `Content-Type: application/json`
-- Key stored in `expo-secure-store` (key name: `anthropic_api_key`).
+### 8.1 DeepSeek API (OpenAI-compatible)
+- Endpoint: `https://api.deepseek.com/v1/chat/completions`
+- Headers: `Authorization: Bearer ${apiKey}`, `Content-Type: application/json`
+- Body: `{ model, max_tokens, messages: [{role, content}, ...], stream? }`
+- System prompt is sent as the first message with `role: "system"` (no separate field).
+- Key stored in `expo-secure-store` (key name: `deepseek_api_key`).
 - If no key: throw `Error("NO_API_KEY")` — UI catches and redirects to Settings.
 
 ### 8.2 Yahoo Finance
@@ -499,7 +501,7 @@ investment-journal-app/
 │   ├── constants.js                # ACTIONS, EMOTIONS, MASTERS, MASTER_STYLES, DEFAULT_RULES
 │   ├── utils.js                    # fmtDate, monthKey, weekKey, weekRange, fmtCurrency, ago
 │   ├── db.js                       # SQLite schema + typed CRUD helpers
-│   ├── api.js                      # Claude (with caching) + Yahoo Finance
+│   ├── api.js                      # DeepSeek + Yahoo Finance
 │   ├── voice.js                    # useSpeech hook — wraps @react-native-voice/voice
 │   ├── components.js               # shared UI primitives
 │   └── screens/
@@ -527,7 +529,7 @@ getApiKey(): Promise<string | null>
 setApiKey(key: string): Promise<void>
 clearApiKey(): Promise<void>
 
-// Claude API (throws Error("NO_API_KEY") if key missing)
+// DeepSeek API (throws Error("NO_API_KEY") if key missing)
 parseTradeText(text: string): Promise<{action, stock, reason, emotion}>
 generateEntryFeedback(entry, entryType: "trade"|"thought", masterId, profile): Promise<string>
 generateMonthlyCommentary(month, monthTrades, masterId, profile): Promise<string>
@@ -627,7 +629,7 @@ useSpeech(onFinalText: (text: string) => void): {
 - P&L % is relative to cost basis in same currency.
 
 ### 12.6 Prompt cache staleness
-- When user edits philosophy, rules, or completes a trade, the cached profile block becomes stale naturally (Anthropic's ephemeral cache is content-hash-based). Next call will be a cache miss but re-cache.
+- When user edits philosophy, rules, or completes a trade, the system prefix changes — DeepSeek's prefix-cache automatically misses on the new content and starts a fresh cache for subsequent calls.
 - Don't attempt manual invalidation.
 
 ---
@@ -699,7 +701,7 @@ An implementation is correct if:
 11. ✅ Exporting JSON produces a complete backup of all user data.
 12. ✅ App works offline for all non-AI features (weekly, monthly bullets, manual trade entry, thought entry). Voice requires network only if the IME does (most do).
 13. ✅ Building via `eas build -p android --profile preview` produces an installable APK.
-14. ✅ No telemetry, no analytics, no external calls except to `api.anthropic.com` and `query1.finance.yahoo.com`.
+14. ✅ No telemetry, no analytics, no external calls except to `api.deepseek.com` and `query1.finance.yahoo.com`.
 
 ---
 
@@ -766,7 +768,7 @@ Investment Journal/                  ← user opens this as an Obsidian Vault
 1. Scaffold: `package.json`, `app.json`, `eas.json`, `babel.config.js`, `App.js` skeleton.
 2. `src/theme.js`, `src/constants.js`, `src/utils.js` — pure data, no deps.
 3. `src/db.js` — schema + all CRUD. Test by seeding sample data.
-4. `src/api.js` — Claude + Yahoo. Test parseTradeText and fetchLivePrices independently.
+4. `src/api.js` — DeepSeek + Yahoo. Test parseTradeText and fetchLivePrices independently.
 5. `src/voice.js` — wrap @react-native-voice/voice.
 6. `src/components.js` — shared UI primitives.
 7. `src/screens/Home.js` — verify fonts + state hookup.
@@ -789,7 +791,7 @@ See `src/constants.js` → `MASTER_STYLES` object. Each master gets a ~200-word 
 
 ## Appendix B: Sample AI Prompts
 
-### Trade parsing (Haiku)
+### Trade parsing (deepseek-chat)
 ```
 Parse this trade description into JSON. Return ONLY the JSON object — no markdown fences, no explanation.
 
@@ -806,7 +808,7 @@ Schema:
 Infer emotion from tone. Match input language exactly.
 ```
 
-### Entry feedback (Sonnet, cached system)
+### Entry feedback (deepseek-v4-pro)
 ```
 System (cached ephemeral):
   [persona text]
@@ -823,7 +825,7 @@ User:
   Give your immediate, specific reaction. Reference their history, rules, or philosophy where relevant. Be direct. 2-3 short paragraphs. Match their language.
 ```
 
-### Monthly commentary (Sonnet)
+### Monthly commentary (deepseek-v4-pro)
 ```
 System (cached): [persona + profile]
 

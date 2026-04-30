@@ -21,7 +21,7 @@ investment-journal-app/
     ├── constants.js          ← 动作、情绪、7 位大师
     ├── utils.js              ← 日期、货币工具
     ├── db.js                 ← SQLite 数据层
-    ├── api.js                ← Claude + Yahoo Finance
+    ├── api.js                ← DeepSeek + Yahoo Finance
     ├── voice.js              ← 语音输入 hook
     ├── components.js         ← 共享 UI 组件
     └── screens/
@@ -82,9 +82,9 @@ eas build -p android --profile preview
 
 只有你想给别人用才需要。要 $25 一次性注册费，还要做图标和描述。个人使用用路线 2 就够了。
 
-## 使用前必做：配置 Anthropic API Key
+## 使用前必做：配置 DeepSeek API Key
 
-1. 去 https://console.anthropic.com/settings/keys 创建 key（建议先充 $5 试用金）
+1. 去 https://platform.deepseek.com/api_keys 创建 key（建议先充 $5 试用金）
 2. 打开 app，进"设置"tab
 3. 粘贴 key，保存
 4. 回主页，开始用

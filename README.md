@@ -16,7 +16,7 @@ Personal investment journal — Android app built with Expo / React Native.
 ## Prerequisites
 
 1. **Node.js** (>= 20 LTS) — https://nodejs.org
-2. **Anthropic API key** for mentor features — https://console.anthropic.com
+2. **DeepSeek API key** for mentor features — https://platform.deepseek.com/api_keys
 3. For APK build: **Expo account** (free) — https://expo.dev
 
 ## Setup
@@ -70,19 +70,19 @@ cd android
 ## First launch
 
 1. Open the app — you'll see a one-time Setup screen.
-2. Paste your Anthropic API key. It's stored in device `SecureStore`, never sent anywhere except `api.anthropic.com`.
+2. Paste your DeepSeek API key. It's stored in device `SecureStore`, never sent anywhere except `api.deepseek.com`.
 3. (Optional) Edit your default Philosophy + Rules.
 4. Start journaling.
 
 ## Token economy
 
-The app is deliberately frugal with Claude tokens:
+The app is deliberately frugal with DeepSeek tokens:
 
 - **Yahoo Finance for prices** — 0 tokens, 200ms.
-- **Claude Haiku** for structured trade parsing — ~$0.001 per trade.
-- **Claude Sonnet** for mentor feedback, master views, monthly commentary.
-- **Prompt caching** — the mentor's profile context is cached 5 min; rapid back-and-forth in chat costs ~10% of a cold call.
-- **No auto-feedback** — mentor comments only on explicit request. Each "求教" button tap costs ~$0.01-0.02.
+- **deepseek-chat** for structured trade parsing — ~$0.0002 per trade.
+- **deepseek-v4-pro** for mentor feedback, master views, monthly commentary.
+- **Server-side prefix caching** — DeepSeek auto-caches request prefixes; rapid back-and-forth in chat reuses the cached system prompt at a discount.
+- **No auto-feedback** — mentor comments only on explicit request. Each "求教" button tap costs roughly a fraction of a cent.
 - **Context trimming** — trade feedback only passes last 10 trades (not all history) to save ingress tokens.
 
 Estimated cost: ~$1-3/month for a daily user.
@@ -107,7 +107,7 @@ investment-journal-app/
 │   ├── constants.js                # ACTIONS, EMOTIONS, MASTERS
 │   ├── utils.js                    # date/currency helpers
 │   ├── db.js                       # SQLite schema + CRUD
-│   ├── api.js                      # Claude + Yahoo Finance
+│   ├── api.js                      # DeepSeek + Yahoo Finance
 │   ├── voice.js                    # speech-to-text hook
 │   ├── components.js               # shared UI components
 │   └── screens/

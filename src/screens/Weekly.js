@@ -4,7 +4,7 @@ import { View, ScrollView, Pressable } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { weekKey, weekRange } from "../utils";
 import { colors, fonts } from "../theme";
-import { useApp } from "../../App";
+import { useApp } from "../context";
 import {
   TSerif, TSerifBold, TSerifItalic, TMono, Kicker,
   PaperInput, FilledButton, Masthead, VoiceMic,

@@ -5,7 +5,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useNavigation } from "@react-navigation/native";
 import { MessageCircle, ChevronRight, Sparkles, X, Edit2, Plus, Trash2 } from "lucide-react-native";
 
-import { useApp } from "../../App";
+import { useApp } from "../context";
 import { colors, fonts } from "../theme";
 import { monthKey, isLastWeekOfMonth, fmtDate } from "../utils";
 import {
@@ -41,7 +41,7 @@ export default function HomeScreen() {
         <View style={{ marginHorizontal: 20, marginTop: 16, padding: 14, backgroundColor: colors.ink }}>
           <Kicker color={colors.accent}>API KEY 未配置</Kicker>
           <TSerif style={{ color: colors.bg, fontSize: 14, marginTop: 4, lineHeight: 20 }}>
-            AI 导师功能需要 Anthropic API key。前往"设置"tab 配置。
+            AI 导师功能需要 DeepSeek API key。前往"设置"tab 配置。
           </TSerif>
           <Pressable onPress={() => nav.navigate("settings")}
             style={{ marginTop: 10, paddingVertical: 8, backgroundColor: colors.accent, alignItems: "center" }}>

@@ -7,12 +7,12 @@ import {
 } from "lucide-react-native";
 
 import { colors, fonts } from "../theme";
-import { useApp } from "../../App";
+import { useApp } from "../context";
 import { fmtCurrency, ago } from "../utils";
 import { fetchLivePrices } from "../api";
 import {
   TSerif, TSerifBold, TSerifItalic, TMono, Kicker,
-  PaperInput, FilledButton, OutlineButton, Masthead, FormHeader, Field,
+  PaperInput, StockSearchInput, FilledButton, OutlineButton, Masthead, FormHeader, Field,
 } from "../components";
 
 export default function HoldingsScreen() {
@@ -247,6 +247,7 @@ function HoldingForm({ initial, onSave, onCancel, onDelete }) {
   const [shares, setShares] = useState(initial?.shares?.toString() || "");
   const [costBasis, setCostBasis] = useState(initial?.costBasis?.toString() || "");
   const [currency, setCurrency] = useState(initial?.currency || "USD");
+  const [buyReason, setBuyReason] = useState(initial?.buyReason || "");
   const [notes, setNotes] = useState(initial?.notes || "");
   const [confirm, setConfirm] = useState(false);
 
@@ -259,6 +260,7 @@ function HoldingForm({ initial, onSave, onCancel, onDelete }) {
       shares: parseFloat(shares),
       costBasis: parseFloat(costBasis),
       currency,
+      buyReason: buyReason.trim(),
       notes: notes.trim(),
     });
   };
@@ -267,9 +269,19 @@ function HoldingForm({ initial, onSave, onCancel, onDelete }) {
     <View style={{ padding: 20 }}>
       <FormHeader title={initial ? "EDIT POSITION" : "NEW POSITION"} onCancel={onCancel} />
 
-      <Field label="SYMBOL · 代码" hint="美股用代码（AAPL）· 港股 xxxx.HK · A 股 xxxxxx.SS/.SZ · 加密 BTC-USD">
-        <PaperInput value={symbol} onChangeText={setSymbol} placeholder="AAPL / 0700.HK / BTC-USD…"
-          autoFocus={!initial} style={{ fontSize: 17 }} />
+      <Field label="SYMBOL · 代码" hint="输入名称或代码搜索 · 美股 AAPL · 港股 xxxx.HK · 加密 BTC-USD">
+        {initial ? (
+          <PaperInput value={symbol} onChangeText={setSymbol} placeholder="AAPL / 0700.HK / BTC-USD…"
+            style={{ fontSize: 17 }} />
+        ) : (
+          <StockSearchInput
+            value={symbol}
+            onChangeText={(t) => setSymbol(t.toUpperCase())}
+            onSelect={(sym, name) => { setSymbol(sym); setDisplayName(name); }}
+            placeholder="搜索名称或代码 · AAPL / 腾讯 / BTC…"
+            style={{ fontSize: 17 }}
+          />
+        )}
       </Field>
 
       <Field label="DISPLAY NAME · 显示名（可选）">
@@ -304,6 +316,12 @@ function HoldingForm({ initial, onSave, onCancel, onDelete }) {
             </Pressable>
           ))}
         </View>
+      </Field>
+
+      <Field label="REASON TO BUY · 购买原因（可选）">
+        <PaperInput multiline value={buyReason} onChangeText={setBuyReason}
+          placeholder="为什么买入这个标的？投资逻辑、核心论点…"
+          style={{ minHeight: 60, fontSize: 14 }} />
       </Field>
 
       <Field label="NOTES · 备注（可选）">
