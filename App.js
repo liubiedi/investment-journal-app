@@ -18,7 +18,7 @@ import {
   JetBrainsMono_500Medium,
 } from "@expo-google-fonts/jetbrains-mono";
 import {
-  Compass, BookOpen, Sparkles, FileText, Briefcase, MessageCircle, Settings as SettingsIcon,
+  Anchor, FileText, Briefcase, RotateCcw, MessageCircle,
 } from "lucide-react-native";
 
 import { AppCtx, useApp } from "./src/context";
@@ -28,10 +28,9 @@ import * as db from "./src/db";
 import { getApiKey } from "./src/api";
 
 import HomeScreen from "./src/screens/Home";
-import WeeklyScreen from "./src/screens/Weekly";
-import MonthlyScreen from "./src/screens/Monthly";
 import LogScreen from "./src/screens/Log";
 import HoldingsScreen from "./src/screens/Holdings";
+import ReviewScreen from "./src/screens/Review";
 import MentorScreen from "./src/screens/Mentor";
 import SettingsScreen from "./src/screens/Settings";
 
@@ -235,19 +234,9 @@ function AppInner({ ctx }) {
           }}
         >
           <Tab.Screen
-            name="home" options={{ tabBarLabel: "主页", tabBarIcon: ({ color }) => <Compass size={17} color={color} /> }}
+            name="home" options={{ tabBarLabel: "心法", tabBarIcon: ({ color }) => <Anchor size={17} color={color} /> }}
           >
             {() => <HomeScreen />}
-          </Tab.Screen>
-          <Tab.Screen
-            name="weekly" options={{ tabBarLabel: "周记", tabBarIcon: ({ color }) => <BookOpen size={17} color={color} /> }}
-          >
-            {() => <WeeklyScreen />}
-          </Tab.Screen>
-          <Tab.Screen
-            name="monthly" options={{ tabBarLabel: "月评", tabBarIcon: ({ color }) => <Sparkles size={17} color={color} /> }}
-          >
-            {() => <MonthlyScreen />}
           </Tab.Screen>
           <Tab.Screen
             name="log" options={{ tabBarLabel: "记录", tabBarIcon: ({ color }) => <FileText size={17} color={color} /> }}
@@ -260,12 +249,18 @@ function AppInner({ ctx }) {
             {() => <HoldingsScreen />}
           </Tab.Screen>
           <Tab.Screen
-            name="mentor" options={{ tabBarLabel: "导师", tabBarIcon: ({ color }) => <MessageCircle size={17} color={color} /> }}
+            name="review" options={{ tabBarLabel: "复盘", tabBarIcon: ({ color }) => <RotateCcw size={17} color={color} /> }}
+          >
+            {() => <ReviewScreen />}
+          </Tab.Screen>
+          <Tab.Screen
+            name="mentor" options={{ tabBarLabel: "问道", tabBarIcon: ({ color }) => <MessageCircle size={17} color={color} /> }}
           >
             {() => <MentorScreen />}
           </Tab.Screen>
           <Tab.Screen
-            name="settings" options={{ tabBarLabel: "设置", tabBarIcon: ({ color }) => <SettingsIcon size={17} color={color} /> }}
+            name="settings"
+            options={{ tabBarButton: () => null }}
           >
             {() => <SettingsScreen />}
           </Tab.Screen>
