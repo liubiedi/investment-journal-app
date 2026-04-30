@@ -356,6 +356,7 @@ function TradeForm({ rules, onSave, onCancel }) {
   const [mode, setMode] = useState("smart");
   const [action, setAction] = useState("buy");
   const [stock, setStock] = useState("");
+  const [stockName, setStockName] = useState("");
   const [reason, setReason] = useState("");
   const [emotion, setEmotion] = useState("calm");
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
@@ -474,11 +475,15 @@ function TradeForm({ rules, onSave, onCancel }) {
       <Field label="STOCK · 标的">
         <StockSearchInput
           value={stock}
-          onChangeText={setStock}
-          onSelect={(sym) => setStock(sym)}
+          onChangeText={(t) => { setStock(t); setStockName(""); }}
+          onSelect={(sym, name) => { setStock(sym); setStockName(name); }}
           placeholder="搜索名称或代码 · AAPL / 腾讯 / BTC…"
           style={{ fontSize: 17 }}
         />
+      </Field>
+
+      <Field label="DISPLAY NAME · 显示名（可选）">
+        <PaperInput value={stockName} onChangeText={setStockName} placeholder="Apple / 腾讯 / 比特币…" />
       </Field>
 
       <Field label="DATE · 日期">
@@ -537,7 +542,8 @@ function TradeForm({ rules, onSave, onCancel }) {
 
       <FilledButton
         onPress={() => onSave({
-          action, stock: stock.trim(), reason: reason.trim(), emotion,
+          action, stock: stock.trim(), stockName: stockName.trim() || undefined,
+          reason: reason.trim(), emotion,
           date: new Date(date).toISOString(), rulesChecked,
           rawInput: mode === "smart" && rawInput.trim() ? rawInput.trim() : undefined,
         })}
