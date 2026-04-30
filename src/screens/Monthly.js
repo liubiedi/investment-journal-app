@@ -5,7 +5,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Sparkles, Plus, Quote } from "lucide-react-native";
 
 import { colors, fonts } from "../theme";
-import { useApp } from "../../App";
+import { useApp } from "../context";
 import { monthKey, monthLabel } from "../utils";
 import { ACTIONS, getMaster } from "../constants";
 import { generateMonthlyCommentary } from "../api";

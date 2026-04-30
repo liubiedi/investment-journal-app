@@ -7,7 +7,7 @@ import {
 } from "lucide-react-native";
 
 import { colors, fonts } from "../theme";
-import { useApp } from "../../App";
+import { useApp } from "../context";
 import { fmtCurrency, ago } from "../utils";
 import { fetchLivePrices } from "../api";
 import {

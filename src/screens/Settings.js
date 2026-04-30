@@ -9,7 +9,7 @@ import * as FileSystem from "expo-file-system";
 import * as Sharing from "expo-sharing";
 
 import { colors, fonts } from "../theme";
-import { useApp } from "../../App";
+import { useApp } from "../context";
 import { getApiKey, setApiKey, clearApiKey, generateStrategyReport } from "../api";
 import * as db from "../db";
 import { exportToObsidianVault } from "../markdown-export";

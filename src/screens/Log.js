@@ -14,7 +14,7 @@ import {
 } from "lucide-react-native";
 
 import { colors, fonts } from "../theme";
-import { useApp } from "../../App";
+import { useApp } from "../context";
 import { ACTIONS, EMOTIONS, getAction, getEmotion } from "../constants";
 import { fmtDate } from "../utils";
 import { parseTradeText, generateEntryFeedback } from "../api";

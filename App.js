@@ -1,6 +1,7 @@
 // App.js — root entry with navigation, font loading, global state
 import React, { useEffect, useState, useCallback, useMemo } from "react";
 import { View, Text, ActivityIndicator } from "react-native";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
 import { NavigationContainer } from "@react-navigation/native";
@@ -20,6 +21,7 @@ import {
   Compass, BookOpen, Sparkles, FileText, Briefcase, MessageCircle, Settings as SettingsIcon,
 } from "lucide-react-native";
 
+import { AppCtx, useApp } from "./src/context";
 import { colors, fonts } from "./src/theme";
 import { DEFAULT_RULES } from "./src/constants";
 import * as db from "./src/db";
@@ -36,9 +38,6 @@ import SettingsScreen from "./src/screens/Settings";
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
 const Tab = createBottomTabNavigator();
-
-// ---------- App context (simple — pass state down as screen props) ----------
-export const AppCtx = React.createContext(null);
 
 export default function App() {
   const [fontsLoaded] = useFonts({
@@ -200,6 +199,7 @@ export default function App() {
   }
 
   return (
+    <GestureHandlerRootView style={{ flex: 1 }}>
     <SafeAreaProvider>
       <AppCtx.Provider value={ctx}>
         <StatusBar style="dark" />
@@ -264,6 +264,7 @@ export default function App() {
         </NavigationContainer>
       </AppCtx.Provider>
     </SafeAreaProvider>
+    </GestureHandlerRootView>
   );
 }
 
@@ -279,8 +280,4 @@ const navTheme = {
   },
 };
 
-export const useApp = () => {
-  const c = React.useContext(AppCtx);
-  if (!c) throw new Error("useApp must be inside AppCtx.Provider");
-  return c;
-};
+export { useApp };

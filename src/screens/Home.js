@@ -5,7 +5,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useNavigation } from "@react-navigation/native";
 import { MessageCircle, ChevronRight, Sparkles, X, Edit2, Plus, Trash2 } from "lucide-react-native";
 
-import { useApp } from "../../App";
+import { useApp } from "../context";
 import { colors, fonts } from "../theme";
 import { monthKey, isLastWeekOfMonth, fmtDate } from "../utils";
 import {
