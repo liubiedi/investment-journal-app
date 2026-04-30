@@ -3,7 +3,7 @@
 // User must tap "求教 xx" to request feedback from a specific master.
 
 import React, { useState } from "react";
-import { View, ScrollView, Pressable, ActivityIndicator } from "react-native";
+import { View, ScrollView, Pressable, ActivityIndicator, Modal, KeyboardAvoidingView, Platform } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
   TrendingUp, TrendingDown, Eye, Search,
@@ -34,6 +34,7 @@ export default function LogScreen() {
   const insets = useSafeAreaInsets();
   const [subTab, setSubTab] = useState("trades");
   const [adding, setAdding] = useState(false);
+  const [holdingPrompt, setHoldingPrompt] = useState(null); // { trade }
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
@@ -81,7 +82,13 @@ export default function LogScreen() {
         {adding && subTab === "trades" && (
           <TradeForm
             rules={app.rules}
-            onSave={async (t) => { await app.addTrade(t); setAdding(false); }}
+            onSave={async (t) => {
+              const saved = await app.addTrade(t);
+              setAdding(false);
+              if (t.action === "buy" || t.action === "sell") {
+                setHoldingPrompt({ trade: saved });
+              }
+            }}
             onCancel={() => setAdding(false)}
           />
         )}
@@ -135,6 +142,39 @@ export default function LogScreen() {
           )}
         </View>
       </ScrollView>
+
+      {holdingPrompt && (
+        <HoldingUpdateModal
+          trade={holdingPrompt.trade}
+          holdings={app.holdings}
+          onConfirm={async ({ shares, price, currency, displayName }) => {
+            setHoldingPrompt(null);
+            const sym = holdingPrompt.trade.stock.toUpperCase();
+            const existing = app.holdings.find(
+              (h) => h.symbol.toUpperCase() === sym
+            );
+            if (holdingPrompt.trade.action === "buy") {
+              if (existing) {
+                const newShares = existing.shares + shares;
+                const newCost = (existing.shares * existing.costBasis + shares * price) / newShares;
+                await app.updateHoldingById(existing.id, { shares: newShares, costBasis: newCost });
+              } else {
+                await app.addHolding({ symbol: sym, displayName: displayName || sym, shares, costBasis: price, currency, buyReason: holdingPrompt.trade.reason, notes: "" });
+              }
+            } else {
+              if (existing) {
+                const newShares = existing.shares - shares;
+                if (newShares <= 0) {
+                  await app.deleteHoldingById(existing.id);
+                } else {
+                  await app.updateHoldingById(existing.id, { shares: newShares });
+                }
+              }
+            }
+          }}
+          onSkip={() => setHoldingPrompt(null)}
+        />
+      )}
     </View>
   );
 }
@@ -562,5 +602,119 @@ function ThoughtForm({ onSave, onCancel }) {
         保存后在详情页按需求教导师回应
       </TSerifItalic>
     </ScrollView>
+  );
+}
+
+// ============================================================
+const CURRENCIES = ["USD", "CNY", "HKD", "EUR", "JPY"];
+
+function HoldingUpdateModal({ trade, holdings, onConfirm, onSkip }) {
+  const sym = trade.stock.toUpperCase();
+  const existing = holdings.find((h) => h.symbol.toUpperCase() === sym);
+  const isBuy = trade.action === "buy";
+
+  const [shares, setShares] = useState("");
+  const [price, setPrice] = useState("");
+  const [currency, setCurrency] = useState(existing?.currency || "USD");
+  const [displayName, setDisplayName] = useState(existing?.displayName || trade.stock);
+
+  const canConfirm = shares.trim() && (isBuy ? price.trim() : true) &&
+    !isNaN(parseFloat(shares)) && parseFloat(shares) > 0 &&
+    (isBuy ? !isNaN(parseFloat(price)) && parseFloat(price) > 0 : true);
+
+  const handleConfirm = () => {
+    onConfirm({
+      shares: parseFloat(shares),
+      price: parseFloat(price) || 0,
+      currency,
+      displayName: displayName.trim() || sym,
+    });
+  };
+
+  return (
+    <Modal transparent animationType="slide" onRequestClose={onSkip}>
+      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>
+        <Pressable style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.4)" }} onPress={onSkip} />
+        <View style={{ backgroundColor: colors.bg, padding: 24, paddingBottom: 40, borderTopWidth: 1, borderColor: colors.divider }}>
+          <Kicker style={{ marginBottom: 4 }}>更新持仓 · UPDATE HOLDINGS</Kicker>
+          <TSerifBold style={{ fontSize: 18, marginBottom: 4 }}>
+            {isBuy ? "买入" : "卖出"} {trade.stock}
+          </TSerifBold>
+          {existing ? (
+            <TMono style={{ fontSize: 11, color: colors.inkFaint, marginBottom: 16 }}>
+              当前持仓 {existing.shares} 股 · 均价 {existing.costBasis}
+            </TMono>
+          ) : isBuy ? (
+            <TMono style={{ fontSize: 11, color: colors.inkFaint, marginBottom: 16 }}>
+              持仓中未找到 {sym}，将新建
+            </TMono>
+          ) : (
+            <TMono style={{ fontSize: 11, color: colors.bad, marginBottom: 16 }}>
+              持仓中未找到 {sym}，无法更新
+            </TMono>
+          )}
+
+          {(!existing && isBuy) && (
+            <Field label="显示名称">
+              <PaperInput value={displayName} onChangeText={setDisplayName} placeholder={sym} />
+            </Field>
+          )}
+
+          <View style={{ flexDirection: "row", gap: 12 }}>
+            <View style={{ flex: 1 }}>
+              <Field label={isBuy ? "买入股数" : "卖出股数"}>
+                <PaperInput
+                  value={shares} onChangeText={setShares}
+                  placeholder="0"
+                  keyboardType="decimal-pad"
+                  style={{ fontFamily: fonts.mono, fontSize: 16 }}
+                />
+              </Field>
+            </View>
+            {isBuy && (
+              <View style={{ flex: 1 }}>
+                <Field label="成交价">
+                  <PaperInput
+                    value={price} onChangeText={setPrice}
+                    placeholder="0.00"
+                    keyboardType="decimal-pad"
+                    style={{ fontFamily: fonts.mono, fontSize: 16 }}
+                  />
+                </Field>
+              </View>
+            )}
+          </View>
+
+          {(!existing || isBuy) && (
+            <Field label="货币">
+              <View style={{ flexDirection: "row", gap: 6 }}>
+                {CURRENCIES.map((c) => (
+                  <Pressable key={c} onPress={() => setCurrency(c)}
+                    style={{ paddingHorizontal: 10, paddingVertical: 6,
+                      backgroundColor: currency === c ? colors.ink : "transparent",
+                      borderWidth: 1, borderColor: currency === c ? colors.ink : colors.divider }}>
+                    <TMono style={{ fontSize: 11, color: currency === c ? colors.bg : colors.inkMuted }}>{c}</TMono>
+                  </Pressable>
+                ))}
+              </View>
+            </Field>
+          )}
+
+          <View style={{ flexDirection: "row", gap: 10, marginTop: 8 }}>
+            <OutlineButton onPress={onSkip} style={{ flex: 1 }}>
+              跳过
+            </OutlineButton>
+            <FilledButton
+              onPress={handleConfirm}
+              disabled={!canConfirm || (!existing && !isBuy)}
+              style={{ flex: 2 }}
+            >
+              <Check size={14} color={colors.bg} />
+              <TSerifBold style={{ color: colors.bg, fontSize: 14 }}>确认更新持仓</TSerifBold>
+            </FilledButton>
+          </View>
+        </View>
+      </KeyboardAvoidingView>
+    </Modal>
   );
 }
