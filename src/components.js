@@ -1,6 +1,6 @@
 // components.js — shared UI primitives matching the editorial aesthetic.
 
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
 import {
   View, Text, Pressable, TextInput, ScrollView, ActivityIndicator,
   StyleSheet,
@@ -11,6 +11,7 @@ import {
 import { colors, fonts, spacing } from "./theme";
 import { MASTERS, getMaster } from "./constants";
 import { useSpeech } from "./voice";
+import { yahooSearch } from "./api";
 
 // ========== Typography ==========
 export const TSerif = ({ style, ...p }) => <Text {...p} style={[{ fontFamily: fonts.serif, color: colors.ink }, style]} />;
@@ -144,6 +145,76 @@ export const PaperInput = React.forwardRef(function PaperInput(
     />
   );
 });
+
+// ========== Stock symbol search input with Yahoo Finance autocomplete ==========
+export function StockSearchInput({ value, onChangeText, onSelect, placeholder, style }) {
+  const [results, setResults] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [open, setOpen] = useState(false);
+  const debounceRef = useRef(null);
+
+  const handleChange = (text) => {
+    onChangeText(text);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    if (!text.trim()) { setResults([]); setOpen(false); return; }
+    debounceRef.current = setTimeout(async () => {
+      setLoading(true);
+      try {
+        const r = await yahooSearch(text.trim());
+        setResults(r);
+        setOpen(r.length > 0);
+      } catch {
+        setResults([]);
+        setOpen(false);
+      } finally {
+        setLoading(false);
+      }
+    }, 400);
+  };
+
+  const pick = (item) => {
+    onChangeText(item.symbol);
+    onSelect?.(item.symbol, item.name);
+    setOpen(false);
+    setResults([]);
+  };
+
+  return (
+    <View>
+      <View style={{ flexDirection: "row", alignItems: "center" }}>
+        <PaperInput
+          value={value}
+          onChangeText={handleChange}
+          placeholder={placeholder}
+          autoCapitalize="characters"
+          style={[{ flex: 1 }, style]}
+        />
+        {loading && <ActivityIndicator size="small" color={colors.inkFaint} style={{ marginLeft: 8 }} />}
+      </View>
+      {open && (
+        <View style={{ borderWidth: 1, borderTopWidth: 0, borderColor: colors.divider, backgroundColor: colors.bgElev }}>
+          {results.map((r, i) => (
+            <Pressable
+              key={r.symbol}
+              onPress={() => pick(r)}
+              style={{
+                flexDirection: "row", justifyContent: "space-between", alignItems: "center",
+                paddingHorizontal: 10, paddingVertical: 9,
+                borderTopWidth: i === 0 ? 0 : 1, borderColor: colors.divider,
+              }}
+            >
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontFamily: fonts.monoMed, fontSize: 13, color: colors.ink }}>{r.symbol}</Text>
+                <Text style={{ fontFamily: fonts.serif, fontSize: 12, color: colors.inkMuted }} numberOfLines={1}>{r.name}</Text>
+              </View>
+              <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.inkFaint, marginLeft: 8 }}>{r.exch}</Text>
+            </Pressable>
+          ))}
+        </View>
+      )}
+    </View>
+  );
+}
 
 // ========== Master chips (horizontal selector) ==========
 export function MasterChips({ active, onSelect }) {

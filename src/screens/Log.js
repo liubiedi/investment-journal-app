@@ -21,7 +21,7 @@ import { parseTradeText, generateEntryFeedback } from "../api";
 import { useSpeech } from "../voice";
 import {
   TSerif, TSerifBold, TSerifItalic, TMono, Kicker,
-  PaperInput, FilledButton, OutlineButton, MasterChips, FeedbackBlock,
+  PaperInput, StockSearchInput, FilledButton, OutlineButton, MasterChips, FeedbackBlock,
   Masthead, FormHeader, Field, HR,
 } from "../components";
 
@@ -472,7 +472,13 @@ function TradeForm({ rules, onSave, onCancel }) {
       </Field>
 
       <Field label="STOCK · 标的">
-        <PaperInput value={stock} onChangeText={setStock} placeholder="AAPL / 腾讯 / BTC…" style={{ fontSize: 17 }} />
+        <StockSearchInput
+          value={stock}
+          onChangeText={setStock}
+          onSelect={(sym) => setStock(sym)}
+          placeholder="搜索名称或代码 · AAPL / 腾讯 / BTC…"
+          style={{ fontSize: 17 }}
+        />
       </Field>
 
       <Field label="DATE · 日期">
