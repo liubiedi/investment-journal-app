@@ -3,8 +3,9 @@ import React, { useState, useMemo } from "react";
 import { View, ScrollView, Pressable, ActivityIndicator } from "react-native";
 import { useSafeAreaInsets, SafeAreaView } from "react-native-safe-area-context";
 import {
-  Plus, RefreshCw, Loader2, Wallet, Trash2, ChevronLeft,
+  Plus, RefreshCw, Loader2, Wallet, Trash2, ChevronLeft, Calendar,
 } from "lucide-react-native";
+import DateTimePicker from "@react-native-community/datetimepicker";
 
 import { colors, fonts } from "../theme";
 import { useApp } from "../context";
@@ -181,6 +182,17 @@ export default function HoldingsScreen() {
   );
 }
 
+function todayISO() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function fmtBuyDate(iso) {
+  if (!iso) return "";
+  const [y, m, d] = iso.split("-");
+  return `${y}.${m}.${d}`;
+}
+
 function HoldingRow({ holding, price, onEdit }) {
   const cost = holding.shares * holding.costBasis;
   const hasLive = !!price;
@@ -204,6 +216,11 @@ function HoldingRow({ holding, price, onEdit }) {
           <TMono style={{ fontSize: 11, marginTop: 2, color: colors.inkMuted }}>
             {holding.shares} 股 · 成本 {fmtCurrency(holding.costBasis, ccy)}
           </TMono>
+          {holding.buyDate && (
+            <TMono style={{ fontSize: 10, marginTop: 1, color: colors.inkFaint }}>
+              买入 {fmtBuyDate(holding.buyDate)}
+            </TMono>
+          )}
         </View>
         <View style={{ alignItems: "flex-end" }}>
           {hasLive ? (
@@ -252,6 +269,8 @@ function HoldingForm({ initial, onSave, onCancel, onDelete }) {
   const [buyReason, setBuyReason] = useState(initial?.buyReason || "");
   const [notes, setNotes] = useState(initial?.notes || "");
   const [confirm, setConfirm] = useState(false);
+  const [buyDate, setBuyDate] = useState(initial?.buyDate || todayISO());
+  const [showDatePicker, setShowDatePicker] = useState(false);
 
   const canSave = symbol.trim() && parseFloat(shares) > 0 && parseFloat(costBasis) >= 0;
 
@@ -264,6 +283,7 @@ function HoldingForm({ initial, onSave, onCancel, onDelete }) {
       currency,
       buyReason: buyReason.trim(),
       notes: notes.trim(),
+      buyDate,
     });
   };
 
@@ -318,6 +338,33 @@ function HoldingForm({ initial, onSave, onCancel, onDelete }) {
             </Pressable>
           ))}
         </View>
+      </Field>
+
+      <Field label="BUY DATE · 买入时间">
+        <Pressable
+          onPress={() => setShowDatePicker(true)}
+          style={{
+            flexDirection: "row", alignItems: "center", gap: 10,
+            paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: colors.divider,
+          }}
+        >
+          <Calendar size={14} color={colors.accent} strokeWidth={1.5} />
+          <TSerif style={{ fontSize: 16, color: colors.ink }}>{fmtBuyDate(buyDate)}</TSerif>
+        </Pressable>
+        {showDatePicker && (
+          <DateTimePicker
+            value={new Date(buyDate + "T12:00:00")}
+            mode="date"
+            display="calendar"
+            onChange={(event, selectedDate) => {
+              setShowDatePicker(false);
+              if (event.type === "set" && selectedDate) {
+                const d = selectedDate;
+                setBuyDate(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`);
+              }
+            }}
+          />
+        )}
       </Field>
 
       <Field label="REASON TO BUY · 购买原因（可选）">

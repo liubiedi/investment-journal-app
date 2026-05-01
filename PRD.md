@@ -38,6 +38,7 @@ A personal, offline-first investment journaling Android app that combines struct
 | Fonts | **@expo-google-fonts/fraunces**, **@expo-google-fonts/jetbrains-mono** | Editorial serif + technical mono |
 | AI API | **DeepSeek API direct** (fetch, OpenAI-compatible) | No backend; BYOK model; cost-effective vs Anthropic |
 | Price Data | **Yahoo Finance public endpoints** (`query1.finance.yahoo.com/v8/finance/chart/`) | Free, no API key, global coverage |
+| Date Picker | **@react-native-community/datetimepicker** | Native Android calendar dialog; Expo SDK 54 / EAS compatible; no Modal wrapper needed |
 | Build | **EAS Build** (cloud) with APK profile | Produces installable `.apk` without local Android Studio |
 
 **Forbidden:**
@@ -121,6 +122,7 @@ CREATE TABLE holdings (
   currency TEXT,                 -- USD|CNY|HKD|SGD|EUR|JPY
   buy_reason TEXT,               -- investment thesis / why this position exists
   notes TEXT,
+  buy_date TEXT,                 -- YYYY-MM-DD; null for pre-feature holdings
   added_at INTEGER NOT NULL
 );
 
@@ -291,6 +293,7 @@ Sub-tab switcher: two full-width buttons at the top; active tab has ink backgrou
 - DISPLAY NAME (optional)
 - SHARES (numeric) + COST (numeric) — side by side
 - CURRENCY (chips: USD/CNY/HKD/SGD/EUR/JPY)
+- BUY DATE · 买入时间 — tappable date display (Calendar icon + formatted date); opens native Android calendar picker via `@react-native-community/datetimepicker`; defaults to today; stored as `YYYY-MM-DD` TEXT
 - REASON TO BUY · 购买原因 (multiline, optional) — investment thesis; included in mentor's investor profile context
 - NOTES (multiline, optional)
 
@@ -754,6 +757,7 @@ An implementation is correct if:
 18. ✅ Holdings "Reason to Buy" is included in the `<investor_profile>` context sent to mentor AI.
 19. ✅ Bottom nav shows exactly 5 tabs (心法 / 记录 / 持仓 / 复盘 / 问道); Settings is accessible only via the gear icon in the 心法 masthead.
 20. ✅ 复盘 tab contains two sub-tabs (周记 / 月评) switchable without losing unsaved text.
+21. ✅ HoldingForm shows a tappable BUY DATE field defaulting to today; tapping opens the Android native calendar picker; the selected date is displayed in the holding row as "买入 YYYY.MM.DD".
 
 ---
 
