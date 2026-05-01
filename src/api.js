@@ -87,6 +87,28 @@ async function callLLMStream({ system, messages, model = MODELS.smart, max_token
     throw new Error(`DeepSeek ${res.status}: ${txt.slice(0, 200)}`);
   }
 
+  function parseSSELines(text) {
+    let full = "";
+    for (const line of text.split("\n")) {
+      if (!line.startsWith("data: ")) continue;
+      const json = line.slice(6).trim();
+      if (!json || json === "[DONE]") continue;
+      try {
+        const evt = JSON.parse(json);
+        const chunk = evt.choices?.[0]?.delta?.content;
+        if (chunk) { full += chunk; onChunk?.(chunk); }
+      } catch { /* skip malformed lines */ }
+    }
+    return full;
+  }
+
+  // React Native's fetch does not expose res.body as a ReadableStream.
+  // Fall back to res.text() which still returns the complete SSE payload.
+  if (!res.body || typeof res.body.getReader !== "function") {
+    const text = await res.text();
+    return parseSSELines(text);
+  }
+
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let full = "";
@@ -97,7 +119,7 @@ async function callLLMStream({ system, messages, model = MODELS.smart, max_token
     if (done) break;
     buf += decoder.decode(value, { stream: true });
     const lines = buf.split("\n");
-    buf = lines.pop(); // keep incomplete last line
+    buf = lines.pop();
     for (const line of lines) {
       if (!line.startsWith("data: ")) continue;
       const json = line.slice(6).trim();
@@ -105,10 +127,7 @@ async function callLLMStream({ system, messages, model = MODELS.smart, max_token
       try {
         const evt = JSON.parse(json);
         const chunk = evt.choices?.[0]?.delta?.content;
-        if (chunk) {
-          full += chunk;
-          onChunk?.(chunk);
-        }
+        if (chunk) { full += chunk; onChunk?.(chunk); }
       } catch { /* skip malformed lines */ }
     }
   }

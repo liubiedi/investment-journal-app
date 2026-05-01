@@ -2,8 +2,8 @@
 
 ## 投资日志 · The Investor's Ledger
 
-**Version:** 1.0
-**Date:** 2026-04-20
+**Version:** 1.2
+**Date:** 2026-05-01
 **Format:** Android mobile application
 **Target:** AI coding agents (single-source-of-truth for autonomous implementation)
 
@@ -27,7 +27,7 @@ A personal, offline-first investment journaling Android app that combines struct
 
 | Layer | Choice | Rationale |
 |---|---|---|
-| Framework | **Expo SDK 51+ / React Native 0.74** | Enables APK build via EAS without Android Studio; cross-platform future-proof |
+| Framework | **Expo SDK 54 / React Native 0.81.5** | Enables APK build via EAS without Android Studio; cross-platform future-proof |
 | Language | **JavaScript (no TypeScript)** | Matches project style; lower cognitive overhead |
 | Database | **expo-sqlite** (async API) | Industry-standard mobile SQLite; works offline |
 | Secure Storage | **expo-secure-store** | For the DeepSeek API key only |
@@ -36,7 +36,7 @@ A personal, offline-first investment journaling Android app that combines struct
 | Voice Input (keyboard mic) | **System IME** (e.g., iFlytek 讯飞输入法) | Users with iFlytek IME installed can tap the keyboard's mic button on any TextInput — transcript is injected like normal typing. Zero integration work. |
 | Icons | **lucide-react-native** | Consistent icon set |
 | Fonts | **@expo-google-fonts/fraunces**, **@expo-google-fonts/jetbrains-mono** | Editorial serif + technical mono |
-| AI API | **DeepSeek API direct** (fetch) | No backend; BYOK model |
+| AI API | **DeepSeek API direct** (fetch, OpenAI-compatible) | No backend; BYOK model; cost-effective vs Anthropic |
 | Price Data | **Yahoo Finance public endpoints** (`query1.finance.yahoo.com/v8/finance/chart/`) | Free, no API key, global coverage |
 | Build | **EAS Build** (cloud) with APK profile | Produces installable `.apk` without local Android Studio |
 
@@ -53,18 +53,22 @@ A personal, offline-first investment journaling Android app that combines struct
 ```
 First Launch
     ↓
-[If no API key] → Home shows "API key 未配置" banner → Settings tab → paste key
+[If no API key] → Home shows "API key 未配置" banner → tap gear icon → Settings → paste key
     ↓
-Home (philosophy, rules, default mentor, stats)
+心法 (Home — philosophy, rules, default mentor, stats)
     ↓
-┌─────────────┬──────────────┬──────────────┬──────────────┬──────────────┬──────────────┐
-│    Weekly   │    Monthly   │      Log     │   Holdings   │    Mentor    │   Settings   │
-│             │              │              │              │              │              │
-│ weekly note │ 4-5 bullets  │ trades +     │ positions    │ chat with    │ API key,     │
-│ w/ voice    │ per month +  │ thoughts     │ w/ live      │ mentor (all  │ export,      │
-│             │ master view  │ w/ voice,    │ prices       │ context      │ about        │
-│             │              │ AI parsing   │ (Yahoo)      │ + caching)   │              │
-└─────────────┴──────────────┴──────────────┴──────────────┴──────────────┴──────────────┘
+┌─────────────┬──────────────┬──────────────────────────┬──────────────┐
+│    记录      │    持仓       │          复盘             │    问道       │
+│    Log      │  Holdings    │  Review (sub-tabs)        │   Mentor     │
+│             │              │ ┌──────────┬───────────┐  │              │
+│ trades +    │ positions    │ │  周记     │   月评    │  │ chat with    │
+│ thoughts    │ w/ live      │ │ weekly   │ monthly   │  │ mentor (all  │
+│ w/ voice,   │ prices       │ │ note     │ 4-5 pts + │  │ context +    │
+│ AI parsing  │ (Yahoo)      │ │ w/ voice │ AI view   │  │ caching)     │
+│             │              │ └──────────┴───────────┘  │              │
+└─────────────┴──────────────┴──────────────────────────┴──────────────┘
+                                          ↑
+              Settings (hidden — via ⚙ gear in 心法 masthead)
 ```
 
 ---
@@ -85,9 +89,12 @@ CREATE TABLE trades (
   id TEXT PRIMARY KEY,           -- trade_<timestamp>_<random>
   date TEXT NOT NULL,            -- ISO 8601
   action TEXT NOT NULL,          -- buy|sell|hold|watch
-  stock TEXT NOT NULL,
+  stock TEXT NOT NULL,           -- ticker symbol (e.g., AAPL, 0700.HK)
+  stock_name TEXT,               -- display name from Yahoo Finance autocomplete (e.g., "Apple Inc.")
   reason TEXT NOT NULL,
   emotion TEXT NOT NULL,         -- calm|confident|neutral|anxious|fearful
+  shares REAL,                   -- optional; used for holdings sync
+  cost_per_share REAL,           -- optional; used for holdings sync
   rules_checked TEXT,            -- JSON string[] of rule texts
   raw_input TEXT,                -- original voice/text before AI parsing (nullable)
   feedback TEXT,                 -- JSON [{masterId, text, createdAt}]
@@ -112,6 +119,7 @@ CREATE TABLE holdings (
   shares REAL NOT NULL,
   cost_basis REAL NOT NULL,      -- per-share cost
   currency TEXT,                 -- USD|CNY|HKD|EUR|JPY
+  buy_reason TEXT,               -- investment thesis / why this position exists
   notes TEXT,
   added_at INTEGER NOT NULL
 );
@@ -174,12 +182,12 @@ CREATE TABLE prices_meta (
 
 ## 5. Screen-by-Screen Specification
 
-### 5.1 Home (tab: 主页)
+### 5.1 Home (tab: 心法)
 
 **Layout top-to-bottom:**
 
-1. **Masthead**: "Vol. {year}" + today's date, then "The Investor's Ledger" (Fraunces serif, 32pt), then "私人投资日志 · Personal Journal" (italic).
-2. **API key warning banner** (conditional): Shows if no API key configured. Dark background (ink color), gold kicker "API KEY 未配置", with button "前往设置" linking to Settings tab.
+1. **Masthead**: "Vol. {year}" + today's date, then "The Investor's Ledger" (Fraunces serif, 32pt), then "私人投资日志 · Personal Journal" (italic). **Gear icon (⚙) in the top-right of the masthead navigates to the hidden Settings screen** (since Settings has no tab bar button).
+2. **API key warning banner** (conditional): Shows if no DeepSeek API key configured. Dark background (ink color), gold kicker "API KEY 未配置", with button pointing user to the gear icon to reach Settings.
 3. **Monthly review banner** (conditional): Shows only during the **last 7 days of the month** AND when current month has ≥ 1 trade AND no monthly review saved yet AND user hasn't dismissed this month's banner. Dark background, gold accents, "该写月评了" + count of trades, CTA "开始写月评" navigates to Monthly tab. Dismiss (X) persists to KV `reviewDismissed:<YYYY-MM>=true`.
 4. **Mentor shortcut card**: White card, "与投资导师对话" + "一位熟知你全部日志的 AI mentor", tap navigates to Mentor tab.
 5. **Section: My Investment Philosophy** (pin icon): One-sentence quote in italic serif, left border accent-colored. Tap to edit; supports multiline up to 3 rows.
@@ -187,7 +195,15 @@ CREATE TABLE prices_meta (
 7. **Section: Default Mentor**: Explanation italic "新条目需要点评时，默认请哪一位？", then horizontal scrollable chips of all 7 masters (see §6). Tap = set default.
 8. **Section: At a Glance**: 5-column grid of `Stat` components: 持仓 / 交易 / 心念 / 周记 / 月评 (counts).
 
-### 5.2 Weekly (tab: 周记)
+### 5.2 Review (tab: 复盘)
+
+**Container screen** (`src/screens/Review.js`) that hosts two sub-tabs:
+- **周记 Weekly** — left sub-tab (default)
+- **月评 Monthly** — right sub-tab
+
+Sub-tab switcher: two full-width buttons at the top; active tab has ink background + paper text. Tapping switches between the two child screens rendered below.
+
+### 5.2a Weekly (sub-tab of 复盘)
 
 **Features:**
 - Current ISO week shown with label + date range (e.g., "2026-W16 · 4.13 – 4.19").
@@ -200,7 +216,7 @@ CREATE TABLE prices_meta (
 - Load: `db.listWeeklyNotes()` on mount.
 - Save: `db.saveWeeklyNote(weekKey, text)`. Empty text deletes the row.
 
-### 5.3 Monthly (tab: 月评)
+### 5.3 Monthly (sub-tab of 复盘)
 
 **Features:**
 - Horizontal scrollable month selector at top (all months with trades or reviews, plus current month, sorted descending). Active month has ink background.
@@ -216,7 +232,7 @@ CREATE TABLE prices_meta (
 - Save bullets: `db.saveMonthlyReview(monthKey, filteredBullets)`.
 - Mentor cache: `db.getMonthlyMentor(monthKey, masterId)` / `db.setMonthlyMentor(monthKey, masterId, text)`.
 
-### 5.4 Log (tab: 记录)
+### 5.4 Log (tab: 记录, route: `log`)
 
 **Two sub-tabs**: 交易 Trades | 心念 Thoughts
 
@@ -239,12 +255,17 @@ CREATE TABLE prices_meta (
   - On tap: `parseTradeText(rawInput)` → populates form below.
 - Structured fields (always visible, smart mode fills them):
   - ACTION (4 buttons: buy/sell/hold/watch, colored)
-  - STOCK (serif input, 17pt)
+  - STOCK — `StockSearchInput` with Yahoo Finance autocomplete (debounced 400ms)
   - DATE (mono input, YYYY-MM-DD)
+  - SHARES + COST · 均价 (side by side, numeric, optional) — shown only for buy/sell actions; hidden and reset for hold/watch
   - REASON (multiline, min 100pt)
   - EMOTION (5 chips: calm/confident/neutral/anxious/fearful)
   - RULES CHECK (checkboxes of current rules)
 - Save button: "写入交易日志". Hint below: "在详情页可按需求教任一位导师点评".
+- **Holdings auto-sync on save (buy/sell only):** When saving a trade with shares + cost filled in:
+  - **BUY**: if symbol already in holdings → merge with weighted-average cost basis (`(old_shares × old_cost + new_shares × new_cost) / total`), update shares; if not in holdings → prompt user via Alert to add immediately, pre-filling buy_reason from trade reason.
+  - **SELL**: reduce shares from matching holding; if shares reach ≤ 0 → delete holding entirely.
+  - Precision: 8 decimal places (supports crypto). No action if shares/cost blank.
 
 **Thoughts sub-tab:**
 - "记下心念" button reveals ThoughtForm.
@@ -252,7 +273,7 @@ CREATE TABLE prices_meta (
 - Expanded: FeedbackBlock + delete.
 - ThoughtForm: header "把心里的纠结、疑问、直觉写/说出来。", large multiline input (160pt min) with voice, save button "记下".
 
-### 5.5 Holdings (tab: 持仓)
+### 5.5 Holdings (tab: 持仓, route: `holdings`)
 
 **Features:**
 - Masthead "当前持仓" + "What I own, at what cost, at what price."
@@ -266,13 +287,14 @@ CREATE TABLE prices_meta (
   - Tap opens HoldingForm in edit mode (with delete option).
 
 **HoldingForm fields:**
-- SYMBOL (serif input, hint about HK/A-share/crypto formatting)
+- SYMBOL — `StockSearchInput` with Yahoo Finance autocomplete (debounced 400ms); selecting a result auto-fills DISPLAY NAME. Hint: "AAPL / 0700.HK / 腾讯…"
 - DISPLAY NAME (optional)
 - SHARES (numeric) + COST (numeric) — side by side
 - CURRENCY (chips: USD/CNY/HKD/EUR/JPY)
+- REASON TO BUY · 购买原因 (multiline, optional) — investment thesis; included in mentor's investor profile context
 - NOTES (multiline, optional)
 
-### 5.6 Mentor (tab: 导师)
+### 5.6 Mentor (tab: 问道, route: `mentor`)
 
 **Features:**
 - Masthead "投资导师", subtitle showing sync status:
@@ -289,13 +311,15 @@ CREATE TABLE prices_meta (
 2. Call `chatMessage(history, text, profile, "default")` — internally trims to last 10 turns, uses cached system prompt.
 3. Append response via `db.appendChat("assistant", reply)`.
 
-### 5.7 Settings (tab: 设置)
+### 5.7 Settings (hidden screen, route: `settings`)
+
+Accessible via the ⚙ gear icon in the 心法 (Home) masthead. Not shown in the tab bar.
 
 **Sections:**
 1. **DeepSeek API Key**:
-   - Password-masked input. "保存" button calls `setApiKey(value)` (SecureStore).
+   - Password-masked input (`sk-…` format). "保存" button calls `setApiKey(value)` (SecureStore).
    - "清除" button for deletion.
-   - Link to DeepSeek platform.
+   - Link to `https://platform.deepseek.com/api_keys`.
 2. **语音输入 · Voice Input**:
    - Informational only (no toggles or credentials).
    - Hint: "为获得更好的中文语音识别，建议安装讯飞输入法或搜狗输入法。在任意输入框中，可以点击键盘上的麦克风按钮进行语音输入；或点击 App 内的麦克风图标快捷录入。"
@@ -339,18 +363,13 @@ All master prompts end with: "Match the user's language exactly (Chinese/English
 **Principle**: minimize API cost without degrading UX.
 
 ### 7.1 Model selection
-- **`deepseek-chat`** for `parseTradeText` — structured extraction only.
-- **`deepseek-v4-pro`** for all mentor output (feedback, chat, monthly commentary).
+- **`deepseek-v4-flash`** for `parseTradeText` — fast, cheap, structured extraction only.
+- **`deepseek-v4-pro`** for all mentor output (entry feedback, chat, monthly commentary, strategy report).
 
 ### 7.2 Prompt caching
-- Mentor system prompts rely on DeepSeek's automatic prefix caching:
-  ```js
-  system: [
-    { type: "text", text: persona },                                // uncached (small)
-    { type: "text", text: profileXml, cache_control: { type: "ephemeral" } }  // cached 5 min
-  ]
-  ```
-- The `<investor_profile>` block is the same across rapid calls → subsequent chat messages within 5 min re-use cache (~10% token cost on the cached portion).
+- DeepSeek handles KV caching automatically server-side based on prefix matching — no client-side `cache_control` annotations needed.
+- System prompt is built as a plain string: `persona + "\n\n" + <investor_profile>...</investor_profile>`.
+- The `<investor_profile>` block is identical across rapid calls → subsequent chat messages benefit from server-side prefix cache.
 
 ### 7.3 On-demand feedback
 - **Never auto-generate mentor feedback on trade/thought save.** User must tap to request per-master.
@@ -365,8 +384,8 @@ When building `<investor_profile>`:
 - Chat history: trim to last **10 turns** (5 exchanges) before sending.
 
 ### 7.5 Zero-token pricing
-- Never use the LLM for live prices. Use Yahoo directly.
-- Yahoo responses come back in ~200ms vs an LLM round-trip of 15-30s.
+- Never use Claude's web_search for prices. Use Yahoo directly.
+- Yahoo responses come back in ~200ms vs Claude's 15-30s.
 
 **Estimated daily-user cost: $1-3/month** (assumes 3-5 feedback requests per day, 20-30 chat messages, 1-2 monthly reports).
 
@@ -374,13 +393,14 @@ When building `<investor_profile>`:
 
 ## 8. External APIs
 
-### 8.1 DeepSeek API (OpenAI-compatible)
-- Endpoint: `https://api.deepseek.com/v1/chat/completions`
-- Headers: `Authorization: Bearer ${apiKey}`, `Content-Type: application/json`
-- Body: `{ model, max_tokens, messages: [{role, content}, ...], stream? }`
-- System prompt is sent as the first message with `role: "system"` (no separate field).
+### 8.1 DeepSeek API
+- Endpoint: `https://api.deepseek.com/chat/completions` (OpenAI-compatible)
+- Headers: `Authorization: Bearer <key>`, `Content-Type: application/json`
+- Body: `{ model, max_tokens, messages: [{ role: "system", content: system }, ...userMessages] }`
+- Response: `data.choices[0].message.content`
 - Key stored in `expo-secure-store` (key name: `deepseek_api_key`).
 - If no key: throw `Error("NO_API_KEY")` — UI catches and redirects to Settings.
+- **No `cache_control` blocks needed** — DeepSeek caches automatically on the server side.
 
 ### 8.2 Yahoo Finance
 - Endpoint: `https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval=1d&range=2d`
@@ -392,6 +412,12 @@ When building `<investor_profile>`:
   - `changePercent = (price - prevClose) / prevClose * 100`
   - `asOf = new Date(result.meta.regularMarketTime * 1000).toLocaleString()`
 - Parallel fetch with `Promise.allSettled` — failures omitted from output, don't crash.
+**Symbol search (autocomplete):**
+- Endpoint: `https://query1.finance.yahoo.com/v1/finance/search?q=<query>&quotesCount=5`
+- Returns `data.quotes[]` with `{ symbol, longname, shortname, exchange, quoteType }`.
+- Used in `StockSearchInput` component — debounced 400ms, min 2 chars, clears on unmount.
+- Available in both HoldingForm (Holdings tab) and TradeForm (Log tab).
+
 - Ticker conventions user must follow:
   - US stocks: `AAPL`, `TSLA`
   - HK stocks: `0700.HK`
@@ -463,23 +489,34 @@ cool:       "#3a5578"
 - `<FeedbackBlock feedback onRequestMaster pending defaultMaster>` — entry feedback with master switcher
 - `<VoiceMic currentText onChange size>` — microphone toggle button
 - `<FormHeader title onCancel>` — back + kicker row in forms
+- `<StockSearchInput value onChangeText onSelect placeholder style>` — PaperInput with Yahoo Finance autocomplete dropdown; debounced 400ms; fires `onSelect({ symbol, name, exch, type })` on pick; has clear (×) button
 - `<TSerif TSerifBold TSerifItalic TMono Kicker>` — typography primitives
 
 ### 9.4 Navigation bar
-- 7 tabs at bottom: 主页 / 周记 / 月评 / 记录 / 持仓 / 导师 / 设置
-- Each has a lucide icon (17px) + 9pt mono label
-- Active state: ink color with underline
-- Inactive: inkFaint
+
+**"修炼循环" — 5-tab practice loop** (as of v1.2):
+- 5 visible tabs: **心法** / **记录** / **持仓** / **复盘** / **问道**
+- Settings is hidden from the tab bar; accessible via gear icon (⚙) in the Home (心法) masthead.
+- Each visible tab has a lucide icon (20px) + 9pt mono label.
+- Active state: ink color. Inactive: inkFaint.
+
+| Tab label | Screen | Route name | Icon |
+|---|---|---|---|
+| 心法 | Home | `home` | `Anchor` |
+| 记录 | Log | `log` | `FileText` |
+| 持仓 | Holdings | `holdings` | `Briefcase` |
+| 复盘 | Review (sub-tabs: 周记 / 月评) | `review` | `RotateCcw` |
+| 问道 | Mentor | `mentor` | `MessageCircle` |
+| *(hidden)* | Settings | `settings` | — |
 
 ### 9.5 Icons
 Using `lucide-react-native`:
-- Home: `Compass`
-- Weekly: `BookOpen`
-- Monthly: `Sparkles`
-- Log: `FileText`
-- Holdings: `Briefcase`
-- Mentor: `MessageCircle`
-- Settings: `Settings`
+- 心法 (Home): `Anchor`
+- 记录 (Log): `FileText`
+- 持仓 (Holdings): `Briefcase`
+- 复盘 (Review): `RotateCcw`
+- 问道 (Mentor): `MessageCircle`
+- Settings (gear in Home masthead): `Settings`
 - Actions: `TrendingUp` (buy), `TrendingDown` (sell), `Eye` (hold), `Search` (watch)
 - Emotions: `Smile` (calm), `Zap` (confident), `Meh` (neutral), `Cloud` (anxious), `Frown` (fearful)
 - Misc: `Plus`, `X`, `Check`, `Trash2`, `Edit2`, `Pin`, `Quote`, `Wand2`, `Pencil`, `Mic`, `MicOff`, `Loader2`, `ChevronLeft`, `ChevronRight`, `AlertCircle`, `RefreshCw`, `Send`, `RotateCcw`, `HelpCircle`, `Lightbulb`
@@ -503,15 +540,17 @@ investment-journal-app/
 │   ├── db.js                       # SQLite schema + typed CRUD helpers
 │   ├── api.js                      # DeepSeek + Yahoo Finance
 │   ├── voice.js                    # useSpeech hook — wraps @react-native-voice/voice
+│   ├── context.js                  # AppCtx React context + useApp hook (avoids circular imports)
 │   ├── components.js               # shared UI primitives
 │   └── screens/
-│       ├── Home.js
-│       ├── Weekly.js
-│       ├── Monthly.js
-│       ├── Log.js                  # trades + thoughts (sub-tabs)
-│       ├── Holdings.js
-│       ├── Mentor.js
-│       └── Settings.js
+│       ├── Home.js                 # 心法 tab — philosophy, rules, mentor default, stats
+│       ├── Review.js               # 复盘 tab — sub-tab container for Weekly + Monthly
+│       ├── Weekly.js               # 周记 sub-tab (inside Review)
+│       ├── Monthly.js              # 月评 sub-tab (inside Review)
+│       ├── Log.js                  # 记录 tab — trades + thoughts (sub-tabs)
+│       ├── Holdings.js             # 持仓 tab
+│       ├── Mentor.js               # 问道 tab
+│       └── Settings.js             # hidden screen — accessible via gear icon in Home
 └── assets/
     ├── icon.png                    # 1024x1024, app icon
     └── splash.png                  # splash screen
@@ -629,8 +668,15 @@ useSpeech(onFinalText: (text: string) => void): {
 - P&L % is relative to cost basis in same currency.
 
 ### 12.6 Prompt cache staleness
-- When user edits philosophy, rules, or completes a trade, the system prefix changes — DeepSeek's prefix-cache automatically misses on the new content and starts a fresh cache for subsequent calls.
+- When user edits philosophy, rules, or completes a trade, the cached profile block becomes stale naturally (DeepSeek's server-side prefix cache is content-based). Next call will be a cache miss but re-cache.
 - Don't attempt manual invalidation.
+
+### 12.7 Holdings sync edge cases
+- Only triggers for `buy` / `sell` actions when `shares > 0`.
+- Weighted average formula: `(old_shares × old_cost + new_shares × new_cost) / (old_shares + new_shares)`.
+- Cost stored to 8 decimal places (`Math.round(x * 100000000) / 100000000`) to support crypto assets like 0.00001 BTC.
+- SELL with more shares than held: removes holding (set to 0 → delete), does not go negative.
+- Symbol matching is case-insensitive (normalized to uppercase before comparison).
 
 ---
 
@@ -702,6 +748,12 @@ An implementation is correct if:
 12. ✅ App works offline for all non-AI features (weekly, monthly bullets, manual trade entry, thought entry). Voice requires network only if the IME does (most do).
 13. ✅ Building via `eas build -p android --profile preview` produces an installable APK.
 14. ✅ No telemetry, no analytics, no external calls except to `api.deepseek.com` and `query1.finance.yahoo.com`.
+15. ✅ Searching "AAPL" in HoldingForm or TradeForm shows a Yahoo Finance autocomplete dropdown within 400ms.
+16. ✅ After logging a BUY trade (with shares + cost), the matching holding in Holdings tab is updated with weighted-average cost basis, or user is prompted to add the symbol if not tracked.
+17. ✅ After logging a SELL trade (with shares), the matching holding's share count decreases; reaching 0 removes the holding.
+18. ✅ Holdings "Reason to Buy" is included in the `<investor_profile>` context sent to mentor AI.
+19. ✅ Bottom nav shows exactly 5 tabs (心法 / 记录 / 持仓 / 复盘 / 问道); Settings is accessible only via the gear icon in the 心法 masthead.
+20. ✅ 复盘 tab contains two sub-tabs (周记 / 月评) switchable without losing unsaved text.
 
 ---
 
@@ -768,7 +820,7 @@ Investment Journal/                  ← user opens this as an Obsidian Vault
 1. Scaffold: `package.json`, `app.json`, `eas.json`, `babel.config.js`, `App.js` skeleton.
 2. `src/theme.js`, `src/constants.js`, `src/utils.js` — pure data, no deps.
 3. `src/db.js` — schema + all CRUD. Test by seeding sample data.
-4. `src/api.js` — DeepSeek + Yahoo. Test parseTradeText and fetchLivePrices independently.
+4. `src/api.js` — Claude + Yahoo. Test parseTradeText and fetchLivePrices independently.
 5. `src/voice.js` — wrap @react-native-voice/voice.
 6. `src/components.js` — shared UI primitives.
 7. `src/screens/Home.js` — verify fonts + state hookup.
@@ -791,7 +843,7 @@ See `src/constants.js` → `MASTER_STYLES` object. Each master gets a ~200-word 
 
 ## Appendix B: Sample AI Prompts
 
-### Trade parsing (deepseek-chat)
+### Trade parsing (deepseek-v4-flash)
 ```
 Parse this trade description into JSON. Return ONLY the JSON object — no markdown fences, no explanation.
 
@@ -808,9 +860,9 @@ Schema:
 Infer emotion from tone. Match input language exactly.
 ```
 
-### Entry feedback (deepseek-v4-pro)
+### Entry feedback (deepseek-v4-pro, server-side cached system)
 ```
-System (cached ephemeral):
+System (plain string, cached by DeepSeek prefix matching):
   [persona text]
   <investor_profile>...</investor_profile>
 

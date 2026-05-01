@@ -6,7 +6,7 @@ import {
   StyleSheet,
 } from "react-native";
 import {
-  Pin, Edit2, Plus, X, Check, Loader2, Mic, MicOff, Quote, Trash2, ChevronLeft,
+  Pin, Edit2, Plus, X, Check, Loader2, Mic, MicOff, Quote, Trash2, ChevronLeft, MessageCircle,
 } from "lucide-react-native";
 import { colors, fonts, spacing } from "./theme";
 import { MASTERS, getMaster } from "./constants";
@@ -254,23 +254,36 @@ export function MasterChips({ active, onSelect }) {
 // Props:
 //   feedback: [{ masterId, text, createdAt }]
 //   onRequestMaster: (masterId, onChunk) => Promise<void>
-export function FeedbackBlock({ feedback, onRequestMaster, pending = false, defaultMaster = "default" }) {
+//   onContinueInMentor: (masterId, text) => void  — optional, shows "带入问道" button
+export function FeedbackBlock({ feedback, onRequestMaster, pending = false, defaultMaster = "default", onContinueInMentor }) {
   const [activeMaster, setActiveMaster] = useState(feedback?.[0]?.masterId || defaultMaster);
   const [loadingMaster, setLoadingMaster] = useState(null);
   const [streamingText, setStreamingText] = useState("");
   const [error, setError] = useState(null);
-  const current = feedback?.find((f) => f.masterId === activeMaster);
+  // Local cache so text is visible immediately after generation even before the
+  // feedback prop re-renders (the finallyblock cleared streamingText too early).
+  const [localCache, setLocalCache] = useState({});
+  const streamAccumRef = useRef("");
+
+  const current = feedback?.find((f) => f.masterId === activeMaster)
+    ?? (localCache[activeMaster] ? { text: localCache[activeMaster] } : null);
 
   const handleSelect = async (masterId) => {
     setActiveMaster(masterId);
     setError(null);
-    if (!feedback?.find((f) => f.masterId === masterId)) {
+    const alreadyHave = feedback?.find((f) => f.masterId === masterId) || localCache[masterId];
+    if (!alreadyHave) {
       setLoadingMaster(masterId);
+      streamAccumRef.current = "";
       setStreamingText("");
       try {
         await onRequestMaster(masterId, (chunk) => {
+          streamAccumRef.current += chunk;
           setStreamingText((prev) => prev + chunk);
         });
+        if (streamAccumRef.current) {
+          setLocalCache((prev) => ({ ...prev, [masterId]: streamAccumRef.current }));
+        }
       } catch (e) {
         setError(e.message === "NO_API_KEY" ? "请先在设置中配置 API key" : "导师暂时失联，点击重试");
       } finally {
@@ -281,7 +294,6 @@ export function FeedbackBlock({ feedback, onRequestMaster, pending = false, defa
   };
 
   const isLoading = loadingMaster === activeMaster || (pending && activeMaster === "default" && !current);
-  // While streaming, show accumulated text immediately (even before save completes)
   const displayText = isLoading && streamingText ? streamingText : null;
 
   return (
@@ -310,7 +322,18 @@ export function FeedbackBlock({ feedback, onRequestMaster, pending = false, defa
             <TSerifItalic style={{ fontSize: 12 }}>{getMaster(activeMaster).zh}正在思考…</TSerifItalic>
           </View>
         ) : current ? (
-          <TSerif style={{ fontSize: 14, lineHeight: 22 }}>{current.text}</TSerif>
+          <>
+            <TSerif style={{ fontSize: 14, lineHeight: 22 }}>{current.text}</TSerif>
+            {onContinueInMentor && (
+              <Pressable
+                onPress={() => onContinueInMentor(activeMaster, current.text)}
+                style={{ marginTop: 10, flexDirection: "row", alignItems: "center", gap: 5 }}
+              >
+                <MessageCircle size={10} color={colors.accent} />
+                <TMono style={{ fontSize: 10, color: colors.accent }}>带入问道继续讨论 ↗</TMono>
+              </Pressable>
+            )}
+          </>
         ) : (
           <Pressable onPress={() => handleSelect(activeMaster)}>
             <TSerifItalic style={{ fontSize: 12 }}>点击上方 {getMaster(activeMaster).zh} 以获取点评</TSerifItalic>

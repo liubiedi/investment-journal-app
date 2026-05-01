@@ -1,9 +1,9 @@
 // Home screen — philosophy, rules, default mentor, stats
 import React, { useState, useEffect } from "react";
 import { View, ScrollView, Pressable } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useSafeAreaInsets, SafeAreaView } from "react-native-safe-area-context";
 import { useNavigation } from "@react-navigation/native";
-import { MessageCircle, ChevronRight, Sparkles, X, Edit2, Plus, Trash2 } from "lucide-react-native";
+import { MessageCircle, ChevronRight, Sparkles, X, Edit2, Plus, Trash2, Settings as SettingsIcon } from "lucide-react-native";
 
 import { useApp } from "../context";
 import { colors, fonts } from "../theme";
@@ -26,22 +26,30 @@ export default function HomeScreen() {
   const showReviewBanner = isLastWeekOfMonth() && currentMonthTrades.length > 0 && !hasCurrentReview && !reviewDismissed;
 
   return (
+    <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }} edges={["top"]}>
     <ScrollView
-      style={{ flex: 1, backgroundColor: colors.bg }}
+      style={{ flex: 1 }}
       contentContainerStyle={{ paddingBottom: 40 + insets.bottom }}
     >
       <Masthead
         kicker={`VOL. ${new Date().getFullYear()}`}
         title={"The Investor's\nLedger"}
         subtitle="私人投资日志 · Personal Journal"
-        right={<Kicker style={{ fontSize: 9, letterSpacing: 3 }}>{fmtDate(new Date().toISOString())}</Kicker>}
+        right={
+          <View style={{ alignItems: "flex-end", gap: 8 }}>
+            <Pressable onPress={() => nav.navigate("settings")} hitSlop={12}>
+              <SettingsIcon size={18} color={colors.inkFaint} />
+            </Pressable>
+            <Kicker style={{ fontSize: 9, letterSpacing: 3 }}>{fmtDate(new Date().toISOString())}</Kicker>
+          </View>
+        }
       />
 
       {!app.apiKeyPresent && (
         <View style={{ marginHorizontal: 20, marginTop: 16, padding: 14, backgroundColor: colors.ink }}>
           <Kicker color={colors.accent}>API KEY 未配置</Kicker>
           <TSerif style={{ color: colors.bg, fontSize: 14, marginTop: 4, lineHeight: 20 }}>
-            AI 导师功能需要 DeepSeek API key。前往"设置"tab 配置。
+            AI 导师功能需要 DeepSeek API key。点击右上角齿轮图标配置。
           </TSerif>
           <Pressable onPress={() => nav.navigate("settings")}
             style={{ marginTop: 10, paddingVertical: 8, backgroundColor: colors.accent, alignItems: "center" }}>
@@ -124,6 +132,7 @@ export default function HomeScreen() {
         </View>
       </Section>
     </ScrollView>
+    </SafeAreaView>
   );
 }
 

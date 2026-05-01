@@ -1,7 +1,7 @@
 // Settings screen — API key, voice hint, export, about, danger zone
 import React, { useState, useEffect } from "react";
 import { View, ScrollView, Pressable, Alert, Linking } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useSafeAreaInsets, SafeAreaView } from "react-native-safe-area-context";
 import {
   Key, Mic, Download, Info, Trash2, ExternalLink, Check, Loader2, FileText, BookMarked,
 } from "lucide-react-native";
@@ -131,8 +131,9 @@ export default function SettingsScreen() {
   };
 
   return (
+    <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }} edges={["top"]}>
     <ScrollView
-      style={{ flex: 1, backgroundColor: colors.bg }}
+      style={{ flex: 1 }}
       contentContainerStyle={{ paddingBottom: 40 + insets.bottom }}
     >
       <Masthead kicker="SETTINGS" title="设置" subtitle="配置 · 导出 · 关于" />
@@ -354,5 +355,6 @@ export default function SettingsScreen() {
         </Pressable>
       </Section>
     </ScrollView>
+    </SafeAreaView>
   );
 }
