@@ -1,5 +1,5 @@
 // Mentor screen — chat with AI mentor. Auto-refreshes prices on mount if stale.
-import React, { useState, useEffect, useMemo, useRef } from "react";
+import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import {
   View, ScrollView, Pressable, ActivityIndicator, KeyboardAvoidingView, Platform, TextInput,
 } from "react-native";
@@ -7,6 +7,7 @@ import { useSafeAreaInsets, SafeAreaView } from "react-native-safe-area-context"
 import {
   MessageCircle, Send, RotateCcw, Loader2, AlertCircle, Mic, MicOff,
 } from "lucide-react-native";
+import { useFocusEffect } from "@react-navigation/native";
 
 import { colors, fonts } from "../theme";
 import { useApp } from "../context";
@@ -32,13 +33,13 @@ export default function MentorScreen() {
   const scrollRef = useRef(null);
   const { listening, supported, start, stop } = useSpeech(setInput);
 
-  // Load chat history on mount
-  useEffect(() => {
-    (async () => {
-      const h = await db.listChat();
-      setHistory(h);
-    })();
-  }, []);
+  // Reload chat history each time the screen comes into focus so that
+  // entries written by "带入问道" from the Log screen appear immediately.
+  useFocusEffect(
+    useCallback(() => {
+      db.listChat().then((h) => setHistory(h));
+    }, [])
+  );
 
   // Auto price refresh on mount if stale
   useEffect(() => {

@@ -5,6 +5,7 @@
 import React, { useState } from "react";
 import { View, ScrollView, Pressable, ActivityIndicator, Modal, KeyboardAvoidingView, Platform } from "react-native";
 import { useSafeAreaInsets, SafeAreaView } from "react-native-safe-area-context";
+import { useNavigation } from "@react-navigation/native";
 import {
   TrendingUp, TrendingDown, Eye, Search,
   Smile, Meh, Frown, Zap, Cloud,
@@ -19,6 +20,7 @@ import { ACTIONS, EMOTIONS, getAction, getEmotion } from "../constants";
 import { fmtDate } from "../utils";
 import { parseTradeText, generateEntryFeedback } from "../api";
 import { useSpeech } from "../voice";
+import * as db from "../db";
 import {
   TSerif, TSerifBold, TSerifItalic, TMono, Kicker,
   PaperInput, StockSearchInput, FilledButton, OutlineButton, MasterChips, FeedbackBlock,
@@ -207,11 +209,20 @@ function EmptyState({ icon, text, hint }) {
 
 // ============================================================
 function TradeRow({ trade, onDelete, onUpdate, onRequestFeedback, defaultMaster }) {
+  const nav = useNavigation();
   const [expanded, setExpanded] = useState(false);
   const [confirm, setConfirm] = useState(false);
   const [editing, setEditing] = useState(false);
   const [draftReason, setDraftReason] = useState(trade.reason);
   const [draftEmotion, setDraftEmotion] = useState(trade.emotion);
+
+  const handleContinueInMentor = async (masterId, feedbackText) => {
+    const { getMaster } = require("../constants");
+    const master = getMaster(masterId);
+    await db.appendChat("user", `我想继续讨论 ${master.zh} 对我这笔交易的点评。\n\n【${trade.action.toUpperCase()}】${trade.stock}\n情绪：${trade.emotion} · 理由：${trade.reason}`);
+    await db.appendChat("assistant", feedbackText);
+    nav.navigate("mentor");
+  };
   const action = getAction(trade.action);
   const emotion = getEmotion(trade.emotion);
   const AIcon = ACTION_ICONS[trade.action] || TrendingUp;
@@ -319,6 +330,7 @@ function TradeRow({ trade, onDelete, onUpdate, onRequestFeedback, defaultMaster 
               feedback={trade.feedback}
               onRequestMaster={onRequestFeedback}
               defaultMaster={defaultMaster}
+              onContinueInMentor={handleContinueInMentor}
             />
           )}
 
@@ -350,11 +362,20 @@ function TradeRow({ trade, onDelete, onUpdate, onRequestFeedback, defaultMaster 
 
 // ============================================================
 function ThoughtRow({ thought, onDelete, onUpdate, onRequestFeedback, defaultMaster }) {
+  const nav = useNavigation();
   const [expanded, setExpanded] = useState(false);
   const [confirm, setConfirm] = useState(false);
   const [editing, setEditing] = useState(false);
   const [draftContent, setDraftContent] = useState(thought.content);
   const hasFeedback = thought.feedback?.length > 0;
+
+  const handleContinueInMentor = async (masterId, feedbackText) => {
+    const { getMaster } = require("../constants");
+    const master = getMaster(masterId);
+    await db.appendChat("user", `我想继续讨论 ${master.zh} 对我这段心念的回应。\n\n心念：${thought.content}`);
+    await db.appendChat("assistant", feedbackText);
+    nav.navigate("mentor");
+  };
 
   return (
     <View style={{ paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: colors.dividerSoft }}>
@@ -403,6 +424,7 @@ function ThoughtRow({ thought, onDelete, onUpdate, onRequestFeedback, defaultMas
               feedback={thought.feedback}
               onRequestMaster={onRequestFeedback}
               defaultMaster={defaultMaster}
+              onContinueInMentor={handleContinueInMentor}
             />
           )}
 
