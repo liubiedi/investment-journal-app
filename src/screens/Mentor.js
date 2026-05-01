@@ -124,7 +124,7 @@ export default function MentorScreen() {
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
       {/* Header */}
       <View style={{
-        paddingHorizontal: 20, paddingTop: 24, paddingBottom: 14,
+        paddingHorizontal: 20, paddingTop: 24 + insets.top, paddingBottom: 14,
         borderBottomWidth: 1, borderBottomColor: colors.divider,
       }}>
         <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>

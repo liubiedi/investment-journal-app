@@ -40,6 +40,7 @@ export default function LogScreen() {
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
       <ScrollView contentContainerStyle={{ paddingBottom: 40 + insets.bottom }}>
         <Masthead
+          topInset={insets.top}
           kicker="LOG"
           title="记录"
           subtitle="Write before you trade. Think out loud."

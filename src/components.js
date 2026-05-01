@@ -349,10 +349,10 @@ export const HR = ({ soft }) => (
 );
 
 // ========== Page header (masthead) ==========
-export function Masthead({ kicker, title, subtitle, right }) {
+export function Masthead({ kicker, title, subtitle, right, topInset = 0 }) {
   return (
     <View style={{
-      paddingHorizontal: 20, paddingTop: 28, paddingBottom: 18,
+      paddingHorizontal: 20, paddingTop: 28 + topInset, paddingBottom: 18,
       borderBottomWidth: 2, borderBottomColor: colors.ink,
       backgroundColor: colors.bg,
     }}>

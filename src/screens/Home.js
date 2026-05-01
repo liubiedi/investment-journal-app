@@ -31,6 +31,7 @@ export default function HomeScreen() {
       contentContainerStyle={{ paddingBottom: 40 + insets.bottom }}
     >
       <Masthead
+        topInset={insets.top}
         kicker={`VOL. ${new Date().getFullYear()}`}
         title={"The Investor's\nLedger"}
         subtitle="私人投资日志 · Personal Journal"

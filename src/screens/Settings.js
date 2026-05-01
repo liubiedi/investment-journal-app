@@ -135,7 +135,7 @@ export default function SettingsScreen() {
       style={{ flex: 1, backgroundColor: colors.bg }}
       contentContainerStyle={{ paddingBottom: 40 + insets.bottom }}
     >
-      <Masthead kicker="SETTINGS" title="设置" subtitle="配置 · 导出 · 关于" />
+      <Masthead topInset={insets.top} kicker="SETTINGS" title="设置" subtitle="配置 · 导出 · 关于" />
 
       {/* API Key */}
       <Section label="DeepSeek API Key" sub="AI 导师功能所需">

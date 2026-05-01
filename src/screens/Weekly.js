@@ -27,7 +27,7 @@ export default function WeeklyScreen() {
       style={{ flex: 1, backgroundColor: colors.bg }}
       contentContainerStyle={{ paddingBottom: 40 + insets.bottom }}
     >
-      <Masthead kicker="WEEKLY" title="周记" subtitle="一周一行，只写最重要的一件事" />
+      <Masthead topInset={insets.top} kicker="WEEKLY" title="周记" subtitle="一周一行，只写最重要的一件事" />
 
       <View style={{ paddingHorizontal: 20, paddingTop: 24 }}>
         <View style={{ flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 10 }}>

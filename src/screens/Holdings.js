@@ -59,6 +59,7 @@ export default function HoldingsScreen() {
       contentContainerStyle={{ paddingBottom: 40 + insets.bottom }}
     >
       <Masthead
+        topInset={insets.top}
         kicker="HOLDINGS"
         title="当前持仓"
         subtitle="What I own, at what cost, at what price."
