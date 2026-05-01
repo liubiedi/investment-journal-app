@@ -101,6 +101,8 @@ async function initSchema(db) {
   // Migrations for existing databases (idempotent — fails silently if column exists).
   try { await db.runAsync("ALTER TABLE holdings ADD COLUMN buy_reason TEXT"); } catch {}
   try { await db.runAsync("ALTER TABLE holdings ADD COLUMN buy_date TEXT"); } catch {}
+  try { await db.runAsync("ALTER TABLE chat_history ADD COLUMN master_id TEXT"); } catch {}
+  try { await db.runAsync("ALTER TABLE trades ADD COLUMN stock_name TEXT"); } catch {}
 }
 
 const newId = (prefix) => `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -321,15 +323,17 @@ export async function listMonthlyMentorMasters(monthKey) {
 // ---------- chat_history ----------
 export async function listChat() {
   const db = await getDb();
-  const rows = await db.getAllAsync("SELECT role, content FROM chat_history ORDER BY id ASC");
-  return rows;
+  const rows = await db.getAllAsync(
+    "SELECT role, content, master_id, created_at FROM chat_history ORDER BY id ASC"
+  );
+  return rows.map((r) => ({ role: r.role, content: r.content, masterId: r.master_id || "default", createdAt: r.created_at }));
 }
 
-export async function appendChat(role, content) {
+export async function appendChat(role, content, masterId = "default") {
   const db = await getDb();
   await db.runAsync(
-    "INSERT INTO chat_history (role, content, created_at) VALUES (?,?,?)",
-    [role, content, Date.now()]
+    "INSERT INTO chat_history (role, content, master_id, created_at) VALUES (?,?,?,?)",
+    [role, content, masterId, Date.now()]
   );
 }
 

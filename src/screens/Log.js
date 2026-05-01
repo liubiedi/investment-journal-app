@@ -3,23 +3,24 @@
 // User must tap "求教 xx" to request feedback from a specific master.
 
 import React, { useState } from "react";
-import { View, ScrollView, Pressable, ActivityIndicator, Modal, KeyboardAvoidingView, Platform } from "react-native";
+import { View, ScrollView, Pressable, ActivityIndicator, Modal, KeyboardAvoidingView, Platform, Alert } from "react-native";
 import { useSafeAreaInsets, SafeAreaView } from "react-native-safe-area-context";
 import { useNavigation } from "@react-navigation/native";
 import {
   TrendingUp, TrendingDown, Eye, Search,
   Smile, Meh, Frown, Zap, Cloud,
   FileText, Lightbulb, HelpCircle, Quote,
-  Plus, Wand2, Pencil, Mic, MicOff,
+  Plus, Wand2, Pencil, Calendar,
   Check, Trash2, ChevronLeft, Sparkles, Loader2,
 } from "lucide-react-native";
+import DateTimePicker from "@react-native-community/datetimepicker";
+import * as ExpoCalendar from "expo-calendar";
 
 import { colors, fonts } from "../theme";
 import { useApp } from "../context";
 import { ACTIONS, EMOTIONS, getAction, getEmotion } from "../constants";
 import { fmtDate } from "../utils";
 import { parseTradeText, generateEntryFeedback } from "../api";
-import { useSpeech } from "../voice";
 import * as db from "../db";
 import {
   TSerif, TSerifBold, TSerifItalic, TMono, Kicker,
@@ -29,6 +30,33 @@ import {
 
 // Name -> icon lookup (RN can't import by name string dynamically)
 const ACTION_ICONS = { buy: TrendingUp, sell: TrendingDown, hold: Eye, watch: Search };
+
+async function addTradeToCalendar(trade) {
+  try {
+    const { status } = await ExpoCalendar.requestCalendarPermissionsAsync();
+    if (status !== "granted") {
+      Alert.alert("权限不足", "请在系统设置中允许访问日历。");
+      return;
+    }
+    const calendars = await ExpoCalendar.getCalendarsAsync(ExpoCalendar.EntityTypes.EVENT);
+    const writable = calendars.find((c) => c.allowsModifications);
+    if (!writable) { Alert.alert("未找到可写日历"); return; }
+    const tradeDate = new Date(trade.date);
+    tradeDate.setHours(9, 0, 0, 0);
+    const endDate = new Date(tradeDate.getTime() + 60 * 60 * 1000);
+    await ExpoCalendar.createEventAsync(writable.id, {
+      title: `📈 ${trade.action === "buy" ? "买入" : trade.action === "sell" ? "卖出" : "关注"} ${trade.stock}`,
+      notes: trade.reason || "",
+      startDate: tradeDate,
+      endDate,
+      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      alarms: [{ relativeOffset: -60 }],
+    });
+    Alert.alert("已添加到日历", `${trade.stock} 交易计划已加入你的日程表。`);
+  } catch (e) {
+    Alert.alert("日历写入失败", e.message || String(e));
+  }
+}
 const EMOTION_ICONS = { calm: Smile, confident: Zap, neutral: Meh, anxious: Cloud, fearful: Frown };
 
 export default function LogScreen() {
@@ -55,7 +83,7 @@ export default function LogScreen() {
           <View style={{ flexDirection: "row", padding: 4, backgroundColor: colors.bgMuted, gap: 4 }}>
             <SubTabButton active={subTab === "trades"} onPress={() => { setSubTab("trades"); setAdding(false); }}
               icon={<FileText size={12} color={subTab === "trades" ? colors.bg : colors.inkMuted} />}
-              label="交易 Trades" />
+              label="交易计划 Trade Plan" />
             <SubTabButton active={subTab === "thoughts"} onPress={() => { setSubTab("thoughts"); setAdding(false); }}
               icon={<Lightbulb size={12} color={subTab === "thoughts" ? colors.bg : colors.inkMuted} />}
               label="心念 Thoughts" />
@@ -89,6 +117,18 @@ export default function LogScreen() {
               setAdding(false);
               if (t.action === "buy" || t.action === "sell") {
                 setHoldingPrompt({ trade: saved });
+              }
+              const tradeDate = new Date(t.date);
+              const isFuture = tradeDate > new Date();
+              if (isFuture) {
+                Alert.alert(
+                  "添加到日历？",
+                  `此交易计划（${t.stock}）的日期在未来，是否加入日程表提醒？`,
+                  [
+                    { text: "跳过", style: "cancel" },
+                    { text: "添加日程提醒", onPress: () => addTradeToCalendar(saved || t) },
+                  ]
+                );
               }
             }}
             onCancel={() => setAdding(false)}
@@ -463,13 +503,12 @@ function TradeForm({ rules, onSave, onCancel }) {
   const [reason, setReason] = useState("");
   const [emotion, setEmotion] = useState("calm");
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [showDatePicker, setShowDatePicker] = useState(false);
   const [rulesChecked, setRulesChecked] = useState([]);
   const [rawInput, setRawInput] = useState("");
   const [parsing, setParsing] = useState(false);
   const [parsed, setParsed] = useState(false);
   const [error, setError] = useState("");
-
-  const { listening, supported, start, stop } = useSpeech(setRawInput);
 
   const generate = async () => {
     if (!rawInput.trim()) return;
@@ -512,14 +551,8 @@ function TradeForm({ rules, onSave, onCancel }) {
 
       {mode === "smart" && (
         <View style={{ marginBottom: 24, padding: 14, backgroundColor: colors.bgElev, borderWidth: 1, borderColor: colors.accent, borderStyle: "dashed" }}>
-          <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-            <Kicker>语音或文字 · 说说你做了什么</Kicker>
-            {listening && (
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: colors.bad }} />
-                <TMono style={{ color: colors.bad, fontSize: 10 }}>LISTENING</TMono>
-              </View>
-            )}
+          <View style={{ marginBottom: 8 }}>
+            <Kicker>用文字描述你的交易</Kicker>
           </View>
           <PaperInput
             multiline value={rawInput} onChangeText={setRawInput}
@@ -527,18 +560,6 @@ function TradeForm({ rules, onSave, onCancel }) {
             style={{ minHeight: 90, fontSize: 15, borderWidth: 0 }}
           />
           <View style={{ flexDirection: "row", gap: 8, marginTop: 12 }}>
-            {supported && (
-              <Pressable onPress={() => listening ? stop() : start(rawInput)}
-                style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6,
-                  paddingHorizontal: 14, paddingVertical: 10,
-                  backgroundColor: listening ? colors.bad : "transparent",
-                  borderWidth: listening ? 0 : 1, borderColor: colors.divider }}>
-                {listening ? <MicOff size={12} color={colors.bg} /> : <Mic size={12} color={colors.ink} />}
-                <TMono style={{ fontSize: 11, color: listening ? colors.bg : colors.ink, fontWeight: "500" }}>
-                  {listening ? "停止" : "语音"}
-                </TMono>
-              </Pressable>
-            )}
             <Pressable onPress={generate} disabled={!rawInput.trim() || parsing}
               style={{ flex: 1, paddingVertical: 10, backgroundColor: colors.accent,
                 flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6,
@@ -590,8 +611,35 @@ function TradeForm({ rules, onSave, onCancel }) {
       </Field>
 
       <Field label="DATE · 日期">
-        <PaperInput value={date} onChangeText={setDate} placeholder="YYYY-MM-DD"
-          style={{ fontFamily: fonts.mono, fontSize: 14 }} />
+        <Pressable
+          onPress={() => setShowDatePicker(true)}
+          style={{
+            flexDirection: "row", alignItems: "center", gap: 10,
+            paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: colors.divider,
+          }}
+        >
+          <Calendar size={14} color={colors.accent} strokeWidth={1.5} />
+          <View style={{ flex: 1 }}>
+            <TMono style={{ fontSize: 14, color: colors.ink }}>{date}</TMono>
+            {new Date(date) > new Date() && (
+              <TMono style={{ fontSize: 10, color: colors.warn, marginTop: 2 }}>未来日期 · 可加入日历提醒</TMono>
+            )}
+          </View>
+        </Pressable>
+        {showDatePicker && (
+          <DateTimePicker
+            value={new Date(date + "T12:00:00")}
+            mode="date"
+            display={Platform.OS === "ios" ? "inline" : "calendar"}
+            onChange={(event, selectedDate) => {
+              setShowDatePicker(false);
+              if (event.type === "set" && selectedDate) {
+                const d = selectedDate;
+                setDate(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`);
+              }
+            }}
+          />
+        )}
       </Field>
 
       <Field label="REASON · 为什么">
@@ -665,7 +713,6 @@ function TradeForm({ rules, onSave, onCancel }) {
 // ============================================================
 function ThoughtForm({ onSave, onCancel }) {
   const [text, setText] = useState("");
-  const { listening, supported, start, stop } = useSpeech(setText);
   const [saving, setSaving] = useState(false);
 
   return (
@@ -677,14 +724,8 @@ function ThoughtForm({ onSave, onCancel }) {
       </TSerifItalic>
 
       <View style={{ marginBottom: 12 }}>
-        <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+        <View style={{ marginBottom: 8 }}>
           <Kicker>MY THOUGHT · 我的心念</Kicker>
-          {listening && (
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-              <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: colors.bad }} />
-              <TMono style={{ color: colors.bad, fontSize: 10 }}>LISTENING</TMono>
-            </View>
-          )}
         </View>
         <PaperInput multiline autoFocus value={text} onChangeText={setText}
           placeholder="例：我现在在纠结要不要加仓苹果。一方面业绩扎实，另一方面占比已经快 30%，违反我自己的规则…"
@@ -692,17 +733,6 @@ function ThoughtForm({ onSave, onCancel }) {
       </View>
 
       <View style={{ flexDirection: "row", gap: 8 }}>
-        {supported && (
-          <Pressable onPress={() => listening ? stop() : start(text)}
-            style={{ paddingHorizontal: 16, paddingVertical: 10, flexDirection: "row", alignItems: "center", gap: 6,
-              backgroundColor: listening ? colors.bad : "transparent",
-              borderWidth: listening ? 0 : 1, borderColor: colors.divider }}>
-            {listening ? <MicOff size={12} color={colors.bg} /> : <Mic size={12} color={colors.ink} />}
-            <TMono style={{ fontSize: 11, color: listening ? colors.bg : colors.ink, fontWeight: "500" }}>
-              {listening ? "停止" : "语音输入"}
-            </TMono>
-          </Pressable>
-        )}
         <FilledButton
           onPress={async () => { setSaving(true); try { await onSave(text.trim(), text.trim()); } finally { setSaving(false); } }}
           disabled={!text.trim() || saving}

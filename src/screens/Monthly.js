@@ -12,7 +12,7 @@ import { generateMonthlyCommentary } from "../api";
 import * as db from "../db";
 import {
   TSerif, TSerifBold, TSerifItalic, TMono, Kicker,
-  PaperInput, FilledButton, Masthead, MasterChips, VoiceMic, HR,
+  PaperInput, FilledButton, Masthead, MasterChips, HR,
 } from "../components";
 
 export default function MonthlyScreen() {
@@ -120,11 +120,6 @@ function MonthlyEditor({ month, initial, trades, onSave, hasReview, profile, def
               placeholder={["最成功的一笔决策？", "最想重来的一笔？", "这个月学到了什么？", "下月要改什么？", "其他观察…"][i]}
               style={{ flex: 1, minHeight: 60, fontSize: 15 }}
             />
-            <View style={{ marginTop: 4 }}>
-              <VoiceMic currentText={b} onChange={(v) => {
-                const next = [...draft]; next[i] = v; setDraft(next);
-              }} />
-            </View>
           </View>
         ))}
         {draft.length < 5 && (

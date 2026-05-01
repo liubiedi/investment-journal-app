@@ -2,8 +2,9 @@
 import React, { useState, useMemo } from "react";
 import { View, ScrollView, Pressable, ActivityIndicator, Platform } from "react-native";
 import { useSafeAreaInsets, SafeAreaView } from "react-native-safe-area-context";
+import { useNavigation } from "@react-navigation/native";
 import {
-  Plus, RefreshCw, Loader2, Wallet, Trash2, ChevronLeft, Calendar,
+  Plus, RefreshCw, Loader2, Wallet, Trash2, ChevronLeft, Calendar, MessageCircle,
 } from "lucide-react-native";
 import DateTimePicker from "@react-native-community/datetimepicker";
 
@@ -11,6 +12,7 @@ import { colors, fonts } from "../theme";
 import { useApp } from "../context";
 import { fmtCurrency, ago } from "../utils";
 import { fetchLivePrices } from "../api";
+import * as db from "../db";
 import {
   TSerif, TSerifBold, TSerifItalic, TMono, Kicker,
   PaperInput, StockSearchInput, FilledButton, OutlineButton, Masthead, FormHeader, Field,
@@ -18,7 +20,20 @@ import {
 
 export default function HoldingsScreen() {
   const app = useApp();
+  const nav = useNavigation();
   const insets = useSafeAreaInsets();
+
+  const askMentor = async (h, price) => {
+    const ccy = h.currency || price?.currency || "";
+    const lines = [`我想聊聊持仓中的 ${h.displayName || h.symbol}（${h.symbol}）：`];
+    lines.push(`• 持有 ${h.shares} 股，成本 ${fmtCurrency(h.costBasis, ccy)}`);
+    if (price) lines.push(`• 当前价 ${fmtCurrency(price.price, price.currency)}，今日 ${price.changePercent >= 0 ? "+" : ""}${price.changePercent?.toFixed(2) ?? "?"}%`);
+    if (h.buyDate) lines.push(`• 买入时间：${h.buyDate}`);
+    if (h.buyReason) lines.push(`• 买入理由：${h.buyReason}`);
+    lines.push("请帮我分析一下这个持仓的现状，值得继续持有吗？");
+    await db.appendChat("user", lines.join("\n"));
+    nav.navigate("mentor");
+  };
   const [adding, setAdding] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -173,7 +188,8 @@ export default function HoldingsScreen() {
             />
           ) : (
             <HoldingRow key={h.id} holding={h} price={app.prices?.data?.[h.symbol]}
-              onEdit={() => setEditingId(h.id)} />
+              onEdit={() => setEditingId(h.id)}
+              onAskMentor={() => askMentor(h, app.prices?.data?.[h.symbol])} />
           )
         ))}
       </View>
@@ -193,7 +209,7 @@ function fmtBuyDate(iso) {
   return `${y}.${m}.${d}`;
 }
 
-function HoldingRow({ holding, price, onEdit }) {
+function HoldingRow({ holding, price, onEdit, onAskMentor }) {
   const cost = holding.shares * holding.costBasis;
   const hasLive = !!price;
   const market = hasLive ? holding.shares * price.price : cost;
@@ -256,6 +272,11 @@ function HoldingRow({ holding, price, onEdit }) {
           {price.asOf}{price.resolvedTicker && price.resolvedTicker !== holding.symbol ? ` · ${price.resolvedTicker}` : ""}
         </TMono>
       )}
+      <Pressable onPress={(e) => { e.stopPropagation?.(); onAskMentor?.(); }}
+        style={{ marginTop: 8, flexDirection: "row", alignItems: "center", gap: 5, alignSelf: "flex-start" }}>
+        <MessageCircle size={11} color={colors.accent} strokeWidth={1.5} />
+        <TMono style={{ fontSize: 10, color: colors.accent }}>带入问道 ↗</TMono>
+      </Pressable>
     </Pressable>
   );
 }

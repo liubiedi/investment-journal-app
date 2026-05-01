@@ -1,13 +1,16 @@
 // Home screen — philosophy, rules, default mentor, stats
-import React, { useState, useEffect } from "react";
-import { View, ScrollView, Pressable } from "react-native";
+import React, { useState } from "react";
+import { View, ScrollView, Pressable, Alert } from "react-native";
 import { useSafeAreaInsets, SafeAreaView } from "react-native-safe-area-context";
 import { useNavigation } from "@react-navigation/native";
-import { MessageCircle, ChevronRight, Sparkles, X, Edit2, Plus, Trash2, Settings as SettingsIcon } from "lucide-react-native";
+import { MessageCircle, ChevronRight, Sparkles, X, Edit2, Plus, Settings as SettingsIcon, FileText, Share2 } from "lucide-react-native";
+import * as Print from "expo-print";
+import * as Sharing from "expo-sharing";
 
 import { useApp } from "../context";
 import { colors, fonts } from "../theme";
 import { monthKey, isLastWeekOfMonth, fmtDate } from "../utils";
+import { generateStrategyReport } from "../api";
 import {
   TSerif, TSerifBold, TSerifItalic, TMono, Kicker,
   Section, Stat, PaperInput, FilledButton, OutlineButton, MasterChips,
@@ -24,6 +27,48 @@ export default function HomeScreen() {
   const hasCurrentReview = !!app.monthlyReviews[current];
   const [reviewDismissed, setReviewDismissed] = useState(false);
   const showReviewBanner = isLastWeekOfMonth() && currentMonthTrades.length > 0 && !hasCurrentReview && !reviewDismissed;
+
+  const [strategyReport, setStrategyReport] = useState(null);
+  const [generatingReport, setGeneratingReport] = useState(false);
+  const [reportError, setReportError] = useState("");
+  const [exportingPdf, setExportingPdf] = useState(false);
+
+  const handleGenerateReport = async () => {
+    setGeneratingReport(true); setReportError("");
+    try {
+      const report = await generateStrategyReport(app.profile);
+      setStrategyReport(report);
+    } catch (e) {
+      setReportError(e.message === "NO_API_KEY" ? "请先在设置中配置 API key" : "生成失败：" + (e.message || String(e)));
+    } finally {
+      setGeneratingReport(false);
+    }
+  };
+
+  const handleExportPdf = async () => {
+    if (!strategyReport) return;
+    setExportingPdf(true);
+    try {
+      const body = strategyReport.replace(/^---[\s\S]*?---\n*/, "");
+      const html = `<!DOCTYPE html><html><head><meta charset="utf-8">
+        <style>body{font-family:Georgia,serif;padding:48px;max-width:720px;margin:0 auto;font-size:15px;line-height:1.7;color:#1a1a1a}
+        h1,h2,h3{font-weight:bold;margin-top:1.5em}pre,code{font-family:monospace;font-size:13px}
+        </style></head><body>
+        <h1>投资策略报告 · Strategy Profile</h1>
+        <pre style="white-space:pre-wrap;font-family:Georgia,serif;font-size:15px;line-height:1.7">${body}</pre>
+        </body></html>`;
+      const { uri } = await Print.printToFileAsync({ html, base64: false });
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(uri, { mimeType: "application/pdf", dialogTitle: "导出策略报告 PDF" });
+      } else {
+        Alert.alert("已生成 PDF", uri);
+      }
+    } catch (e) {
+      Alert.alert("导出失败", e.message || String(e));
+    } finally {
+      setExportingPdf(false);
+    }
+  };
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }} edges={["top"]}>
@@ -130,6 +175,54 @@ export default function HomeScreen() {
           <Stat value={Object.keys(app.weeklyNotes).length} label="周记" />
           <Stat value={Object.keys(app.monthlyReviews).length} label="月评" />
         </View>
+      </Section>
+
+      <Section label="投资策略报告 · Strategy Profile" sub="AI 分析你的完整日志">
+        <TSerif style={{ fontSize: 13, lineHeight: 22, color: colors.inkSoft, marginBottom: 12 }}>
+          基于你的全部交易、月评、周记与规则，AI 生成一份诚实的策略画像——写明你实际在做什么、情绪模式、规则执行情况、核心盲点，以及未来 6 个月改进重点。
+        </TSerif>
+
+        {app.trades.length < 5 && (
+          <View style={{ padding: 10, marginBottom: 12, backgroundColor: colors.bgMuted, borderWidth: 1, borderColor: colors.divider }}>
+            <TSerifItalic style={{ fontSize: 12, color: colors.inkMuted }}>
+              至少记录 5 笔交易后，策略报告才有意义。目前有 {app.trades.length} 笔。
+            </TSerifItalic>
+          </View>
+        )}
+
+        {strategyReport && (
+          <View style={{ marginBottom: 14, padding: 14, backgroundColor: colors.bgCard, borderWidth: 1, borderColor: colors.dividerSoft }}>
+            <TSerif style={{ fontSize: 14, lineHeight: 24, color: colors.ink }}>
+              {strategyReport.replace(/^---[\s\S]*?---\n*/, "")}
+            </TSerif>
+          </View>
+        )}
+
+        {reportError ? (
+          <TMono style={{ color: colors.bad, fontSize: 11, marginBottom: 10 }}>{reportError}</TMono>
+        ) : null}
+
+        <FilledButton
+          onPress={handleGenerateReport}
+          disabled={generatingReport || app.trades.length === 0}
+          loading={generatingReport}
+          style={{ marginBottom: strategyReport ? 10 : 0 }}
+        >
+          <TSerifBold style={{ color: colors.bg, fontSize: 14 }}>
+            {generatingReport ? "AI 分析中…（约 30-60 秒）" : strategyReport ? "重新生成报告" : "生成我的投资策略报告"}
+          </TSerifBold>
+        </FilledButton>
+
+        {strategyReport && (
+          <OutlineButton onPress={handleExportPdf} disabled={exportingPdf} loading={exportingPdf}>
+            <Share2 size={13} color={colors.ink} />
+            <TSerif style={{ fontSize: 13, color: colors.ink }}>{exportingPdf ? "生成 PDF 中…" : "导出 PDF"}</TSerif>
+          </OutlineButton>
+        )}
+
+        <TSerifItalic style={{ fontSize: 11, marginTop: 8, color: colors.inkMuted }}>
+          约 $0.05-0.10 / 次。读取全量日志，生成结构化报告。
+        </TSerifItalic>
       </Section>
     </ScrollView>
     </SafeAreaView>

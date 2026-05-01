@@ -44,7 +44,13 @@
           "speechRecognitionPermission": "This app uses speech recognition to convert your spoken journal entries to text."
         }
       ],
-      "@react-native-community/datetimepicker"
+      "@react-native-community/datetimepicker",
+      [
+        "expo-calendar",
+        {
+          "calendarPermission": "Allow 投资日志 to access your calendar to create trade reminders."
+        }
+      ]
     ],
     "extra": {
       "eas": {
