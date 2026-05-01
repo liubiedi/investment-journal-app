@@ -2,7 +2,7 @@
 //
 // Token economy principles:
 //   1. DeepSeek auto-caches request prefixes server-side (no client cache_control)
-//   2. deepseek-chat for structured extraction; deepseek-v4-pro for nuanced mentor advice
+//   2. deepseek-chat for structured extraction; deepseek-reasoner for nuanced mentor advice
 //   3. Context trimming — only send what's relevant for the call
 //   4. Yahoo Finance directly, not through any LLM web_search
 //
@@ -15,11 +15,11 @@ import { monthLabel } from "./utils";
 const DEEPSEEK_URL = "https://api.deepseek.com/v1/chat/completions";
 
 // Current models (as of Apr 2026).
-// deepseek-v4-flash is the cheap/fast tier — good for parsing.
-// deepseek-v4-pro is the flagship — used for mentor reasoning.
+// deepseek-chat = DeepSeek-V3 — fast/cheap, good for parsing.
+// deepseek-reasoner = DeepSeek-R1 — flagship reasoning model for mentor advice.
 const MODELS = {
-  fast: "deepseek-v4-flash",
-  smart: "deepseek-v4-pro",
+  fast: "deepseek-chat",
+  smart: "deepseek-reasoner",
 };
 
 // ========== API key management ==========
