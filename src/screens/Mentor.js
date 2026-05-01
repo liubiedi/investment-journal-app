@@ -13,7 +13,7 @@ import { colors, fonts } from "../theme";
 import { useApp } from "../context";
 import { ago } from "../utils";
 import { chatMessage, fetchLivePrices } from "../api";
-import { MASTERS, getMaster } from "../constants";
+import { getMaster } from "../constants";
 import * as db from "../db";
 import {
   TSerif, TSerifBold, TSerifItalic, TMono, Kicker, PaperInput, MasterChips,

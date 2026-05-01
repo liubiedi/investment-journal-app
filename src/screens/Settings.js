@@ -74,7 +74,7 @@ export default function SettingsScreen() {
     setExportingVault(true); setExportResult("");
     try {
       const result = await exportToObsidianVault(app.profile, null);
-      setExportResult(`✓ 已生成 ${result.fileCount} 个文件${strategyReport ? "（含策略报告）" : ""}`);
+      setExportResult(`✓ 已生成 ${result.fileCount} 个文件`);
     } catch (e) {
       setExportResult("导出失败：" + (e.message || String(e)));
     } finally {

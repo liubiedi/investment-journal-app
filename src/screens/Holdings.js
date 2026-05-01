@@ -272,7 +272,7 @@ function HoldingRow({ holding, price, onEdit, onAskMentor }) {
           {price.asOf}{price.resolvedTicker && price.resolvedTicker !== holding.symbol ? ` · ${price.resolvedTicker}` : ""}
         </TMono>
       )}
-      <Pressable onPress={(e) => { e.stopPropagation?.(); onAskMentor?.(); }}
+      <Pressable onPress={() => onAskMentor?.()}
         style={{ marginTop: 8, flexDirection: "row", alignItems: "center", gap: 5, alignSelf: "flex-start" }}>
         <MessageCircle size={11} color={colors.accent} strokeWidth={1.5} />
         <TMono style={{ fontSize: 10, color: colors.accent }}>带入问道 ↗</TMono>

@@ -1,9 +1,9 @@
 // Home screen — philosophy, rules, default mentor, stats
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { View, ScrollView, Pressable, Alert } from "react-native";
 import { useSafeAreaInsets, SafeAreaView } from "react-native-safe-area-context";
 import { useNavigation } from "@react-navigation/native";
-import { MessageCircle, ChevronRight, Sparkles, X, Edit2, Plus, Settings as SettingsIcon, FileText, Share2 } from "lucide-react-native";
+import { MessageCircle, ChevronRight, Sparkles, X, Edit2, Plus, Settings as SettingsIcon, Share2 } from "lucide-react-native";
 import * as Print from "expo-print";
 import * as Sharing from "expo-sharing";
 
@@ -214,7 +214,7 @@ export default function HomeScreen() {
         </FilledButton>
 
         {strategyReport && (
-          <OutlineButton onPress={handleExportPdf} disabled={exportingPdf} loading={exportingPdf}>
+          <OutlineButton onPress={handleExportPdf} disabled={exportingPdf}>
             <Share2 size={13} color={colors.ink} />
             <TSerif style={{ fontSize: 13, color: colors.ink }}>{exportingPdf ? "生成 PDF 中…" : "导出 PDF"}</TSerif>
           </OutlineButton>
