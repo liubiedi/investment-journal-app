@@ -125,6 +125,10 @@ export default function App() {
     await db.deleteTrade(id);
     setTrades((prev) => prev.filter((t) => t.id !== id));
   }, []);
+  const updateTradeById = useCallback(async (id, fields) => {
+    await db.updateTrade(id, fields);
+    setTrades((prev) => prev.map((t) => t.id === id ? { ...t, ...fields } : t));
+  }, []);
   const updateTradeFeedback = useCallback(async (id, feedbackArr) => {
     await db.updateTradeFeedback(id, feedbackArr);
     setTrades((prev) => prev.map((t) => t.id === id ? { ...t, feedback: feedbackArr } : t));
@@ -139,6 +143,10 @@ export default function App() {
   const deleteThoughtById = useCallback(async (id) => {
     await db.deleteThought(id);
     setThoughts((prev) => prev.filter((t) => t.id !== id));
+  }, []);
+  const updateThoughtById = useCallback(async (id, content) => {
+    await db.updateThought(id, content);
+    setThoughts((prev) => prev.map((t) => t.id === id ? { ...t, content } : t));
   }, []);
   const updateThoughtFeedback = useCallback(async (id, feedbackArr) => {
     await db.updateThoughtFeedback(id, feedbackArr);
@@ -183,8 +191,8 @@ export default function App() {
     // handlers
     savePhilosophy, saveRules, saveDefaultMaster,
     saveWeekly, saveMonthly,
-    addTrade, deleteTradeById, updateTradeFeedback,
-    addThought, deleteThoughtById, updateThoughtFeedback,
+    addTrade, deleteTradeById, updateTradeById, updateTradeFeedback,
+    addThought, deleteThoughtById, updateThoughtById, updateThoughtFeedback,
     addHolding, updateHoldingById, deleteHoldingById,
     savePricesData,
   };

@@ -109,6 +109,7 @@ export default function LogScreen() {
               {app.trades.map((t) => (
                 <TradeRow key={t.id} trade={t}
                   onDelete={() => app.deleteTradeById(t.id)}
+                  onUpdate={(fields) => app.updateTradeById(t.id, fields)}
                   onRequestFeedback={async (masterId, onChunk) => {
                     const text = await generateEntryFeedback(t, "trade", masterId, app.profile, onChunk);
                     const current = app.trades.find(x => x.id === t.id);
@@ -129,6 +130,7 @@ export default function LogScreen() {
               {app.thoughts.map((t) => (
                 <ThoughtRow key={t.id} thought={t}
                   onDelete={() => app.deleteThoughtById(t.id)}
+                  onUpdate={(content) => app.updateThoughtById(t.id, content)}
                   onRequestFeedback={async (masterId, onChunk) => {
                     const text = await generateEntryFeedback(t, "thought", masterId, app.profile, onChunk);
                     const current = app.thoughts.find(x => x.id === t.id);
@@ -204,9 +206,12 @@ function EmptyState({ icon, text, hint }) {
 }
 
 // ============================================================
-function TradeRow({ trade, onDelete, onRequestFeedback, defaultMaster }) {
+function TradeRow({ trade, onDelete, onUpdate, onRequestFeedback, defaultMaster }) {
   const [expanded, setExpanded] = useState(false);
   const [confirm, setConfirm] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [draftReason, setDraftReason] = useState(trade.reason);
+  const [draftEmotion, setDraftEmotion] = useState(trade.emotion);
   const action = getAction(trade.action);
   const emotion = getEmotion(trade.emotion);
   const AIcon = ACTION_ICONS[trade.action] || TrendingUp;
@@ -273,14 +278,59 @@ function TradeRow({ trade, onDelete, onRequestFeedback, defaultMaster }) {
             </View>
           )}
 
-          <FeedbackBlock
-            feedback={trade.feedback}
-            onRequestMaster={onRequestFeedback}
-            defaultMaster={defaultMaster}
-          />
+          {editing ? (
+            <View style={{ marginTop: 12 }}>
+              <Kicker style={{ marginBottom: 6 }}>EDIT · 修改</Kicker>
+              <PaperInput
+                multiline
+                value={draftReason}
+                onChangeText={setDraftReason}
+                placeholder="交易理由…"
+                style={{ minHeight: 70, fontSize: 14, marginBottom: 10 }}
+              />
+              <Kicker style={{ marginBottom: 6 }}>EMOTION · 情绪</Kicker>
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
+                {EMOTIONS.map((e) => {
+                  const EI = EMOTION_ICONS[e.id] || Meh;
+                  const active = draftEmotion === e.id;
+                  return (
+                    <Pressable key={e.id} onPress={() => setDraftEmotion(e.id)}
+                      style={{ flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 6,
+                        borderWidth: 1, borderColor: active ? e.color : colors.divider,
+                        backgroundColor: active ? colors.bgElev : "transparent" }}>
+                      <EI size={11} color={e.color} />
+                      <TMono style={{ fontSize: 10, color: active ? e.color : colors.inkMuted }}>{e.label.toUpperCase()}</TMono>
+                    </Pressable>
+                  );
+                })}
+              </View>
+              <View style={{ flexDirection: "row", gap: 10 }}>
+                <Pressable onPress={() => { onUpdate({ reason: draftReason, emotion: draftEmotion }); setEditing(false); }}
+                  style={{ paddingHorizontal: 14, paddingVertical: 7, backgroundColor: colors.ink }}>
+                  <TMono style={{ fontSize: 10, color: colors.bg, fontWeight: "600" }}>SAVE</TMono>
+                </Pressable>
+                <Pressable onPress={() => { setDraftReason(trade.reason); setDraftEmotion(trade.emotion); setEditing(false); }}>
+                  <TMono style={{ fontSize: 10, marginTop: 7 }}>CANCEL</TMono>
+                </Pressable>
+              </View>
+            </View>
+          ) : (
+            <FeedbackBlock
+              feedback={trade.feedback}
+              onRequestMaster={onRequestFeedback}
+              defaultMaster={defaultMaster}
+            />
+          )}
 
-          <View style={{ marginTop: 12 }}>
-            {confirm ? (
+          <View style={{ marginTop: 12, flexDirection: "row", gap: 16, alignItems: "center" }}>
+            {!editing && (
+              <Pressable onPress={() => { setEditing(true); setConfirm(false); }}
+                style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                <Pencil size={10} color={colors.inkFaint} />
+                <TMono style={{ fontSize: 10 }}>EDIT</TMono>
+              </Pressable>
+            )}
+            {!editing && (confirm ? (
               <View style={{ flexDirection: "row", gap: 12 }}>
                 <Pressable onPress={onDelete}><TMono style={{ color: colors.bad, fontSize: 10, fontWeight: "600" }}>CONFIRM DELETE</TMono></Pressable>
                 <Pressable onPress={() => setConfirm(false)}><TMono style={{ fontSize: 10 }}>CANCEL</TMono></Pressable>
@@ -290,7 +340,7 @@ function TradeRow({ trade, onDelete, onRequestFeedback, defaultMaster }) {
                 <Trash2 size={10} color={colors.inkFaint} />
                 <TMono style={{ fontSize: 10 }}>DELETE</TMono>
               </Pressable>
-            )}
+            ))}
           </View>
         </View>
       )}
@@ -299,9 +349,11 @@ function TradeRow({ trade, onDelete, onRequestFeedback, defaultMaster }) {
 }
 
 // ============================================================
-function ThoughtRow({ thought, onDelete, onRequestFeedback, defaultMaster }) {
+function ThoughtRow({ thought, onDelete, onUpdate, onRequestFeedback, defaultMaster }) {
   const [expanded, setExpanded] = useState(false);
   const [confirm, setConfirm] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [draftContent, setDraftContent] = useState(thought.content);
   const hasFeedback = thought.feedback?.length > 0;
 
   return (
@@ -326,14 +378,43 @@ function ThoughtRow({ thought, onDelete, onRequestFeedback, defaultMaster }) {
 
       {expanded && (
         <View style={{ marginTop: 12, marginLeft: 80, paddingTop: 12, borderTopWidth: 1, borderTopColor: colors.dividerSoft }}>
-          <FeedbackBlock
-            feedback={thought.feedback}
-            onRequestMaster={onRequestFeedback}
-            defaultMaster={defaultMaster}
-          />
+          {editing ? (
+            <View>
+              <Kicker style={{ marginBottom: 6 }}>EDIT · 修改</Kicker>
+              <PaperInput
+                multiline autoFocus
+                value={draftContent}
+                onChangeText={setDraftContent}
+                placeholder="心念内容…"
+                style={{ minHeight: 80, fontSize: 14, marginBottom: 10 }}
+              />
+              <View style={{ flexDirection: "row", gap: 10 }}>
+                <Pressable onPress={() => { onUpdate(draftContent); setEditing(false); }}
+                  style={{ paddingHorizontal: 14, paddingVertical: 7, backgroundColor: colors.ink }}>
+                  <TMono style={{ fontSize: 10, color: colors.bg, fontWeight: "600" }}>SAVE</TMono>
+                </Pressable>
+                <Pressable onPress={() => { setDraftContent(thought.content); setEditing(false); }}>
+                  <TMono style={{ fontSize: 10, marginTop: 7 }}>CANCEL</TMono>
+                </Pressable>
+              </View>
+            </View>
+          ) : (
+            <FeedbackBlock
+              feedback={thought.feedback}
+              onRequestMaster={onRequestFeedback}
+              defaultMaster={defaultMaster}
+            />
+          )}
 
-          <View style={{ marginTop: 12 }}>
-            {confirm ? (
+          <View style={{ marginTop: 12, flexDirection: "row", gap: 16, alignItems: "center" }}>
+            {!editing && (
+              <Pressable onPress={() => { setEditing(true); setConfirm(false); }}
+                style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                <Pencil size={10} color={colors.inkFaint} />
+                <TMono style={{ fontSize: 10 }}>EDIT</TMono>
+              </Pressable>
+            )}
+            {!editing && (confirm ? (
               <View style={{ flexDirection: "row", gap: 12 }}>
                 <Pressable onPress={onDelete}><TMono style={{ color: colors.bad, fontSize: 10, fontWeight: "600" }}>CONFIRM DELETE</TMono></Pressable>
                 <Pressable onPress={() => setConfirm(false)}><TMono style={{ fontSize: 10 }}>CANCEL</TMono></Pressable>
@@ -343,7 +424,7 @@ function ThoughtRow({ thought, onDelete, onRequestFeedback, defaultMaster }) {
                 <Trash2 size={10} color={colors.inkFaint} />
                 <TMono style={{ fontSize: 10 }}>DELETE</TMono>
               </Pressable>
-            )}
+            ))}
           </View>
         </View>
       )}

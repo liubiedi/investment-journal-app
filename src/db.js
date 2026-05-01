@@ -145,6 +145,17 @@ export async function addTrade(t) {
   return { ...t, id, feedback: [] };
 }
 
+export async function updateTrade(id, fields) {
+  const db = await getDb();
+  const allowed = ["reason", "emotion", "stock", "action", "date"];
+  const keys = Object.keys(fields).filter((k) => allowed.includes(k));
+  if (keys.length === 0) return;
+  await db.runAsync(
+    `UPDATE trades SET ${keys.map((k) => `${k} = ?`).join(", ")} WHERE id = ?`,
+    [...keys.map((k) => fields[k]), id]
+  );
+}
+
 export async function updateTradeFeedback(id, feedback) {
   const db = await getDb();
   await db.runAsync("UPDATE trades SET feedback = ? WHERE id = ?", [JSON.stringify(feedback), id]);
@@ -186,6 +197,11 @@ export async function addThought(content, rawInput) {
     [id, date, content, rawInput || null, JSON.stringify([]), now]
   );
   return { id, date, content, rawInput, feedback: [] };
+}
+
+export async function updateThought(id, content) {
+  const db = await getDb();
+  await db.runAsync("UPDATE thoughts SET content = ? WHERE id = ?", [content, id]);
 }
 
 export async function updateThoughtFeedback(id, feedback) {
