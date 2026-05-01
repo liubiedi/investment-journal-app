@@ -4,7 +4,7 @@
 
 import React, { useState } from "react";
 import { View, ScrollView, Pressable, ActivityIndicator, Modal, KeyboardAvoidingView, Platform } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useSafeAreaInsets, SafeAreaView } from "react-native-safe-area-context";
 import {
   TrendingUp, TrendingDown, Eye, Search,
   Smile, Meh, Frown, Zap, Cloud,
@@ -37,10 +37,9 @@ export default function LogScreen() {
   const [holdingPrompt, setHoldingPrompt] = useState(null); // { trade }
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.bg }}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }} edges={["top"]}>
       <ScrollView contentContainerStyle={{ paddingBottom: 40 + insets.bottom }}>
         <Masthead
-          topInset={insets.top}
           kicker="LOG"
           title="记录"
           subtitle="Write before you trade. Think out loud."
@@ -176,7 +175,7 @@ export default function LogScreen() {
           onSkip={() => setHoldingPrompt(null)}
         />
       )}
-    </View>
+    </SafeAreaView>
   );
 }
 

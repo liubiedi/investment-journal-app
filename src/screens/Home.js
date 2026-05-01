@@ -1,7 +1,7 @@
 // Home screen — philosophy, rules, default mentor, stats
 import React, { useState, useEffect } from "react";
 import { View, ScrollView, Pressable } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useSafeAreaInsets, SafeAreaView } from "react-native-safe-area-context";
 import { useNavigation } from "@react-navigation/native";
 import { MessageCircle, ChevronRight, Sparkles, X, Edit2, Plus, Trash2, Settings as SettingsIcon } from "lucide-react-native";
 
@@ -26,12 +26,12 @@ export default function HomeScreen() {
   const showReviewBanner = isLastWeekOfMonth() && currentMonthTrades.length > 0 && !hasCurrentReview && !reviewDismissed;
 
   return (
+    <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }} edges={["top"]}>
     <ScrollView
-      style={{ flex: 1, backgroundColor: colors.bg }}
+      style={{ flex: 1 }}
       contentContainerStyle={{ paddingBottom: 40 + insets.bottom }}
     >
       <Masthead
-        topInset={insets.top}
         kicker={`VOL. ${new Date().getFullYear()}`}
         title={"The Investor's\nLedger"}
         subtitle="私人投资日志 · Personal Journal"
@@ -132,6 +132,7 @@ export default function HomeScreen() {
         </View>
       </Section>
     </ScrollView>
+    </SafeAreaView>
   );
 }
 

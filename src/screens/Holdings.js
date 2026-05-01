@@ -1,7 +1,7 @@
 // Holdings screen — positions, live prices from Yahoo, currency-grouped totals
 import React, { useState, useMemo } from "react";
 import { View, ScrollView, Pressable, ActivityIndicator } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useSafeAreaInsets, SafeAreaView } from "react-native-safe-area-context";
 import {
   Plus, RefreshCw, Loader2, Wallet, Trash2, ChevronLeft,
 } from "lucide-react-native";
@@ -54,12 +54,12 @@ export default function HoldingsScreen() {
   const freshness = ago(app.prices?.lastUpdated);
 
   return (
+    <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }} edges={["top"]}>
     <ScrollView
-      style={{ flex: 1, backgroundColor: colors.bg }}
+      style={{ flex: 1 }}
       contentContainerStyle={{ paddingBottom: 40 + insets.bottom }}
     >
       <Masthead
-        topInset={insets.top}
         kicker="HOLDINGS"
         title="当前持仓"
         subtitle="What I own, at what cost, at what price."
@@ -177,6 +177,7 @@ export default function HoldingsScreen() {
         ))}
       </View>
     </ScrollView>
+    </SafeAreaView>
   );
 }
 

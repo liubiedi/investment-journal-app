@@ -35,7 +35,7 @@ export default function MonthlyScreen() {
       style={{ flex: 1, backgroundColor: colors.bg }}
       contentContainerStyle={{ paddingBottom: 40 + insets.bottom }}
     >
-      <Masthead topInset={insets.top} kicker="MONTHLY" title="月评" subtitle="4-5 条要点，凝结一个月的思考" />
+      <Masthead kicker="MONTHLY" title="月评" subtitle="4-5 条要点，凝结一个月的思考" />
 
       <View style={{ paddingHorizontal: 20, paddingTop: 20, paddingBottom: 16 }}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>

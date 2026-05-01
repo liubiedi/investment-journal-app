@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
   View, ScrollView, Pressable, ActivityIndicator, KeyboardAvoidingView, Platform, TextInput,
 } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useSafeAreaInsets, SafeAreaView } from "react-native-safe-area-context";
 import {
   MessageCircle, Send, RotateCcw, Loader2, AlertCircle, Mic, MicOff,
 } from "lucide-react-native";
@@ -121,10 +121,10 @@ export default function MentorScreen() {
   ];
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.bg }}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }} edges={["top"]}>
       {/* Header */}
       <View style={{
-        paddingHorizontal: 20, paddingTop: 24 + insets.top, paddingBottom: 14,
+        paddingHorizontal: 20, paddingTop: 24, paddingBottom: 14,
         borderBottomWidth: 1, borderBottomColor: colors.divider,
       }}>
         <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
@@ -260,7 +260,7 @@ export default function MentorScreen() {
           </Pressable>
         </View>
       </KeyboardAvoidingView>
-    </View>
+    </SafeAreaView>
   );
 }
 
