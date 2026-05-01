@@ -1,6 +1,6 @@
 // Holdings screen — positions, live prices from Yahoo, currency-grouped totals
 import React, { useState, useMemo } from "react";
-import { View, ScrollView, Pressable, ActivityIndicator } from "react-native";
+import { View, ScrollView, Pressable, ActivityIndicator, Platform } from "react-native";
 import { useSafeAreaInsets, SafeAreaView } from "react-native-safe-area-context";
 import {
   Plus, RefreshCw, Loader2, Wallet, Trash2, ChevronLeft, Calendar,
@@ -355,7 +355,7 @@ function HoldingForm({ initial, onSave, onCancel, onDelete }) {
           <DateTimePicker
             value={new Date(buyDate + "T12:00:00")}
             mode="date"
-            display="calendar"
+            display={Platform.OS === "ios" ? "inline" : "calendar"}
             onChange={(event, selectedDate) => {
               setShowDatePicker(false);
               if (event.type === "set" && selectedDate) {
