@@ -307,7 +307,7 @@ function HoldingForm({ initial, onSave, onCancel, onDelete }) {
 
       <Field label="CURRENCY · 币种">
         <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
-          {["USD", "CNY", "HKD", "EUR", "JPY"].map((c) => (
+          {["USD", "CNY", "HKD", "SGD", "EUR", "JPY"].map((c) => (
             <Pressable key={c} onPress={() => setCurrency(c)}
               style={{
                 paddingHorizontal: 12, paddingVertical: 6,

@@ -2,7 +2,7 @@
 
 ## 投资日志 · The Investor's Ledger
 
-**Version:** 1.2
+**Version:** 1.3
 **Date:** 2026-05-01
 **Format:** Android mobile application
 **Target:** AI coding agents (single-source-of-truth for autonomous implementation)
@@ -118,7 +118,7 @@ CREATE TABLE holdings (
   display_name TEXT,
   shares REAL NOT NULL,
   cost_basis REAL NOT NULL,      -- per-share cost
-  currency TEXT,                 -- USD|CNY|HKD|EUR|JPY
+  currency TEXT,                 -- USD|CNY|HKD|SGD|EUR|JPY
   buy_reason TEXT,               -- investment thesis / why this position exists
   notes TEXT,
   added_at INTEGER NOT NULL
@@ -290,7 +290,7 @@ Sub-tab switcher: two full-width buttons at the top; active tab has ink backgrou
 - SYMBOL — `StockSearchInput` with Yahoo Finance autocomplete (debounced 400ms); selecting a result auto-fills DISPLAY NAME. Hint: "AAPL / 0700.HK / 腾讯…"
 - DISPLAY NAME (optional)
 - SHARES (numeric) + COST (numeric) — side by side
-- CURRENCY (chips: USD/CNY/HKD/EUR/JPY)
+- CURRENCY (chips: USD/CNY/HKD/SGD/EUR/JPY)
 - REASON TO BUY · 购买原因 (multiline, optional) — investment thesis; included in mentor's investor profile context
 - NOTES (multiline, optional)
 
