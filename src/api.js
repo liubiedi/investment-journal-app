@@ -2,7 +2,7 @@
 //
 // Token economy principles:
 //   1. DeepSeek auto-caches request prefixes server-side (no client cache_control)
-//   2. deepseek-chat for structured extraction; deepseek-reasoner for nuanced mentor advice
+//   2. deepseek-chat for structured extraction; deepseek-v4-pro for nuanced mentor advice
 //   3. Context trimming — only send what's relevant for the call
 //   4. Yahoo Finance directly, not through any LLM web_search
 //
@@ -15,11 +15,11 @@ import { monthLabel } from "./utils";
 const DEEPSEEK_URL = "https://api.deepseek.com/v1/chat/completions";
 
 // Current models (as of Apr 2026).
-// deepseek-chat = DeepSeek-V3 — fast/cheap, good for parsing.
-// deepseek-reasoner = DeepSeek-R1 — flagship reasoning model for mentor advice.
+// deepseek-v4-flash is the cheap/fast tier — good for parsing.
+// deepseek-v4-pro is the flagship — used for mentor reasoning.
 const MODELS = {
-  fast: "deepseek-chat",
-  smart: "deepseek-reasoner",
+  fast: "deepseek-v4-flash",
+  smart: "deepseek-v4-pro",
 };
 
 // ========== API key management ==========
@@ -87,6 +87,28 @@ async function callLLMStream({ system, messages, model = MODELS.smart, max_token
     throw new Error(`DeepSeek ${res.status}: ${txt.slice(0, 200)}`);
   }
 
+  function parseSSELines(text) {
+    let full = "";
+    for (const line of text.split("\n")) {
+      if (!line.startsWith("data: ")) continue;
+      const json = line.slice(6).trim();
+      if (!json || json === "[DONE]") continue;
+      try {
+        const evt = JSON.parse(json);
+        const chunk = evt.choices?.[0]?.delta?.content;
+        if (chunk) { full += chunk; onChunk?.(chunk); }
+      } catch { /* skip malformed lines */ }
+    }
+    return full;
+  }
+
+  // React Native's fetch does not expose res.body as a ReadableStream.
+  // Fall back to res.text() which still returns the complete SSE payload.
+  if (!res.body || typeof res.body.getReader !== "function") {
+    const text = await res.text();
+    return parseSSELines(text);
+  }
+
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let full = "";
@@ -97,7 +119,7 @@ async function callLLMStream({ system, messages, model = MODELS.smart, max_token
     if (done) break;
     buf += decoder.decode(value, { stream: true });
     const lines = buf.split("\n");
-    buf = lines.pop(); // keep incomplete last line
+    buf = lines.pop();
     for (const line of lines) {
       if (!line.startsWith("data: ")) continue;
       const json = line.slice(6).trim();
@@ -105,10 +127,7 @@ async function callLLMStream({ system, messages, model = MODELS.smart, max_token
       try {
         const evt = JSON.parse(json);
         const chunk = evt.choices?.[0]?.delta?.content;
-        if (chunk) {
-          full += chunk;
-          onChunk?.(chunk);
-        }
+        if (chunk) { full += chunk; onChunk?.(chunk); }
       } catch { /* skip malformed lines */ }
     }
   }
