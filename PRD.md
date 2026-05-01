@@ -2,7 +2,7 @@
 
 ## 投资日志 · The Investor's Ledger
 
-**Version:** 1.2
+**Version:** 1.3
 **Date:** 2026-05-01
 **Format:** Android mobile application
 **Target:** AI coding agents (single-source-of-truth for autonomous implementation)
@@ -239,12 +239,14 @@ Sub-tab switcher: two full-width buttons at the top; active tab has ink backgrou
 **Trades sub-tab:**
 - "新建交易" button reveals TradeForm.
 - List of trades: date (mono) | action icon+label | stock name (serif bold) | emotion icon (muted).
-- Tap row to expand → shows full reason, emotion label, rules checked, original input (if AI-parsed), **FeedbackBlock**, and delete controls.
+- Tap row to expand → shows full reason, emotion label, rules checked, original input (if AI-parsed), **FeedbackBlock**, and EDIT / DELETE controls.
+- **Inline edit mode**: tapping EDIT reveals an editable `reason` field (multiline) + emotion chip picker. SAVE persists changes via `db.updateTrade(id, {reason, emotion})`; CANCEL restores original. Editing replaces the FeedbackBlock in the expanded view (they do not overlap). Delete remains available only when not editing.
 - **FeedbackBlock** behavior:
   - Horizontal MasterChips.
-  - If cached feedback for active master exists: render it.
+  - If cached feedback for active master exists: render it. Multi-master switching is supported — each master's text is independently cached in a `localCache` state within the component so switching away and back does not blank the previously-loaded text.
   - If not cached: tap to request → calls `generateEntryFeedback(trade, "trade", masterId, profile)` → appends to `feedback[]` → persists via `db.updateTradeFeedback`.
   - **CRITICAL: feedback is NEVER auto-generated on save. Always on explicit user tap.**
+  - **"带入问道继续讨论 ↗" button** appears below any loaded feedback text. Tapping it: (1) appends two messages to `chat_history` (user context message + assistant feedback text), (2) navigates to the 问道 tab. The mentor screen reloads on focus and immediately shows the context so the conversation can continue seamlessly.
 
 **TradeForm:**
 - Segmented control at top: "AI 智能输入" (wand icon) vs "手动填写" (pencil icon).
@@ -270,7 +272,7 @@ Sub-tab switcher: two full-width buttons at the top; active tab has ink backgrou
 **Thoughts sub-tab:**
 - "记下心念" button reveals ThoughtForm.
 - List: date | help-circle icon | first 80 chars of content (expand on tap).
-- Expanded: FeedbackBlock + delete.
+- Expanded: FeedbackBlock (with "带入问道" button, same as trades) + inline EDIT / DELETE. Tapping EDIT shows full content in an editable `PaperInput`; SAVE persists via `db.updateThought(id, content)`.
 - ThoughtForm: header "把心里的纠结、疑问、直觉写/说出来。", large multiline input (160pt min) with voice, save button "记下".
 
 ### 5.5 Holdings (tab: 持仓, route: `holdings`)
@@ -310,6 +312,8 @@ Sub-tab switcher: two full-width buttons at the top; active tab has ink backgrou
 1. Append user message to local state and DB via `db.appendChat("user", text)`.
 2. Call `chatMessage(history, text, profile, "default")` — internally trims to last 10 turns, uses cached system prompt.
 3. Append response via `db.appendChat("assistant", reply)`.
+
+**Chat reload on focus:** The screen uses `useFocusEffect` to reload `chat_history` from DB each time it gains focus. This ensures that entries written by "带入问道" from the Log screen appear immediately without requiring a manual refresh.
 
 ### 5.7 Settings (hidden screen, route: `settings`)
 
@@ -394,13 +398,14 @@ When building `<investor_profile>`:
 ## 8. External APIs
 
 ### 8.1 DeepSeek API
-- Endpoint: `https://api.deepseek.com/chat/completions` (OpenAI-compatible)
+- Endpoint: `https://api.deepseek.com/v1/chat/completions` (OpenAI-compatible)
 - Headers: `Authorization: Bearer <key>`, `Content-Type: application/json`
 - Body: `{ model, max_tokens, messages: [{ role: "system", content: system }, ...userMessages] }`
 - Response: `data.choices[0].message.content`
 - Key stored in `expo-secure-store` (key name: `deepseek_api_key`).
 - If no key: throw `Error("NO_API_KEY")` — UI catches and redirects to Settings.
 - **No `cache_control` blocks needed** — DeepSeek caches automatically on the server side.
+- **Streaming implementation note:** React Native's `fetch` does not expose `response.body` as a `ReadableStream` — `res.body.getReader()` is unavailable. `callLLMStream` detects this and falls back to `res.text()`, parsing all SSE `data:` lines at once. `onChunk` is still called (in a single batch at the end) so the streaming code path remains consistent. Progressive display is not available on React Native; the spinner shows until the full response is ready.
 
 ### 8.2 Yahoo Finance
 - Endpoint: `https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval=1d&range=2d`
@@ -486,7 +491,7 @@ cool:       "#3a5578"
 - `<FilledButton>` — ink background, paper text, serif bold
 - `<OutlineButton>` — transparent with divider border
 - `<MasterChips active onSelect>` — horizontal scrollable persona selector
-- `<FeedbackBlock feedback onRequestMaster pending defaultMaster>` — entry feedback with master switcher
+- `<FeedbackBlock feedback onRequestMaster pending defaultMaster onContinueInMentor>` — entry feedback with master switcher. `onContinueInMentor(masterId, text)` is optional; when provided, renders "带入问道继续讨论 ↗" button below any loaded feedback text. Uses internal `localCache` + `streamAccumRef` so multi-master switching never blanks already-loaded feedback.
 - `<VoiceMic currentText onChange size>` — microphone toggle button
 - `<FormHeader title onCancel>` — back + kicker row in forms
 - `<StockSearchInput value onChangeText onSelect placeholder style>` — PaperInput with Yahoo Finance autocomplete dropdown; debounced 400ms; fires `onSelect({ symbol, name, exch, type })` on pick; has clear (×) button
@@ -590,11 +595,13 @@ kvSet(key, value): Promise<void>
 
 listTrades(): Promise<Trade[]>
 addTrade(t): Promise<Trade>                         // Assigns id, empty feedback
+updateTrade(id, fields): Promise<void>              // fields: subset of {reason, emotion, stock, action, date}
 updateTradeFeedback(id, feedbackArr): Promise<void>
 deleteTrade(id): Promise<void>
 
 listThoughts(): Promise<Thought[]>
 addThought(content, rawInput?): Promise<Thought>
+updateThought(id, content): Promise<void>
 updateThoughtFeedback(id, feedbackArr): Promise<void>
 deleteThought(id): Promise<void>
 
@@ -754,6 +761,11 @@ An implementation is correct if:
 18. ✅ Holdings "Reason to Buy" is included in the `<investor_profile>` context sent to mentor AI.
 19. ✅ Bottom nav shows exactly 5 tabs (心法 / 记录 / 持仓 / 复盘 / 问道); Settings is accessible only via the gear icon in the 心法 masthead.
 20. ✅ 复盘 tab contains two sub-tabs (周记 / 月评) switchable without losing unsaved text.
+21. ✅ All top-level screens (心法, 记录, 持仓, 复盘, 问道, Settings) reserve space for the device status bar / notch / punch-hole camera using `SafeAreaView edges={["top"]}`.
+22. ✅ Tapping EDIT on an expanded trade row allows editing the reason and emotion; changes persist after restart.
+23. ✅ Tapping EDIT on an expanded thought row allows editing the full content; changes persist after restart.
+24. ✅ Switching between mentor chips (e.g., 林奇 → 芒格) after loading one master's feedback shows the second master's feedback correctly — does not blank or re-show the first master's text.
+25. ✅ Tapping "带入问道继续讨论 ↗" on a feedback entry navigates to the 问道 tab and shows the trade context + mentor feedback as the opening exchange of a conversation ready for follow-up.
 
 ---
 
