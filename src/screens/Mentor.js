@@ -7,7 +7,8 @@ import { useSafeAreaInsets, SafeAreaView } from "react-native-safe-area-context"
 import {
   MessageCircle, Send, RotateCcw, Loader2, AlertCircle,
 } from "lucide-react-native";
-import { useFocusEffect } from "@react-navigation/native";
+import { useFocusEffect, useRoute } from "@react-navigation/native";
+import * as Clipboard from "expo-clipboard";
 
 import { colors, fonts } from "../theme";
 import { useApp } from "../context";
@@ -23,22 +24,35 @@ const PRICE_STALE_MS = 15 * 60 * 1000;
 
 export default function MentorScreen() {
   const app = useApp();
+  const route = useRoute();
   const insets = useSafeAreaInsets();
   const [history, setHistory] = useState([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
+  const [pendingRetry, setPendingRetry] = useState(null);
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState("");
   const [activeMaster, setActiveMaster] = useState("default");
   const scrollRef = useRef(null);
-  // Reload chat history each time the screen comes into focus so that
-  // entries written by "带入问道" from the Log screen appear immediately.
-  useFocusEffect(
-    useCallback(() => {
-      db.listChat().then((h) => setHistory(h));
-    }, [])
-  );
+
+  // Auto-switch to the master used in "带入问道" navigation
+  useEffect(() => {
+    const m = route.params?.autoMaster;
+    if (m) setActiveMaster(m);
+  }, [route.params?.autoMaster]);
+
+  const loadHistory = useCallback(async () => {
+    const h = await db.listChat(activeMaster);
+    setHistory(h);
+    setPendingRetry(null);
+    setError("");
+  }, [activeMaster]);
+
+  // Reload on screen focus (picks up 带入问道 entries from Log screen)
+  useFocusEffect(loadHistory);
+  // Reload when master changes while screen is already focused
+  useEffect(() => { loadHistory(); }, [loadHistory]);
 
   // Auto price refresh on mount if stale
   useEffect(() => {
@@ -84,7 +98,7 @@ export default function MentorScreen() {
   const send = async () => {
     const text = input.trim();
     if (!text || sending) return;
-    setInput(""); setError("");
+    setInput(""); setError(""); setPendingRetry(null);
     const userMsg = { role: "user", content: text, masterId: activeMaster, createdAt: Date.now() };
     const newHistory = [...history, userMsg];
     setHistory(newHistory);
@@ -97,6 +111,26 @@ export default function MentorScreen() {
       await db.appendChat("assistant", reply, activeMaster);
     } catch (e) {
       setError(e.message === "NO_API_KEY" ? "请先在设置中配置 API key" : "导师暂时失联，请稍后再试");
+      if (e.message !== "NO_API_KEY") setPendingRetry(text);
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const retry = async () => {
+    if (!pendingRetry || sending) return;
+    setError(""); setSending(true);
+    // history already has the failed user message as last item;
+    // chatMessage expects context = messages BEFORE the new user message
+    const contextHistory = history.slice(0, -1);
+    try {
+      const reply = await chatMessage(contextHistory, pendingRetry, app.profile, activeMaster);
+      const updated = [...history, { role: "assistant", content: reply, masterId: activeMaster, createdAt: Date.now() }];
+      setHistory(updated);
+      await db.appendChat("assistant", reply, activeMaster);
+      setPendingRetry(null);
+    } catch (e) {
+      setError(e.message === "NO_API_KEY" ? "请先在设置中配置 API key" : "导师暂时失联，请稍后再试");
     } finally {
       setSending(false);
     }
@@ -104,8 +138,10 @@ export default function MentorScreen() {
 
   const reset = async () => {
     if (history.length === 0) return;
-    await db.clearChat();
+    await db.clearChat(activeMaster);
     setHistory([]);
+    setPendingRetry(null);
+    setError("");
   };
 
   const priceFreshness = useMemo(() => ago(app.prices?.lastUpdated), [app.prices]);
@@ -206,14 +242,13 @@ export default function MentorScreen() {
             const mDate = m.createdAt ? new Date(m.createdAt).toDateString() : null;
             const prevDate = prev?.createdAt ? new Date(prev.createdAt).toDateString() : null;
             const showDateDivider = mDate && mDate !== prevDate;
-            const showMasterChange = i > 0 && m.masterId && prev.masterId && m.masterId !== prev.masterId;
             return (
               <React.Fragment key={i}>
-                {(showDateDivider || showMasterChange) && (
+                {showDateDivider && (
                   <View style={{ alignItems: "center", marginVertical: 12, flexDirection: "row", gap: 8 }}>
                     <View style={{ flex: 1, height: 1, backgroundColor: colors.dividerSoft }} />
                     <TMono style={{ fontSize: 9 }}>
-                      {[showDateDivider && mDate && new Date(m.createdAt).toLocaleDateString("zh-CN", { month: "short", day: "numeric" }), showMasterChange && getMaster(m.masterId).zh].filter(Boolean).join(" · ")}
+                      {new Date(m.createdAt).toLocaleDateString("zh-CN", { month: "short", day: "numeric" })}
                     </TMono>
                     <View style={{ flex: 1, height: 1, backgroundColor: colors.dividerSoft }} />
                   </View>
@@ -230,7 +265,18 @@ export default function MentorScreen() {
             </View>
           )}
 
-          {error ? <TMono style={{ color: colors.bad, fontSize: 11, paddingVertical: 6 }}>{error}</TMono> : null}
+          {error ? (
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 6 }}>
+              <TMono style={{ color: colors.bad, fontSize: 11, flex: 1 }}>{error}</TMono>
+              {pendingRetry && (
+                <Pressable onPress={retry} disabled={sending}
+                  style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+                  <RotateCcw size={11} color={colors.ink} />
+                  <TMono style={{ fontSize: 11 }}>重新发送</TMono>
+                </Pressable>
+              )}
+            </View>
+          ) : null}
         </ScrollView>
 
         {/* Input row */}
@@ -273,25 +319,41 @@ export default function MentorScreen() {
 }
 
 function MessageBubble({ role, content, masterId }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async () => {
+    await Clipboard.setStringAsync(content);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
+
   if (role === "user") {
     return (
-      <View style={{ flexDirection: "row", justifyContent: "flex-end", marginBottom: 14 }}>
+      <Pressable onLongPress={handleCopy} delayLongPress={400}
+        style={{ flexDirection: "row", justifyContent: "flex-end", marginBottom: 14 }}>
         <View style={{ maxWidth: "85%", padding: 12, backgroundColor: colors.ink }}>
           <TSerif style={{ color: colors.bg, fontSize: 14, lineHeight: 22 }}>{content}</TSerif>
+          {copied && (
+            <TMono style={{ color: colors.accent, fontSize: 9, marginTop: 4, textAlign: "right" }}>已复制 ✓</TMono>
+          )}
         </View>
-      </View>
+      </Pressable>
     );
   }
+
   const master = getMaster(masterId || "default");
   return (
-    <View style={{ marginBottom: 18 }}>
+    <Pressable onLongPress={handleCopy} delayLongPress={400} style={{ marginBottom: 18 }}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 6 }}>
         <View style={{ width: 18, height: 18, backgroundColor: colors.ink, alignItems: "center", justifyContent: "center" }}>
           <MessageCircle size={10} color={colors.accent} />
         </View>
-        <Kicker>{master.zh} · {master.en}</Kicker>
+        <Kicker style={{ flex: 1 }}>{master.zh} · {master.name}</Kicker>
+        {copied && (
+          <TMono style={{ fontSize: 9, color: colors.accent }}>已复制 ✓</TMono>
+        )}
       </View>
       <TSerif style={{ fontSize: 15, lineHeight: 24 }}>{content}</TSerif>
-    </View>
+    </Pressable>
   );
 }

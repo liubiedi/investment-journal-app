@@ -18,7 +18,7 @@ import * as ExpoCalendar from "expo-calendar";
 
 import { colors, fonts } from "../theme";
 import { useApp } from "../context";
-import { ACTIONS, EMOTIONS, getAction, getEmotion } from "../constants";
+import { ACTIONS, EMOTIONS, getAction, getEmotion, getMaster } from "../constants";
 import { fmtDate } from "../utils";
 import { parseTradeText, generateEntryFeedback } from "../api";
 import * as db from "../db";
@@ -257,11 +257,10 @@ function TradeRow({ trade, onDelete, onUpdate, onRequestFeedback, defaultMaster 
   const [draftEmotion, setDraftEmotion] = useState(trade.emotion);
 
   const handleContinueInMentor = async (masterId, feedbackText) => {
-    const { getMaster } = require("../constants");
     const master = getMaster(masterId);
-    await db.appendChat("user", `我想继续讨论 ${master.zh} 对我这笔交易的点评。\n\n【${trade.action.toUpperCase()}】${trade.stock}\n情绪：${trade.emotion} · 理由：${trade.reason}`);
-    await db.appendChat("assistant", feedbackText);
-    nav.navigate("mentor");
+    await db.appendChat("user", `我想继续讨论 ${master.zh} 对我这笔交易的点评。\n\n【${trade.action.toUpperCase()}】${trade.stock}\n情绪：${trade.emotion} · 理由：${trade.reason}`, masterId);
+    await db.appendChat("assistant", feedbackText, masterId);
+    nav.navigate("mentor", { autoMaster: masterId });
   };
   const action = getAction(trade.action);
   const emotion = getEmotion(trade.emotion);
@@ -410,11 +409,10 @@ function ThoughtRow({ thought, onDelete, onUpdate, onRequestFeedback, defaultMas
   const hasFeedback = thought.feedback?.length > 0;
 
   const handleContinueInMentor = async (masterId, feedbackText) => {
-    const { getMaster } = require("../constants");
     const master = getMaster(masterId);
-    await db.appendChat("user", `我想继续讨论 ${master.zh} 对我这段心念的回应。\n\n心念：${thought.content}`);
-    await db.appendChat("assistant", feedbackText);
-    nav.navigate("mentor");
+    await db.appendChat("user", `我想继续讨论 ${master.zh} 对我这段心念的回应。\n\n心念：${thought.content}`, masterId);
+    await db.appendChat("assistant", feedbackText, masterId);
+    nav.navigate("mentor", { autoMaster: masterId });
   };
 
   return (

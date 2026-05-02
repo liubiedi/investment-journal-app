@@ -321,11 +321,16 @@ export async function listMonthlyMentorMasters(monthKey) {
 }
 
 // ---------- chat_history ----------
-export async function listChat() {
+export async function listChat(masterId = null) {
   const db = await getDb();
-  const rows = await db.getAllAsync(
-    "SELECT role, content, master_id, created_at FROM chat_history ORDER BY id ASC"
-  );
+  const rows = masterId
+    ? await db.getAllAsync(
+        "SELECT role, content, master_id, created_at FROM chat_history WHERE master_id = ? ORDER BY id ASC",
+        [masterId]
+      )
+    : await db.getAllAsync(
+        "SELECT role, content, master_id, created_at FROM chat_history ORDER BY id ASC"
+      );
   return rows.map((r) => ({ role: r.role, content: r.content, masterId: r.master_id || "default", createdAt: r.created_at }));
 }
 
@@ -337,9 +342,13 @@ export async function appendChat(role, content, masterId = "default") {
   );
 }
 
-export async function clearChat() {
+export async function clearChat(masterId = null) {
   const db = await getDb();
-  await db.runAsync("DELETE FROM chat_history");
+  if (masterId) {
+    await db.runAsync("DELETE FROM chat_history WHERE master_id = ?", [masterId]);
+  } else {
+    await db.runAsync("DELETE FROM chat_history");
+  }
 }
 
 // ---------- prices ----------
