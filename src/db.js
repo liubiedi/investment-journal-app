@@ -97,12 +97,21 @@ async function initSchema(db) {
       id INTEGER PRIMARY KEY CHECK (id=1),
       last_updated INTEGER
     );
+
+    CREATE TABLE IF NOT EXISTS holding_reviews (
+      id TEXT PRIMARY KEY,
+      holding_id TEXT NOT NULL,
+      date TEXT NOT NULL,
+      content TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    );
   `);
   // Migrations for existing databases (idempotent — fails silently if column exists).
   try { await db.runAsync("ALTER TABLE holdings ADD COLUMN buy_reason TEXT"); } catch {}
   try { await db.runAsync("ALTER TABLE holdings ADD COLUMN buy_date TEXT"); } catch {}
   try { await db.runAsync("ALTER TABLE chat_history ADD COLUMN master_id TEXT"); } catch {}
   try { await db.runAsync("ALTER TABLE trades ADD COLUMN stock_name TEXT"); } catch {}
+  try { await db.runAsync("ALTER TABLE thoughts ADD COLUMN emotion TEXT"); } catch {}
 }
 
 const newId = (prefix) => `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -185,26 +194,31 @@ export async function listThoughts() {
   const rows = await db.getAllAsync("SELECT * FROM thoughts ORDER BY date DESC");
   return rows.map(r => ({
     id: r.id, date: r.date, content: r.content,
+    emotion: r.emotion || undefined,
     rawInput: r.raw_input || undefined,
     feedback: safeJson(r.feedback, []),
   }));
 }
 
-export async function addThought(content, rawInput) {
+export async function addThought(content, rawInput, emotion) {
   const db = await getDb();
   const id = newId("thought");
   const now = Date.now();
   const date = new Date().toISOString();
   await db.runAsync(
-    `INSERT INTO thoughts (id, date, content, raw_input, feedback, created_at) VALUES (?,?,?,?,?,?)`,
-    [id, date, content, rawInput || null, JSON.stringify([]), now]
+    `INSERT INTO thoughts (id, date, content, raw_input, emotion, feedback, created_at) VALUES (?,?,?,?,?,?,?)`,
+    [id, date, content, rawInput || null, emotion || null, JSON.stringify([]), now]
   );
-  return { id, date, content, rawInput, feedback: [] };
+  return { id, date, content, rawInput, emotion: emotion || undefined, feedback: [] };
 }
 
-export async function updateThought(id, content) {
+export async function updateThought(id, content, emotion) {
   const db = await getDb();
-  await db.runAsync("UPDATE thoughts SET content = ? WHERE id = ?", [content, id]);
+  if (emotion !== undefined) {
+    await db.runAsync("UPDATE thoughts SET content = ?, emotion = ? WHERE id = ?", [content, emotion || null, id]);
+  } else {
+    await db.runAsync("UPDATE thoughts SET content = ? WHERE id = ?", [content, id]);
+  }
 }
 
 export async function updateThoughtFeedback(id, feedback) {
@@ -254,6 +268,32 @@ export async function updateHolding(id, updates) {
 export async function deleteHolding(id) {
   const db = await getDb();
   await db.runAsync("DELETE FROM holdings WHERE id = ?", [id]);
+}
+
+// ---------- holding_reviews ----------
+export async function listHoldingReviews(holdingId) {
+  const db = await getDb();
+  const rows = await db.getAllAsync(
+    "SELECT * FROM holding_reviews WHERE holding_id = ? ORDER BY date DESC",
+    [holdingId]
+  );
+  return rows.map(r => ({ id: r.id, holdingId: r.holding_id, date: r.date, content: r.content, createdAt: r.created_at }));
+}
+
+export async function addHoldingReview(holdingId, date, content) {
+  const db = await getDb();
+  const id = newId("review");
+  const now = Date.now();
+  await db.runAsync(
+    "INSERT INTO holding_reviews (id, holding_id, date, content, created_at) VALUES (?,?,?,?,?)",
+    [id, holdingId, date, content, now]
+  );
+  return { id, holdingId, date, content, createdAt: now };
+}
+
+export async function deleteHoldingReview(id) {
+  const db = await getDb();
+  await db.runAsync("DELETE FROM holding_reviews WHERE id = ?", [id]);
 }
 
 // ---------- weekly_notes ----------
@@ -408,4 +448,74 @@ export async function exportAll() {
     trades, thoughts, holdings, weeklyNotes: weekly, monthlyReviews: monthly,
     chatHistory: chat, prices,
   };
+}
+
+// Import a full backup snapshot — runs inside a transaction to avoid partial state
+export async function importAll(snapshot) {
+  if (!snapshot || snapshot.version !== 1) throw new Error("Invalid backup format");
+  const database = await getDb();
+  await database.withTransactionAsync(async () => {
+    // kv
+    await database.runAsync("DELETE FROM kv");
+    if (snapshot.kv) {
+      for (const [key, value] of Object.entries(snapshot.kv)) {
+        await database.runAsync(
+          "INSERT INTO kv (key, value) VALUES (?,?)",
+          [key, JSON.stringify(value)]
+        );
+      }
+    }
+    // trades
+    await database.runAsync("DELETE FROM trades");
+    for (const t of snapshot.trades || []) {
+      await database.runAsync(
+        `INSERT OR REPLACE INTO trades (id, date, action, stock, stock_name, reason, emotion, rules_checked, raw_input, feedback, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+        [t.id, t.date, t.action, t.stock, t.stockName || null, t.reason, t.emotion, JSON.stringify(t.rulesChecked || []), t.rawInput || null, JSON.stringify(t.feedback || []), t.createdAt || Date.now()]
+      );
+    }
+    // thoughts
+    await database.runAsync("DELETE FROM thoughts");
+    for (const t of snapshot.thoughts || []) {
+      await database.runAsync(
+        `INSERT OR REPLACE INTO thoughts (id, date, content, raw_input, emotion, feedback, created_at) VALUES (?,?,?,?,?,?,?)`,
+        [t.id, t.date, t.content, t.rawInput || null, t.emotion || null, JSON.stringify(t.feedback || []), t.createdAt || Date.now()]
+      );
+    }
+    // holdings
+    await database.runAsync("DELETE FROM holdings");
+    for (const h of snapshot.holdings || []) {
+      await database.runAsync(
+        `INSERT OR REPLACE INTO holdings (id, symbol, display_name, shares, cost_basis, currency, buy_reason, notes, buy_date, added_at) VALUES (?,?,?,?,?,?,?,?,?,?)`,
+        [h.id, h.symbol, h.displayName || null, h.shares, h.costBasis, h.currency || null, h.buyReason || null, h.notes || null, h.buyDate || null, h.addedAt || Date.now()]
+      );
+    }
+    // weekly notes
+    await database.runAsync("DELETE FROM weekly_notes");
+    if (snapshot.weeklyNotes) {
+      for (const [key, text] of Object.entries(snapshot.weeklyNotes)) {
+        await database.runAsync(
+          "INSERT INTO weekly_notes (week_key, text, updated_at) VALUES (?,?,?)",
+          [key, text, Date.now()]
+        );
+      }
+    }
+    // monthly reviews
+    await database.runAsync("DELETE FROM monthly_reviews");
+    if (snapshot.monthlyReviews) {
+      for (const [key, bullets] of Object.entries(snapshot.monthlyReviews)) {
+        await database.runAsync(
+          "INSERT INTO monthly_reviews (month_key, bullets, updated_at) VALUES (?,?,?)",
+          [key, Array.isArray(bullets) ? JSON.stringify(bullets) : bullets, Date.now()]
+        );
+      }
+    }
+    // chat history
+    await database.runAsync("DELETE FROM chat_history");
+    for (const m of snapshot.chatHistory || []) {
+      await database.runAsync(
+        "INSERT INTO chat_history (role, content, master_id, created_at) VALUES (?,?,?,?)",
+        [m.role, m.content, m.masterId || "default", m.createdAt || Date.now()]
+      );
+    }
+  });
 }

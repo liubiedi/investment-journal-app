@@ -17,9 +17,12 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.you.investmentjournal",
+      "deploymentTarget": "16.0",
       "infoPlist": {
         "NSMicrophoneUsageDescription": "This app uses the microphone for voice journaling.",
-        "NSSpeechRecognitionUsageDescription": "This app uses speech recognition to convert your spoken journal entries to text."
+        "NSSpeechRecognitionUsageDescription": "This app uses speech recognition to convert your spoken journal entries to text.",
+        "NSCalendarsUsageDescription": "Allow 投资日志 to access your calendar to create trade reminders.",
+        "NSCalendarsFullAccessUsageDescription": "Allow 投资日志 to access your calendar to create trade reminders."
       }
     },
     "android": {

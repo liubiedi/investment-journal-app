@@ -4,6 +4,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Platform } from "react-native";
 
+
 let Voice = null;
 try {
   // Dynamic require so Expo Go doesn't crash
@@ -59,6 +60,11 @@ export function useSpeech(onFinalText) {
     accumRef.current = initialText || "";
     setError(null);
     try {
+      // On iOS, request speech recognition permission before starting.
+      // Voice.requestSpeechRecognitionPermission() is a no-op on Android.
+      if (Platform.OS === "ios" && typeof Voice.requestSpeechRecognitionPermission === "function") {
+        await Voice.requestSpeechRecognitionPermission();
+      }
       await Voice.start("zh-CN");
       setListening(true);
       return true;

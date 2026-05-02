@@ -1,5 +1,5 @@
 // Holdings screen — positions, live prices from Yahoo, currency-grouped totals
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect, useCallback } from "react";
 import { View, ScrollView, Pressable, ActivityIndicator, Platform } from "react-native";
 import { useSafeAreaInsets, SafeAreaView } from "react-native-safe-area-context";
 import { useNavigation } from "@react-navigation/native";
@@ -31,8 +31,9 @@ export default function HoldingsScreen() {
     if (h.buyDate) lines.push(`• 买入时间：${h.buyDate}`);
     if (h.buyReason) lines.push(`• 买入理由：${h.buyReason}`);
     lines.push("请帮我分析一下这个持仓的现状，值得继续持有吗？");
-    await db.appendChat("user", lines.join("\n"));
-    nav.navigate("mentor");
+    const masterId = app.defaultMaster || "default";
+    await db.appendChat("user", lines.join("\n"), masterId);
+    nav.navigate("mentor", { autoMaster: masterId, autoReplyTs: Date.now() });
   };
   const [adding, setAdding] = useState(false);
   const [editingId, setEditingId] = useState(null);
@@ -293,6 +294,21 @@ function HoldingForm({ initial, onSave, onCancel, onDelete }) {
   const [buyDate, setBuyDate] = useState(initial?.buyDate || todayISO());
   const [showDatePicker, setShowDatePicker] = useState(false);
 
+  // Review log state (only when editing an existing holding)
+  const [reviews, setReviews] = useState([]);
+  const [reviewText, setReviewText] = useState("");
+  const [reviewDate, setReviewDate] = useState(todayISO());
+  const [showReviewDatePicker, setShowReviewDatePicker] = useState(false);
+  const [addingReview, setAddingReview] = useState(false);
+
+  const loadReviews = useCallback(async () => {
+    if (!initial?.id) return;
+    const list = await db.listHoldingReviews(initial.id);
+    setReviews(list);
+  }, [initial?.id]);
+
+  useEffect(() => { loadReviews(); }, [loadReviews]);
+
   const canSave = symbol.trim() && parseFloat(shares) > 0 && parseFloat(costBasis) >= 0;
 
   const handleSave = () => {
@@ -399,6 +415,77 @@ function HoldingForm({ initial, onSave, onCancel, onDelete }) {
           placeholder="建仓时的简短思考，或者止损/止盈位…"
           style={{ minHeight: 60, fontSize: 14 }} />
       </Field>
+
+      {initial?.id && (
+        <View style={{ marginTop: 20 }}>
+          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+            <Kicker>REVIEW LOG · 复盘记录</Kicker>
+            <Pressable onPress={() => setAddingReview(!addingReview)}
+              style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+              <Plus size={11} color={colors.accent} />
+              <TMono style={{ fontSize: 10, color: colors.accent }}>添加复盘</TMono>
+            </Pressable>
+          </View>
+
+          {addingReview && (
+            <View style={{ marginBottom: 12, padding: 12, backgroundColor: colors.bgElev, borderWidth: 1, borderColor: colors.divider }}>
+              <Pressable onPress={() => setShowReviewDatePicker(true)}
+                style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                <Calendar size={12} color={colors.accent} strokeWidth={1.5} />
+                <TMono style={{ fontSize: 12 }}>{reviewDate}</TMono>
+              </Pressable>
+              {showReviewDatePicker && (
+                <DateTimePicker
+                  value={new Date(reviewDate + "T12:00:00")}
+                  mode="date"
+                  display={Platform.OS === "ios" ? "inline" : "calendar"}
+                  onChange={(event, selectedDate) => {
+                    setShowReviewDatePicker(false);
+                    if (event.type === "set" && selectedDate) {
+                      const d = selectedDate;
+                      setReviewDate(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`);
+                    }
+                  }}
+                />
+              )}
+              <PaperInput multiline value={reviewText} onChangeText={setReviewText}
+                placeholder="持仓复盘内容：基本面变化、论点验证、是否继续持有…"
+                style={{ minHeight: 80, fontSize: 13, marginBottom: 8 }} />
+              <View style={{ flexDirection: "row", gap: 8 }}>
+                <Pressable
+                  onPress={async () => {
+                    if (!reviewText.trim()) return;
+                    await db.addHoldingReview(initial.id, reviewDate, reviewText.trim());
+                    setReviewText(""); setAddingReview(false);
+                    loadReviews();
+                  }}
+                  style={{ paddingHorizontal: 14, paddingVertical: 7, backgroundColor: colors.ink }}>
+                  <TMono style={{ fontSize: 10, color: colors.bg, fontWeight: "600" }}>保存</TMono>
+                </Pressable>
+                <Pressable onPress={() => { setReviewText(""); setAddingReview(false); }}>
+                  <TMono style={{ fontSize: 10, marginTop: 7 }}>取消</TMono>
+                </Pressable>
+              </View>
+            </View>
+          )}
+
+          {reviews.length === 0 && !addingReview ? (
+            <TSerifItalic style={{ fontSize: 12, color: colors.inkFaint }}>还没有复盘记录</TSerifItalic>
+          ) : (
+            reviews.map((r) => (
+              <View key={r.id} style={{ marginBottom: 10, paddingBottom: 10, borderBottomWidth: 1, borderBottomColor: colors.dividerSoft }}>
+                <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+                  <TMono style={{ fontSize: 10, color: colors.inkMuted }}>{r.date}</TMono>
+                  <Pressable onPress={async () => { await db.deleteHoldingReview(r.id); loadReviews(); }}>
+                    <Trash2 size={10} color={colors.inkFaint} />
+                  </Pressable>
+                </View>
+                <TSerif style={{ fontSize: 13, lineHeight: 20 }}>{r.content}</TSerif>
+              </View>
+            ))
+          )}
+        </View>
+      )}
 
       <FilledButton onPress={handleSave} disabled={!canSave} style={{ marginTop: 16 }}>
         {initial ? "保存修改" : "加入持仓"}

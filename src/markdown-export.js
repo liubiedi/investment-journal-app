@@ -19,7 +19,7 @@
 //
 // Each file has YAML front-matter so Obsidian's Dataview plugin can query it.
 
-import * as FileSystem from "expo-file-system";
+import * as FileSystem from "expo-file-system/legacy";
 import * as Sharing from "expo-sharing";
 import { zip } from "react-native-zip-archive";
 

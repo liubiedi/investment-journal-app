@@ -3,10 +3,11 @@ import React, { useState, useEffect } from "react";
 import { View, ScrollView, Pressable, Alert, Linking } from "react-native";
 import { useSafeAreaInsets, SafeAreaView } from "react-native-safe-area-context";
 import {
-  Key, Download, Info, Trash2, ExternalLink, Check, Loader2, FileText, BookMarked,
+  Key, Download, Upload, Info, Trash2, ExternalLink, Check, Loader2, FileText, BookMarked,
 } from "lucide-react-native";
-import * as FileSystem from "expo-file-system";
+import * as FileSystem from "expo-file-system/legacy";
 import * as Sharing from "expo-sharing";
+import * as DocumentPicker from "expo-document-picker";
 
 import { colors, fonts } from "../theme";
 import { useApp } from "../context";
@@ -31,6 +32,7 @@ export default function SettingsScreen() {
   const [exportingVault, setExportingVault] = useState(false);
   const [exportingJson, setExportingJson] = useState(false);
   const [exportResult, setExportResult] = useState("");
+  const [importing, setImporting] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -103,6 +105,46 @@ export default function SettingsScreen() {
       setExportResult("导出失败：" + (e.message || String(e)));
     } finally {
       setExportingJson(false);
+    }
+  };
+
+  const handleImport = async () => {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({ type: "application/json", copyToCacheDirectory: true });
+      if (result.canceled) return;
+      const uri = result.assets?.[0]?.uri;
+      if (!uri) return;
+      const json = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.UTF8 });
+      const snapshot = JSON.parse(json);
+      if (!snapshot || snapshot.version !== 1) {
+        Alert.alert("格式错误", "所选文件不是有效的投资日志备份文件。");
+        return;
+      }
+      Alert.alert(
+        "恢复备份",
+        `此操作将覆盖当前所有数据（${snapshot.trades?.length ?? 0} 笔交易、${snapshot.thoughts?.length ?? 0} 条心念、${snapshot.holdings?.length ?? 0} 个持仓）。继续吗？`,
+        [
+          { text: "取消", style: "cancel" },
+          {
+            text: "覆盖恢复",
+            style: "destructive",
+            onPress: async () => {
+              setImporting(true); setExportResult("");
+              try {
+                await db.importAll(snapshot);
+                await app.reloadAll();
+                setExportResult("✓ 数据恢复成功");
+              } catch (e) {
+                setExportResult("恢复失败：" + (e.message || String(e)));
+              } finally {
+                setImporting(false);
+              }
+            },
+          },
+        ]
+      );
+    } catch (e) {
+      setExportResult("恢复失败：" + (e.message || String(e)));
     }
   };
 
@@ -204,19 +246,34 @@ export default function SettingsScreen() {
           <TSerifItalic style={{ fontSize: 11, marginBottom: 8 }}>
             原始数据库 JSON，用于换设备时恢复。包含所有字段和缓存的导师点评。
           </TSerifItalic>
-          <OutlineButton onPress={handleExportJson} disabled={exportingJson}>
-            {exportingJson ? (
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                <Loader2 size={12} color={colors.ink} />
-                <TSerif style={{ fontSize: 13, color: colors.ink }}>导出中…</TSerif>
-              </View>
-            ) : (
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                <Download size={12} color={colors.ink} />
-                <TSerif style={{ fontSize: 13, color: colors.ink }}>导出 JSON 备份</TSerif>
-              </View>
-            )}
-          </OutlineButton>
+          <View style={{ flexDirection: "row", gap: 8 }}>
+            <OutlineButton onPress={handleExportJson} disabled={exportingJson} style={{ flex: 1 }}>
+              {exportingJson ? (
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                  <Loader2 size={12} color={colors.ink} />
+                  <TSerif style={{ fontSize: 13, color: colors.ink }}>导出中…</TSerif>
+                </View>
+              ) : (
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                  <Download size={12} color={colors.ink} />
+                  <TSerif style={{ fontSize: 13, color: colors.ink }}>导出备份</TSerif>
+                </View>
+              )}
+            </OutlineButton>
+            <OutlineButton onPress={handleImport} disabled={importing} style={{ flex: 1 }}>
+              {importing ? (
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                  <Loader2 size={12} color={colors.ink} />
+                  <TSerif style={{ fontSize: 13, color: colors.ink }}>恢复中…</TSerif>
+                </View>
+              ) : (
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                  <Upload size={12} color={colors.ink} />
+                  <TSerif style={{ fontSize: 13, color: colors.ink }}>恢复备份</TSerif>
+                </View>
+              )}
+            </OutlineButton>
+          </View>
         </View>
 
         {exportResult ? (

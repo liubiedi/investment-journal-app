@@ -112,6 +112,7 @@ export default function LogScreen() {
         {adding && subTab === "trades" && (
           <TradeForm
             rules={app.rules}
+            onSaveAsThought={async (content) => { await app.addThought(content, content); setAdding(false); }}
             onSave={async (t) => {
               const saved = await app.addTrade(t);
               setAdding(false);
@@ -136,7 +137,7 @@ export default function LogScreen() {
         )}
         {adding && subTab === "thoughts" && (
           <ThoughtForm
-            onSave={async (content, raw) => { await app.addThought(content, raw); setAdding(false); }}
+            onSave={async (content, raw, emotion) => { await app.addThought(content, raw, emotion); setAdding(false); }}
             onCancel={() => setAdding(false)}
           />
         )}
@@ -425,6 +426,18 @@ function ThoughtRow({ thought, onDelete, onUpdate, onRequestFeedback, defaultMas
             {expanded ? thought.content : thought.content.length > 80 ? thought.content.slice(0, 80) + "…" : thought.content}
           </TSerif>
         </View>
+        {thought.emotion && (() => {
+          const em = getEmotion(thought.emotion);
+          const EIcon = EMOTION_ICONS[thought.emotion] || Meh;
+          return (
+            <View style={{ marginTop: 4, marginLeft: 80, flexDirection: "row", alignItems: "center", gap: 4 }}>
+              <EIcon size={10} color={em.color} />
+              <TMono style={{ fontSize: 10, color: em.color, letterSpacing: 1 }}>
+                {em.label.split(" ")[0].toUpperCase()}
+              </TMono>
+            </View>
+          );
+        })()}
         {hasFeedback && !expanded && (
           <View style={{ marginTop: 6, marginLeft: 80, flexDirection: "row", alignItems: "center", gap: 6 }}>
             <Quote size={9} color={colors.accent} />
@@ -493,7 +506,7 @@ function ThoughtRow({ thought, onDelete, onUpdate, onRequestFeedback, defaultMas
 }
 
 // ============================================================
-function TradeForm({ rules, onSave, onCancel }) {
+function TradeForm({ rules, onSave, onCancel, onSaveAsThought }) {
   const [mode, setMode] = useState("smart");
   const [action, setAction] = useState("buy");
   const [stock, setStock] = useState("");
@@ -519,7 +532,19 @@ function TradeForm({ rules, onSave, onCancel }) {
       setEmotion(res.emotion || "neutral");
       setParsed(true);
     } catch (e) {
-      setError(e.message === "NO_API_KEY" ? "请先在设置中配置 API key" : "AI 解析失败，请手动填写");
+      if (e.message === "NO_API_KEY") {
+        setError("请先在设置中配置 API key");
+      } else {
+        Alert.alert(
+          "AI 解析失败",
+          "无法自动解析这段描述，请选择处理方式：",
+          [
+            { text: "手动填写", onPress: () => { setMode("manual"); setReason(rawInput); } },
+            ...(onSaveAsThought ? [{ text: "存为心念", onPress: () => onSaveAsThought(rawInput) }] : []),
+            { text: "取消", style: "cancel" },
+          ]
+        );
+      }
     } finally {
       setParsing(false);
     }
@@ -711,6 +736,7 @@ function TradeForm({ rules, onSave, onCancel }) {
 // ============================================================
 function ThoughtForm({ onSave, onCancel }) {
   const [text, setText] = useState("");
+  const [emotion, setEmotion] = useState("neutral");
   const [saving, setSaving] = useState(false);
 
   return (
@@ -730,9 +756,29 @@ function ThoughtForm({ onSave, onCancel }) {
           style={{ minHeight: 160, fontSize: 15 }} />
       </View>
 
-      <View style={{ flexDirection: "row", gap: 8 }}>
+      <Field label="EMOTION · 情绪">
+        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+          {EMOTIONS.map((e) => {
+            const EI = EMOTION_ICONS[e.id];
+            const isActive = emotion === e.id;
+            return (
+              <Pressable key={e.id} onPress={() => setEmotion(e.id)}
+                style={{ paddingHorizontal: 12, paddingVertical: 8, flexDirection: "row", alignItems: "center", gap: 6,
+                  backgroundColor: isActive ? e.color : "transparent",
+                  borderWidth: isActive ? 0 : 1, borderColor: e.color + "60" }}>
+                <EI size={12} color={isActive ? colors.bg : e.color} />
+                <TMono style={{ fontSize: 11, color: isActive ? colors.bg : e.color }}>
+                  {e.label.split(" ")[0]}
+                </TMono>
+              </Pressable>
+            );
+          })}
+        </View>
+      </Field>
+
+      <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
         <FilledButton
-          onPress={async () => { setSaving(true); try { await onSave(text.trim(), text.trim()); } finally { setSaving(false); } }}
+          onPress={async () => { setSaving(true); try { await onSave(text.trim(), text.trim(), emotion); } finally { setSaving(false); } }}
           disabled={!text.trim() || saving}
           loading={saving}
           style={{ flex: 1 }}

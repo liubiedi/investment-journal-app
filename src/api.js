@@ -253,10 +253,28 @@ Infer emotion from tone. Match input language exactly.`;
     model: MODELS.fast,
     max_tokens: 512,
   });
-  const clean = raw.replace(/```json|```/g, "").trim();
+
+  // Strip markdown fences and normalize quotes (Chinese curly quotes → straight)
+  const clean = raw
+    .replace(/```json\s*/gi, "")
+    .replace(/```/g, "")
+    .replace(/“/g, '"')
+    .replace(/”/g, '"')
+    .trim();
+
   const s = clean.indexOf("{"), e = clean.lastIndexOf("}");
   if (s === -1) throw new Error("No JSON in response");
-  return JSON.parse(clean.slice(s, e + 1));
+
+  const parsed = JSON.parse(clean.slice(s, e + 1));
+  const VALID_ACTIONS = ["buy", "sell", "hold", "watch"];
+  return {
+    action: VALID_ACTIONS.includes(parsed.action) ? parsed.action : "buy",
+    stock: parsed.stock || "?",
+    reason: typeof parsed.reason === "string" ? parsed.reason.slice(0, 200) : "",
+    emotion: ["calm", "confident", "neutral", "anxious", "fearful"].includes(parsed.emotion)
+      ? parsed.emotion
+      : "neutral",
+  };
 }
 
 // Generate mentor feedback for a single trade or thought.

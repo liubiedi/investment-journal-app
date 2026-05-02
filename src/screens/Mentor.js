@@ -42,6 +42,33 @@ export default function MentorScreen() {
     if (m) setActiveMaster(m);
   }, [route.params?.autoMaster]);
 
+  // Auto-reply when Holdings pre-loads a user message and navigates here
+  useEffect(() => {
+    const ts = route.params?.autoReplyTs;
+    const m = route.params?.autoMaster || "default";
+    if (!ts) return;
+    (async () => {
+      const h = await db.listChat(m);
+      setHistory(h);
+      const last = h[h.length - 1];
+      if (!last || last.role !== "user") return;
+      setSending(true);
+      setError(""); setPendingRetry(null);
+      try {
+        const reply = await chatMessage(h.slice(0, -1), last.content, app.profile, m);
+        const updated = [...h, { role: "assistant", content: reply, masterId: m, createdAt: Date.now() }];
+        setHistory(updated);
+        await db.appendChat("assistant", reply, m);
+      } catch (e) {
+        setError(e?.message || "请求失败");
+        setPendingRetry(last.content);
+      } finally {
+        setSending(false);
+      }
+    })();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [route.params?.autoReplyTs]);
+
   const loadHistory = useCallback(async () => {
     const h = await db.listChat(activeMaster);
     setHistory(h);

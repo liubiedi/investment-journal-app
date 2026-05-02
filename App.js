@@ -135,8 +135,8 @@ export default function App() {
   }, []);
 
   // ---- thoughts ----
-  const addThought = useCallback(async (content, rawInput) => {
-    const created = await db.addThought(content, rawInput);
+  const addThought = useCallback(async (content, rawInput, emotion) => {
+    const created = await db.addThought(content, rawInput, emotion);
     setThoughts((prev) => [created, ...prev]);
     return created;
   }, []);
@@ -144,9 +144,9 @@ export default function App() {
     await db.deleteThought(id);
     setThoughts((prev) => prev.filter((t) => t.id !== id));
   }, []);
-  const updateThoughtById = useCallback(async (id, content) => {
-    await db.updateThought(id, content);
-    setThoughts((prev) => prev.map((t) => t.id === id ? { ...t, content } : t));
+  const updateThoughtById = useCallback(async (id, content, emotion) => {
+    await db.updateThought(id, content, emotion);
+    setThoughts((prev) => prev.map((t) => t.id === id ? { ...t, content, ...(emotion !== undefined ? { emotion } : {}) } : t));
   }, []);
   const updateThoughtFeedback = useCallback(async (id, feedbackArr) => {
     await db.updateThoughtFeedback(id, feedbackArr);
@@ -177,6 +177,24 @@ export default function App() {
     }));
   }, []);
 
+  // Reload all state from DB after a backup import
+  const reloadAll = useCallback(async () => {
+    const [p, r, dm, tr, th, hd, wn, mr, pc] = await Promise.all([
+      db.kvGet("philosophy", ""),
+      db.kvGet("rules", DEFAULT_RULES),
+      db.kvGet("defaultMaster", "default"),
+      db.listTrades(),
+      db.listThoughts(),
+      db.listHoldings(),
+      db.listWeeklyNotes(),
+      db.listMonthlyReviews(),
+      db.getPricesCache(),
+    ]);
+    setPhilosophy(p); setRules(r); setDefaultMaster(dm);
+    setTrades(tr); setThoughts(th); setHoldings(hd);
+    setWeeklyNotes(wn); setMonthlyReviews(mr); setPrices(pc);
+  }, []);
+
   const profile = useMemo(() => ({
     philosophy, rules, weeklyNotes, monthlyReviews, trades, holdings, prices,
   }), [philosophy, rules, weeklyNotes, monthlyReviews, trades, holdings, prices]);
@@ -195,6 +213,7 @@ export default function App() {
     addThought, deleteThoughtById, updateThoughtById, updateThoughtFeedback,
     addHolding, updateHoldingById, deleteHoldingById,
     savePricesData,
+    reloadAll,
   };
 
   if (!fontsLoaded || !bootstrapped) {
