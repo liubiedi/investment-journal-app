@@ -3,14 +3,13 @@
 import React, { useState, useRef } from "react";
 import {
   View, Text, Pressable, TextInput, ScrollView, ActivityIndicator,
-  StyleSheet,
+  StyleSheet, Modal, SafeAreaView,
 } from "react-native";
 import {
-  Pin, Edit2, Plus, X, Check, Loader2, Mic, MicOff, Quote, Trash2, ChevronLeft, MessageCircle,
+  Pin, Edit2, Plus, X, Check, Loader2, Quote, Trash2, ChevronLeft, MessageCircle, Maximize2,
 } from "lucide-react-native";
 import { colors, fonts, spacing } from "./theme";
 import { MASTERS, getMaster } from "./constants";
-import { useSpeech } from "./voice";
 import { yahooSearch } from "./api";
 
 // ========== Typography ==========
@@ -255,13 +254,63 @@ export function MasterChips({ active, onSelect }) {
 //   feedback: [{ masterId, text, createdAt }]
 //   onRequestMaster: (masterId, onChunk) => Promise<void>
 //   onContinueInMentor: (masterId, text) => void  — optional, shows "带入问道" button
+function FullFeedbackModal({ visible, text, masterName, onClose, onContinueInMentor }) {
+  return (
+    <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
+        <View style={{
+          flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+          paddingHorizontal: 20, paddingVertical: 14,
+          borderBottomWidth: 1, borderBottomColor: colors.divider,
+        }}>
+          <View>
+            <Kicker>MENTOR'S VIEW · 导师点评</Kicker>
+            <Text style={{ fontFamily: fonts.serifBold, fontSize: 18, color: colors.ink, marginTop: 2 }}>
+              {masterName}
+            </Text>
+          </View>
+          <Pressable onPress={onClose} hitSlop={12}>
+            <X size={18} color={colors.inkMuted} />
+          </Pressable>
+        </View>
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 24 }}>
+          <Text style={{ fontFamily: fonts.serif, fontSize: 16, lineHeight: 28, color: colors.ink }}>
+            {text}
+          </Text>
+        </ScrollView>
+        {onContinueInMentor && (
+          <View style={{
+            paddingHorizontal: 20, paddingVertical: 16,
+            borderTopWidth: 1, borderTopColor: colors.divider,
+          }}>
+            <Pressable
+              onPress={() => { onClose(); onContinueInMentor(); }}
+              style={{
+                flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8,
+                paddingVertical: 14, backgroundColor: colors.ink,
+              }}
+            >
+              <MessageCircle size={14} color={colors.accent} />
+              <Text style={{ fontFamily: fonts.serifBold, fontSize: 14, color: colors.bg }}>
+                带入问道继续讨论 ↗
+              </Text>
+            </Pressable>
+          </View>
+        )}
+      </SafeAreaView>
+    </Modal>
+  );
+}
+
+
 export function FeedbackBlock({ feedback, onRequestMaster, pending = false, defaultMaster = "default", onContinueInMentor }) {
   const [activeMaster, setActiveMaster] = useState(feedback?.[0]?.masterId || defaultMaster);
   const [loadingMaster, setLoadingMaster] = useState(null);
   const [streamingText, setStreamingText] = useState("");
   const [error, setError] = useState(null);
+  const [showModal, setShowModal] = useState(false);
   // Local cache so text is visible immediately after generation even before the
-  // feedback prop re-renders (the finallyblock cleared streamingText too early).
+  // feedback prop re-renders (the finally block cleared streamingText too early).
   const [localCache, setLocalCache] = useState({});
   const streamAccumRef = useRef("");
 
@@ -323,16 +372,32 @@ export function FeedbackBlock({ feedback, onRequestMaster, pending = false, defa
           </View>
         ) : current ? (
           <>
-            <TSerif style={{ fontSize: 14, lineHeight: 22 }}>{current.text}</TSerif>
-            {onContinueInMentor && (
-              <Pressable
-                onPress={() => onContinueInMentor(activeMaster, current.text)}
-                style={{ marginTop: 10, flexDirection: "row", alignItems: "center", gap: 5 }}
-              >
-                <MessageCircle size={10} color={colors.accent} />
-                <TMono style={{ fontSize: 10, color: colors.accent }}>带入问道继续讨论 ↗</TMono>
+            <TSerif style={{ fontSize: 14, lineHeight: 22 }} numberOfLines={6}>{current.text}</TSerif>
+            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 10 }}>
+              <Pressable onPress={() => setShowModal(true)}
+                style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
+                <Maximize2 size={10} color={colors.inkMuted} />
+                <TMono style={{ fontSize: 10, color: colors.inkMuted }}>全文查看</TMono>
               </Pressable>
-            )}
+              {onContinueInMentor && (
+                <Pressable
+                  onPress={() => onContinueInMentor(activeMaster, current.text)}
+                  style={{ flexDirection: "row", alignItems: "center", gap: 5 }}
+                >
+                  <MessageCircle size={10} color={colors.accent} />
+                  <TMono style={{ fontSize: 10, color: colors.accent }}>带入问道 ↗</TMono>
+                </Pressable>
+              )}
+            </View>
+            <FullFeedbackModal
+              visible={showModal}
+              text={current.text}
+              masterName={getMaster(activeMaster).zh}
+              onClose={() => setShowModal(false)}
+              onContinueInMentor={onContinueInMentor
+                ? () => onContinueInMentor(activeMaster, current.text)
+                : null}
+            />
           </>
         ) : (
           <Pressable onPress={() => handleSelect(activeMaster)}>
@@ -341,28 +406,6 @@ export function FeedbackBlock({ feedback, onRequestMaster, pending = false, defa
         )}
       </View>
     </View>
-  );
-}
-
-// ========== Voice mic button — small inline version ==========
-export function VoiceMic({ currentText, onChange, size = 32 }) {
-  const { listening, supported, start, stop } = useSpeech(onChange);
-  if (!supported) return null;
-  const Icon = listening ? MicOff : Mic;
-  return (
-    <Pressable
-      onPress={() => listening ? stop() : start(currentText || "")}
-      style={({ pressed }) => ({
-        width: size, height: size,
-        alignItems: "center", justifyContent: "center",
-        backgroundColor: listening ? colors.bad : "transparent",
-        borderWidth: listening ? 0 : 1,
-        borderColor: colors.divider,
-        opacity: pressed ? 0.7 : 1,
-      })}
-    >
-      <Icon size={14} color={listening ? colors.bg : colors.inkMuted} />
-    </Pressable>
   );
 }
 

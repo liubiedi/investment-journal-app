@@ -5,7 +5,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets, SafeAreaView } from "react-native-safe-area-context";
 import {
-  MessageCircle, Send, RotateCcw, Loader2, AlertCircle, Mic, MicOff,
+  MessageCircle, Send, RotateCcw, Loader2, AlertCircle,
 } from "lucide-react-native";
 import { useFocusEffect } from "@react-navigation/native";
 
@@ -13,10 +13,10 @@ import { colors, fonts } from "../theme";
 import { useApp } from "../context";
 import { ago } from "../utils";
 import { chatMessage, fetchLivePrices } from "../api";
-import { useSpeech } from "../voice";
+import { getMaster } from "../constants";
 import * as db from "../db";
 import {
-  TSerif, TSerifBold, TSerifItalic, TMono, Kicker, PaperInput,
+  TSerif, TSerifBold, TSerifItalic, TMono, Kicker, PaperInput, MasterChips,
 } from "../components";
 
 const PRICE_STALE_MS = 15 * 60 * 1000;
@@ -30,9 +30,8 @@ export default function MentorScreen() {
   const [error, setError] = useState("");
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState("");
+  const [activeMaster, setActiveMaster] = useState("default");
   const scrollRef = useRef(null);
-  const { listening, supported, start, stop } = useSpeech(setInput);
-
   // Reload chat history each time the screen comes into focus so that
   // entries written by "带入问道" from the Log screen appear immediately.
   useFocusEffect(
@@ -86,16 +85,16 @@ export default function MentorScreen() {
     const text = input.trim();
     if (!text || sending) return;
     setInput(""); setError("");
-    const userMsg = { role: "user", content: text };
+    const userMsg = { role: "user", content: text, masterId: activeMaster, createdAt: Date.now() };
     const newHistory = [...history, userMsg];
     setHistory(newHistory);
-    await db.appendChat("user", text);
+    await db.appendChat("user", text, activeMaster);
     setSending(true);
     try {
-      const reply = await chatMessage(history, text, app.profile, "default");
-      const updated = [...newHistory, { role: "assistant", content: reply }];
+      const reply = await chatMessage(history, text, app.profile, activeMaster);
+      const updated = [...newHistory, { role: "assistant", content: reply, masterId: activeMaster, createdAt: Date.now() }];
       setHistory(updated);
-      await db.appendChat("assistant", reply);
+      await db.appendChat("assistant", reply, activeMaster);
     } catch (e) {
       setError(e.message === "NO_API_KEY" ? "请先在设置中配置 API key" : "导师暂时失联，请稍后再试");
     } finally {
@@ -139,6 +138,9 @@ export default function MentorScreen() {
         </View>
         <TSerifBold style={{ fontSize: 26, letterSpacing: -0.5 }}>投资导师</TSerifBold>
         <TMono style={{ fontSize: 10, marginTop: 4, color: colors.inkMuted }}>已同步 · {ctxSummary}</TMono>
+        <View style={{ marginTop: 10 }}>
+          <MasterChips active={activeMaster} onSelect={setActiveMaster} />
+        </View>
 
         {hasHoldings && (
           <View style={{ marginTop: 8, flexDirection: "row", alignItems: "center", gap: 8 }}>
@@ -199,9 +201,27 @@ export default function MentorScreen() {
             </View>
           )}
 
-          {history.map((m, i) => (
-            <MessageBubble key={i} role={m.role} content={m.content} />
-          ))}
+          {history.map((m, i) => {
+            const prev = history[i - 1];
+            const mDate = m.createdAt ? new Date(m.createdAt).toDateString() : null;
+            const prevDate = prev?.createdAt ? new Date(prev.createdAt).toDateString() : null;
+            const showDateDivider = mDate && mDate !== prevDate;
+            const showMasterChange = i > 0 && m.masterId && prev.masterId && m.masterId !== prev.masterId;
+            return (
+              <React.Fragment key={i}>
+                {(showDateDivider || showMasterChange) && (
+                  <View style={{ alignItems: "center", marginVertical: 12, flexDirection: "row", gap: 8 }}>
+                    <View style={{ flex: 1, height: 1, backgroundColor: colors.dividerSoft }} />
+                    <TMono style={{ fontSize: 9 }}>
+                      {[showDateDivider && mDate && new Date(m.createdAt).toLocaleDateString("zh-CN", { month: "short", day: "numeric" }), showMasterChange && getMaster(m.masterId).zh].filter(Boolean).join(" · ")}
+                    </TMono>
+                    <View style={{ flex: 1, height: 1, backgroundColor: colors.dividerSoft }} />
+                  </View>
+                )}
+                <MessageBubble role={m.role} content={m.content} masterId={m.masterId} />
+              </React.Fragment>
+            );
+          })}
 
           {sending && (
             <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 8 }}>
@@ -221,19 +241,6 @@ export default function MentorScreen() {
           backgroundColor: colors.bg,
           flexDirection: "row", alignItems: "flex-end", gap: 8,
         }}>
-          {supported && (
-            <Pressable
-              onPress={() => listening ? stop() : start(input)}
-              style={{
-                width: 42, height: 42,
-                alignItems: "center", justifyContent: "center",
-                backgroundColor: listening ? colors.bad : "transparent",
-                borderWidth: listening ? 0 : 1, borderColor: colors.divider,
-              }}
-            >
-              {listening ? <MicOff size={15} color={colors.bg} /> : <Mic size={15} color={colors.inkMuted} />}
-            </Pressable>
-          )}
           <TextInput
             value={input}
             onChangeText={setInput}
@@ -265,26 +272,24 @@ export default function MentorScreen() {
   );
 }
 
-function MessageBubble({ role, content }) {
+function MessageBubble({ role, content, masterId }) {
   if (role === "user") {
     return (
       <View style={{ flexDirection: "row", justifyContent: "flex-end", marginBottom: 14 }}>
-        <View style={{
-          maxWidth: "85%", padding: 12,
-          backgroundColor: colors.ink,
-        }}>
+        <View style={{ maxWidth: "85%", padding: 12, backgroundColor: colors.ink }}>
           <TSerif style={{ color: colors.bg, fontSize: 14, lineHeight: 22 }}>{content}</TSerif>
         </View>
       </View>
     );
   }
+  const master = getMaster(masterId || "default");
   return (
     <View style={{ marginBottom: 18 }}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 6 }}>
         <View style={{ width: 18, height: 18, backgroundColor: colors.ink, alignItems: "center", justifyContent: "center" }}>
           <MessageCircle size={10} color={colors.accent} />
         </View>
-        <Kicker>MENTOR</Kicker>
+        <Kicker>{master.zh} · {master.en}</Kicker>
       </View>
       <TSerif style={{ fontSize: 15, lineHeight: 24 }}>{content}</TSerif>
     </View>

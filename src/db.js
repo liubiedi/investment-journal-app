@@ -100,6 +100,9 @@ async function initSchema(db) {
   `);
   // Migrations for existing databases (idempotent — fails silently if column exists).
   try { await db.runAsync("ALTER TABLE holdings ADD COLUMN buy_reason TEXT"); } catch {}
+  try { await db.runAsync("ALTER TABLE holdings ADD COLUMN buy_date TEXT"); } catch {}
+  try { await db.runAsync("ALTER TABLE chat_history ADD COLUMN master_id TEXT"); } catch {}
+  try { await db.runAsync("ALTER TABLE trades ADD COLUMN stock_name TEXT"); } catch {}
 }
 
 const newId = (prefix) => `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -221,7 +224,7 @@ export async function listHoldings() {
   return rows.map(r => ({
     id: r.id, symbol: r.symbol, displayName: r.display_name,
     shares: r.shares, costBasis: r.cost_basis,
-    currency: r.currency, buyReason: r.buy_reason, notes: r.notes, addedAt: r.added_at,
+    currency: r.currency, buyReason: r.buy_reason, notes: r.notes, buyDate: r.buy_date || null, addedAt: r.added_at,
   }));
 }
 
@@ -230,8 +233,8 @@ export async function addHolding(h) {
   const id = newId("holding");
   const now = Date.now();
   await db.runAsync(
-    `INSERT INTO holdings (id, symbol, display_name, shares, cost_basis, currency, buy_reason, notes, added_at) VALUES (?,?,?,?,?,?,?,?,?)`,
-    [id, h.symbol, h.displayName || null, h.shares, h.costBasis, h.currency || null, h.buyReason || null, h.notes || null, now]
+    `INSERT INTO holdings (id, symbol, display_name, shares, cost_basis, currency, buy_reason, notes, buy_date, added_at) VALUES (?,?,?,?,?,?,?,?,?,?)`,
+    [id, h.symbol, h.displayName || null, h.shares, h.costBasis, h.currency || null, h.buyReason || null, h.notes || null, h.buyDate || null, now]
   );
   return { ...h, id, addedAt: now };
 }
@@ -239,7 +242,7 @@ export async function addHolding(h) {
 export async function updateHolding(id, updates) {
   const db = await getDb();
   const fields = [], vals = [];
-  const map = { symbol: "symbol", displayName: "display_name", shares: "shares", costBasis: "cost_basis", currency: "currency", buyReason: "buy_reason", notes: "notes" };
+  const map = { symbol: "symbol", displayName: "display_name", shares: "shares", costBasis: "cost_basis", currency: "currency", buyReason: "buy_reason", notes: "notes", buyDate: "buy_date" };
   for (const k of Object.keys(updates)) {
     if (map[k]) { fields.push(`${map[k]} = ?`); vals.push(updates[k]); }
   }
@@ -320,15 +323,17 @@ export async function listMonthlyMentorMasters(monthKey) {
 // ---------- chat_history ----------
 export async function listChat() {
   const db = await getDb();
-  const rows = await db.getAllAsync("SELECT role, content FROM chat_history ORDER BY id ASC");
-  return rows;
+  const rows = await db.getAllAsync(
+    "SELECT role, content, master_id, created_at FROM chat_history ORDER BY id ASC"
+  );
+  return rows.map((r) => ({ role: r.role, content: r.content, masterId: r.master_id || "default", createdAt: r.created_at }));
 }
 
-export async function appendChat(role, content) {
+export async function appendChat(role, content, masterId = "default") {
   const db = await getDb();
   await db.runAsync(
-    "INSERT INTO chat_history (role, content, created_at) VALUES (?,?,?)",
-    [role, content, Date.now()]
+    "INSERT INTO chat_history (role, content, master_id, created_at) VALUES (?,?,?,?)",
+    [role, content, masterId, Date.now()]
   );
 }
 

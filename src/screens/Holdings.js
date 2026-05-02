@@ -1,15 +1,18 @@
 // Holdings screen — positions, live prices from Yahoo, currency-grouped totals
 import React, { useState, useMemo } from "react";
-import { View, ScrollView, Pressable, ActivityIndicator } from "react-native";
+import { View, ScrollView, Pressable, ActivityIndicator, Platform } from "react-native";
 import { useSafeAreaInsets, SafeAreaView } from "react-native-safe-area-context";
+import { useNavigation } from "@react-navigation/native";
 import {
-  Plus, RefreshCw, Loader2, Wallet, Trash2, ChevronLeft,
+  Plus, RefreshCw, Loader2, Wallet, Trash2, ChevronLeft, Calendar, MessageCircle,
 } from "lucide-react-native";
+import DateTimePicker from "@react-native-community/datetimepicker";
 
 import { colors, fonts } from "../theme";
 import { useApp } from "../context";
 import { fmtCurrency, ago } from "../utils";
 import { fetchLivePrices } from "../api";
+import * as db from "../db";
 import {
   TSerif, TSerifBold, TSerifItalic, TMono, Kicker,
   PaperInput, StockSearchInput, FilledButton, OutlineButton, Masthead, FormHeader, Field,
@@ -17,7 +20,20 @@ import {
 
 export default function HoldingsScreen() {
   const app = useApp();
+  const nav = useNavigation();
   const insets = useSafeAreaInsets();
+
+  const askMentor = async (h, price) => {
+    const ccy = h.currency || price?.currency || "";
+    const lines = [`我想聊聊持仓中的 ${h.displayName || h.symbol}（${h.symbol}）：`];
+    lines.push(`• 持有 ${h.shares} 股，成本 ${fmtCurrency(h.costBasis, ccy)}`);
+    if (price) lines.push(`• 当前价 ${fmtCurrency(price.price, price.currency)}，今日 ${price.changePercent >= 0 ? "+" : ""}${price.changePercent?.toFixed(2) ?? "?"}%`);
+    if (h.buyDate) lines.push(`• 买入时间：${h.buyDate}`);
+    if (h.buyReason) lines.push(`• 买入理由：${h.buyReason}`);
+    lines.push("请帮我分析一下这个持仓的现状，值得继续持有吗？");
+    await db.appendChat("user", lines.join("\n"));
+    nav.navigate("mentor");
+  };
   const [adding, setAdding] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -172,7 +188,8 @@ export default function HoldingsScreen() {
             />
           ) : (
             <HoldingRow key={h.id} holding={h} price={app.prices?.data?.[h.symbol]}
-              onEdit={() => setEditingId(h.id)} />
+              onEdit={() => setEditingId(h.id)}
+              onAskMentor={() => askMentor(h, app.prices?.data?.[h.symbol])} />
           )
         ))}
       </View>
@@ -181,7 +198,18 @@ export default function HoldingsScreen() {
   );
 }
 
-function HoldingRow({ holding, price, onEdit }) {
+function todayISO() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function fmtBuyDate(iso) {
+  if (!iso) return "";
+  const [y, m, d] = iso.split("-");
+  return `${y}.${m}.${d}`;
+}
+
+function HoldingRow({ holding, price, onEdit, onAskMentor }) {
   const cost = holding.shares * holding.costBasis;
   const hasLive = !!price;
   const market = hasLive ? holding.shares * price.price : cost;
@@ -204,6 +232,11 @@ function HoldingRow({ holding, price, onEdit }) {
           <TMono style={{ fontSize: 11, marginTop: 2, color: colors.inkMuted }}>
             {holding.shares} 股 · 成本 {fmtCurrency(holding.costBasis, ccy)}
           </TMono>
+          {holding.buyDate && (
+            <TMono style={{ fontSize: 10, marginTop: 1, color: colors.inkFaint }}>
+              买入 {fmtBuyDate(holding.buyDate)}
+            </TMono>
+          )}
         </View>
         <View style={{ alignItems: "flex-end" }}>
           {hasLive ? (
@@ -239,6 +272,11 @@ function HoldingRow({ holding, price, onEdit }) {
           {price.asOf}{price.resolvedTicker && price.resolvedTicker !== holding.symbol ? ` · ${price.resolvedTicker}` : ""}
         </TMono>
       )}
+      <Pressable onPress={() => onAskMentor?.()}
+        style={{ marginTop: 8, flexDirection: "row", alignItems: "center", gap: 5, alignSelf: "flex-start" }}>
+        <MessageCircle size={11} color={colors.accent} strokeWidth={1.5} />
+        <TMono style={{ fontSize: 10, color: colors.accent }}>带入问道 ↗</TMono>
+      </Pressable>
     </Pressable>
   );
 }
@@ -252,6 +290,8 @@ function HoldingForm({ initial, onSave, onCancel, onDelete }) {
   const [buyReason, setBuyReason] = useState(initial?.buyReason || "");
   const [notes, setNotes] = useState(initial?.notes || "");
   const [confirm, setConfirm] = useState(false);
+  const [buyDate, setBuyDate] = useState(initial?.buyDate || todayISO());
+  const [showDatePicker, setShowDatePicker] = useState(false);
 
   const canSave = symbol.trim() && parseFloat(shares) > 0 && parseFloat(costBasis) >= 0;
 
@@ -264,6 +304,7 @@ function HoldingForm({ initial, onSave, onCancel, onDelete }) {
       currency,
       buyReason: buyReason.trim(),
       notes: notes.trim(),
+      buyDate,
     });
   };
 
@@ -307,7 +348,7 @@ function HoldingForm({ initial, onSave, onCancel, onDelete }) {
 
       <Field label="CURRENCY · 币种">
         <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
-          {["USD", "CNY", "HKD", "EUR", "JPY"].map((c) => (
+          {["USD", "CNY", "HKD", "SGD", "EUR", "JPY"].map((c) => (
             <Pressable key={c} onPress={() => setCurrency(c)}
               style={{
                 paddingHorizontal: 12, paddingVertical: 6,
@@ -318,6 +359,33 @@ function HoldingForm({ initial, onSave, onCancel, onDelete }) {
             </Pressable>
           ))}
         </View>
+      </Field>
+
+      <Field label="BUY DATE · 买入时间">
+        <Pressable
+          onPress={() => setShowDatePicker(true)}
+          style={{
+            flexDirection: "row", alignItems: "center", gap: 10,
+            paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: colors.divider,
+          }}
+        >
+          <Calendar size={14} color={colors.accent} strokeWidth={1.5} />
+          <TSerif style={{ fontSize: 16, color: colors.ink }}>{fmtBuyDate(buyDate)}</TSerif>
+        </Pressable>
+        {showDatePicker && (
+          <DateTimePicker
+            value={new Date(buyDate + "T12:00:00")}
+            mode="date"
+            display={Platform.OS === "ios" ? "inline" : "calendar"}
+            onChange={(event, selectedDate) => {
+              setShowDatePicker(false);
+              if (event.type === "set" && selectedDate) {
+                const d = selectedDate;
+                setBuyDate(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`);
+              }
+            }}
+          />
+        )}
       </Field>
 
       <Field label="REASON TO BUY · 购买原因（可选）">

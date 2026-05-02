@@ -38,6 +38,7 @@ A personal, offline-first investment journaling Android app that combines struct
 | Fonts | **@expo-google-fonts/fraunces**, **@expo-google-fonts/jetbrains-mono** | Editorial serif + technical mono |
 | AI API | **DeepSeek API direct** (fetch, OpenAI-compatible) | No backend; BYOK model; cost-effective vs Anthropic |
 | Price Data | **Yahoo Finance public endpoints** (`query1.finance.yahoo.com/v8/finance/chart/`) | Free, no API key, global coverage |
+| Date Picker | **@react-native-community/datetimepicker** | Native Android calendar dialog; Expo SDK 54 / EAS compatible; no Modal wrapper needed |
 | Build | **EAS Build** (cloud) with APK profile | Produces installable `.apk` without local Android Studio |
 
 **Forbidden:**
@@ -118,9 +119,10 @@ CREATE TABLE holdings (
   display_name TEXT,
   shares REAL NOT NULL,
   cost_basis REAL NOT NULL,      -- per-share cost
-  currency TEXT,                 -- USD|CNY|HKD|EUR|JPY
+  currency TEXT,                 -- USD|CNY|HKD|SGD|EUR|JPY
   buy_reason TEXT,               -- investment thesis / why this position exists
   notes TEXT,
+  buy_date TEXT,                 -- YYYY-MM-DD; null for pre-feature holdings
   added_at INTEGER NOT NULL
 );
 
@@ -292,7 +294,8 @@ Sub-tab switcher: two full-width buttons at the top; active tab has ink backgrou
 - SYMBOL — `StockSearchInput` with Yahoo Finance autocomplete (debounced 400ms); selecting a result auto-fills DISPLAY NAME. Hint: "AAPL / 0700.HK / 腾讯…"
 - DISPLAY NAME (optional)
 - SHARES (numeric) + COST (numeric) — side by side
-- CURRENCY (chips: USD/CNY/HKD/EUR/JPY)
+- CURRENCY (chips: USD/CNY/HKD/SGD/EUR/JPY)
+- BUY DATE · 买入时间 — tappable date display (Calendar icon + formatted date); opens native Android calendar picker via `@react-native-community/datetimepicker`; defaults to today; stored as `YYYY-MM-DD` TEXT
 - REASON TO BUY · 购买原因 (multiline, optional) — investment thesis; included in mentor's investor profile context
 - NOTES (multiline, optional)
 
@@ -314,6 +317,7 @@ Sub-tab switcher: two full-width buttons at the top; active tab has ink backgrou
 3. Append response via `db.appendChat("assistant", reply)`.
 
 **Chat reload on focus:** The screen uses `useFocusEffect` to reload `chat_history` from DB each time it gains focus. This ensures that entries written by "带入问道" from the Log screen appear immediately without requiring a manual refresh.
+
 
 ### 5.7 Settings (hidden screen, route: `settings`)
 
@@ -398,7 +402,7 @@ When building `<investor_profile>`:
 ## 8. External APIs
 
 ### 8.1 DeepSeek API
-- Endpoint: `https://api.deepseek.com/v1/chat/completions` (OpenAI-compatible)
+- Endpoint: `https://api.deepseek.com/chat/completions` (OpenAI-compatible)
 - Headers: `Authorization: Bearer <key>`, `Content-Type: application/json`
 - Body: `{ model, max_tokens, messages: [{ role: "system", content: system }, ...userMessages] }`
 - Response: `data.choices[0].message.content`
@@ -766,6 +770,7 @@ An implementation is correct if:
 23. ✅ Tapping EDIT on an expanded thought row allows editing the full content; changes persist after restart.
 24. ✅ Switching between mentor chips (e.g., 林奇 → 芒格) after loading one master's feedback shows the second master's feedback correctly — does not blank or re-show the first master's text.
 25. ✅ Tapping "带入问道继续讨论 ↗" on a feedback entry navigates to the 问道 tab and shows the trade context + mentor feedback as the opening exchange of a conversation ready for follow-up.
+26. ✅ HoldingForm shows a tappable BUY DATE field defaulting to today; tapping opens the Android native calendar picker; the selected date is displayed in the holding row as "买入 YYYY.MM.DD".
 
 ---
 
