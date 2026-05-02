@@ -7,7 +7,23 @@
     "android": "expo start --android",
     "prebuild": "expo prebuild",
     "build:apk": "eas build -p android --profile preview",
-    "postinstall": "node scripts/patch-voice-gradle.js"
+    "postinstall": "node scripts/patch-voice-gradle.js",
+    "test": "jest"
+  },
+  "jest": {
+    "preset": "jest-expo",
+    "transformIgnorePatterns": [
+      "node_modules/(?!((jest-)?react-native|@react-native(-community)?)|expo(nent)?|@expo(nent)?/.*|@expo-google-fonts/.*|react-navigation|@react-navigation/.*|@unimodules/.*|unimodules|sentry-expo|native-base|react-native-svg|lucide-react-native)"
+    ],
+    "moduleNameMapper": {
+      "^expo-sqlite$": "<rootDir>/__mocks__/expo-sqlite.js",
+      "^expo-secure-store$": "<rootDir>/__mocks__/expo-secure-store.js",
+      "^expo-clipboard$": "<rootDir>/__mocks__/expo-clipboard.js",
+      "^expo-calendar$": "<rootDir>/__mocks__/expo-calendar.js",
+      "^expo-print$": "<rootDir>/__mocks__/expo-print.js",
+      "^expo-sharing$": "<rootDir>/__mocks__/expo-sharing.js",
+      "^@react-native-voice/voice$": "<rootDir>/__mocks__/@react-native-voice/voice.js"
+    }
   },
   "dependencies": {
     "@expo-google-fonts/fraunces": "^0.2.3",
@@ -40,7 +56,11 @@
   "devDependencies": {
     "@babel/core": "^7.20.0",
     "@expo/config-plugins": "~54.0.4",
-    "babel-preset-expo": "~54.0.0"
+    "@testing-library/jest-native": "^5.4.3",
+    "@testing-library/react-native": "^13.3.3",
+    "babel-preset-expo": "~54.0.0",
+    "jest": "^29.7.0",
+    "jest-expo": "~54.0.0"
   },
   "private": true
 }
