@@ -7,6 +7,7 @@ import { useSafeAreaInsets, SafeAreaView } from "react-native-safe-area-context"
 import {
   MessageCircle, Send, RotateCcw, Loader2, AlertCircle,
 } from "lucide-react-native";
+import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
 import { useFocusEffect, useRoute } from "@react-navigation/native";
 import * as Clipboard from "expo-clipboard";
 
@@ -17,7 +18,7 @@ import { chatMessage, fetchLivePrices } from "../api";
 import { getMaster } from "../constants";
 import * as db from "../db";
 import {
-  TSerif, TSerifBold, TSerifItalic, TMono, Kicker, PaperInput, MasterChips,
+  TSerif, TSerifBold, TSerifItalic, TMono, Kicker, MasterChips,
 } from "../components";
 
 const PRICE_STALE_MS = 15 * 60 * 1000;
@@ -26,6 +27,7 @@ export default function MentorScreen() {
   const app = useApp();
   const route = useRoute();
   const insets = useSafeAreaInsets();
+  const tabBarHeight = useBottomTabBarHeight();
   const [history, setHistory] = useState([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
@@ -187,6 +189,11 @@ export default function MentorScreen() {
   ];
 
   return (
+    <KeyboardAvoidingView
+      style={{ flex: 1 }}
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
+      keyboardVerticalOffset={tabBarHeight}
+    >
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }} edges={["top"]}>
       {/* Header */}
       <View style={{
@@ -237,15 +244,11 @@ export default function MentorScreen() {
         )}
       </View>
 
-      {/* Messages */}
-      <KeyboardAvoidingView
-        style={{ flex: 1 }}
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
-        keyboardVerticalOffset={64}
-      >
+      <View style={{ flex: 1 }}>
         <ScrollView
           ref={scrollRef}
           style={{ flex: 1 }}
+          keyboardShouldPersistTaps="handled"
           contentContainerStyle={{ padding: 20, paddingBottom: 20 }}
         >
           {history.length === 0 && (
@@ -312,7 +315,7 @@ export default function MentorScreen() {
         {/* Input row */}
         <View style={{
           paddingHorizontal: 12, paddingTop: 10,
-          paddingBottom: Math.max(10, insets.bottom - 20),
+          paddingBottom: Math.max(10, insets.bottom),
           borderTopWidth: 1, borderTopColor: colors.divider,
           backgroundColor: colors.bg,
           flexDirection: "row", alignItems: "flex-end", gap: 8,
@@ -343,8 +346,9 @@ export default function MentorScreen() {
             {sending ? <Loader2 size={15} color={colors.bg} /> : <Send size={15} color={colors.bg} />}
           </Pressable>
         </View>
-      </KeyboardAvoidingView>
+      </View>
     </SafeAreaView>
+    </KeyboardAvoidingView>
   );
 }
 
