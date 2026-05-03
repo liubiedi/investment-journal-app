@@ -1,6 +1,6 @@
 // Home screen — philosophy, rules, default mentor, stats
 import React, { useState, useEffect } from "react";
-import { View, ScrollView, Pressable, Alert } from "react-native";
+import { View, ScrollView, Pressable, Alert, KeyboardAvoidingView, Platform } from "react-native";
 import { useSafeAreaInsets, SafeAreaView } from "react-native-safe-area-context";
 import { useNavigation } from "@react-navigation/native";
 import { MessageCircle, ChevronRight, Sparkles, X, Edit2, Plus, Settings as SettingsIcon, Share2 } from "lucide-react-native";
@@ -71,8 +71,10 @@ export default function HomeScreen() {
   };
 
   return (
+    <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : "height"}>
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }} edges={["top"]}>
     <ScrollView
+      keyboardShouldPersistTaps="handled"
       style={{ flex: 1 }}
       contentContainerStyle={{ paddingBottom: 40 + insets.bottom }}
     >
@@ -226,6 +228,7 @@ export default function HomeScreen() {
       </Section>
     </ScrollView>
     </SafeAreaView>
+    </KeyboardAvoidingView>
   );
 }
 

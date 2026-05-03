@@ -1,6 +1,6 @@
 // Weekly notes screen with voice input
 import React, { useState, useEffect } from "react";
-import { View, ScrollView, Pressable } from "react-native";
+import { View, ScrollView, Pressable, KeyboardAvoidingView, Platform } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { weekKey, weekRange } from "../utils";
 import { colors, fonts } from "../theme";
@@ -23,7 +23,9 @@ export default function WeeklyScreen() {
   const unchanged = draft === (app.weeklyNotes[activeWeek] || "");
 
   return (
+    <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : "height"}>
     <ScrollView
+      keyboardShouldPersistTaps="handled"
       style={{ flex: 1, backgroundColor: colors.bg }}
       contentContainerStyle={{ paddingBottom: 40 + insets.bottom }}
     >
@@ -74,5 +76,6 @@ export default function WeeklyScreen() {
         </View>
       )}
     </ScrollView>
+    </KeyboardAvoidingView>
   );
 }

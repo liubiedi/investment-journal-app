@@ -1,6 +1,6 @@
 // Holdings screen — positions, live prices from Yahoo, currency-grouped totals
 import React, { useState, useMemo, useEffect, useCallback } from "react";
-import { View, ScrollView, Pressable, ActivityIndicator, Platform } from "react-native";
+import { View, ScrollView, Pressable, ActivityIndicator, Platform, KeyboardAvoidingView } from "react-native";
 import { useSafeAreaInsets, SafeAreaView } from "react-native-safe-area-context";
 import { useNavigation } from "@react-navigation/native";
 import {
@@ -77,8 +77,10 @@ export default function HoldingsScreen() {
   const freshness = ago(app.prices?.lastUpdated);
 
   return (
+    <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : "height"}>
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }} edges={["top"]}>
     <ScrollView
+      keyboardShouldPersistTaps="handled"
       style={{ flex: 1 }}
       contentContainerStyle={{ paddingBottom: 40 + insets.bottom }}
     >
@@ -202,6 +204,7 @@ export default function HoldingsScreen() {
       </View>
     </ScrollView>
     </SafeAreaView>
+    </KeyboardAvoidingView>
   );
 }
 

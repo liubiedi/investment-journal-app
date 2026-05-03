@@ -1,6 +1,6 @@
 // Monthly review screen: bullets (with voice) + mentor commentary by master
 import React, { useState, useEffect, useMemo } from "react";
-import { View, ScrollView, Pressable, ActivityIndicator } from "react-native";
+import { View, ScrollView, Pressable, ActivityIndicator, KeyboardAvoidingView, Platform } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Sparkles, Plus, Quote } from "lucide-react-native";
 
@@ -31,7 +31,9 @@ export default function MonthlyScreen() {
   const bullets = app.monthlyReviews[activeMonth] || ["", "", "", ""];
 
   return (
+    <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : "height"}>
     <ScrollView
+      keyboardShouldPersistTaps="handled"
       style={{ flex: 1, backgroundColor: colors.bg }}
       contentContainerStyle={{ paddingBottom: 40 + insets.bottom }}
     >
@@ -69,6 +71,7 @@ export default function MonthlyScreen() {
         defaultMaster={app.defaultMaster}
       />
     </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 

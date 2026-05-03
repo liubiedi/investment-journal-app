@@ -67,8 +67,9 @@ export default function LogScreen() {
   const [holdingPrompt, setHoldingPrompt] = useState(null); // { trade }
 
   return (
+    <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : "height"}>
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }} edges={["top"]}>
-      <ScrollView contentContainerStyle={{ paddingBottom: 40 + insets.bottom }}>
+      <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: 40 + insets.bottom }}>
         <Masthead
           kicker="LOG"
           title="记录"
@@ -221,6 +222,7 @@ export default function LogScreen() {
         />
       )}
     </SafeAreaView>
+    </KeyboardAvoidingView>
   );
 }
 
@@ -553,7 +555,7 @@ function TradeForm({ rules, onSave, onCancel, onSaveAsThought }) {
   const canSave = stock.trim() && reason.trim();
 
   return (
-    <ScrollView contentContainerStyle={{ padding: 20 }}>
+    <View style={{ padding: 20 }}>
       <FormHeader title="NEW TRADE" onCancel={onCancel} />
 
       {/* Mode toggle */}
@@ -729,7 +731,7 @@ function TradeForm({ rules, onSave, onCancel, onSaveAsThought }) {
       <TSerifItalic style={{ fontSize: 11, textAlign: "center", marginTop: 8 }}>
         在详情页可按需求教任一位导师点评
       </TSerifItalic>
-    </ScrollView>
+    </View>
   );
 }
 
@@ -740,7 +742,7 @@ function ThoughtForm({ onSave, onCancel }) {
   const [saving, setSaving] = useState(false);
 
   return (
-    <ScrollView contentContainerStyle={{ padding: 20 }}>
+    <View style={{ padding: 20 }}>
       <FormHeader title="NEW THOUGHT" onCancel={onCancel} />
 
       <TSerifItalic style={{ fontSize: 14, marginBottom: 16 }}>
@@ -790,7 +792,7 @@ function ThoughtForm({ onSave, onCancel }) {
       <TSerifItalic style={{ fontSize: 11, textAlign: "center", marginTop: 12 }}>
         保存后在详情页按需求教导师回应
       </TSerifItalic>
-    </ScrollView>
+    </View>
   );
 }
 
