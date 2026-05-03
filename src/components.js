@@ -3,8 +3,9 @@
 import React, { useState, useRef } from "react";
 import {
   View, Text, Pressable, TextInput, ScrollView, ActivityIndicator,
-  StyleSheet, Modal, SafeAreaView,
+  StyleSheet, Modal,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import {
   Pin, Edit2, Plus, X, Check, Loader2, Quote, Trash2, ChevronLeft, MessageCircle, Maximize2,
 } from "lucide-react-native";
