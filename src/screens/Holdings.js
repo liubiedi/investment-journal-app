@@ -30,6 +30,12 @@ export default function HoldingsScreen() {
     if (price) lines.push(`• 当前价 ${fmtCurrency(price.price, price.currency)}，今日 ${price.changePercent >= 0 ? "+" : ""}${price.changePercent?.toFixed(2) ?? "?"}%`);
     if (h.buyDate) lines.push(`• 买入时间：${h.buyDate}`);
     if (h.buyReason) lines.push(`• 买入理由：${h.buyReason}`);
+    if (h.notes) lines.push(`• 备注：${h.notes}`);
+    const reviews = h.id ? await db.listHoldingReviews(h.id) : [];
+    if (reviews.length > 0) {
+      lines.push("• 历次复盘记录：");
+      reviews.forEach((r) => lines.push(`  [${r.date}] ${r.content}`));
+    }
     lines.push("请帮我分析一下这个持仓的现状，值得继续持有吗？");
     const masterId = app.defaultMaster || "default";
     await db.appendChat("user", lines.join("\n"), masterId);
