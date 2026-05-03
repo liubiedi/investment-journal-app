@@ -196,8 +196,8 @@ export default function App() {
   }, []);
 
   const profile = useMemo(() => ({
-    philosophy, rules, weeklyNotes, monthlyReviews, trades, holdings, prices,
-  }), [philosophy, rules, weeklyNotes, monthlyReviews, trades, holdings, prices]);
+    philosophy, rules, weeklyNotes, monthlyReviews, trades, thoughts, holdings, prices,
+  }), [philosophy, rules, weeklyNotes, monthlyReviews, trades, thoughts, holdings, prices]);
 
   const ctx = {
     // state
