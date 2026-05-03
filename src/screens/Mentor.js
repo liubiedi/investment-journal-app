@@ -69,17 +69,20 @@ export default function MentorScreen() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [route.params?.autoReplyTs]);
 
-  const loadHistory = useCallback(async () => {
-    const h = await db.listChat(activeMaster);
-    setHistory(h);
-    setPendingRetry(null);
-    setError("");
+  const reloadChat = useCallback(() => {
+    async function run() {
+      const h = await db.listChat(activeMaster);
+      setHistory(h);
+      setPendingRetry(null);
+      setError("");
+    }
+    run();
   }, [activeMaster]);
 
   // Reload on screen focus (picks up 带入问道 entries from Log screen)
-  useFocusEffect(loadHistory);
+  useFocusEffect(reloadChat);
   // Reload when master changes while screen is already focused
-  useEffect(() => { loadHistory(); }, [loadHistory]);
+  useEffect(reloadChat, [reloadChat]);
 
   // Auto price refresh on mount if stale
   useEffect(() => {
