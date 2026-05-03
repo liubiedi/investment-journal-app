@@ -290,6 +290,8 @@ Sub-tab switcher: two full-width buttons at the top; active tab has ink backgrou
   - Footer: mono "as of" timestamp + resolved ticker if different.
   - Tap opens HoldingForm in edit mode (with delete option).
 
+- **"带入问道 ↗" button** on each holding row: builds a context message containing symbol, shares, cost, live price, buy date, buy reason, notes, and **all review log entries** (each as `[date] content`), appends it to chat history, then navigates to the 问道 tab.
+
 **HoldingForm fields:**
 - SYMBOL — `StockSearchInput` with Yahoo Finance autocomplete (debounced 400ms); selecting a result auto-fills DISPLAY NAME. Hint: "AAPL / 0700.HK / 腾讯…"
 - DISPLAY NAME (optional)
@@ -298,6 +300,13 @@ Sub-tab switcher: two full-width buttons at the top; active tab has ink backgrou
 - BUY DATE · 买入时间 — tappable date display (Calendar icon + formatted date); opens native Android calendar picker via `@react-native-community/datetimepicker`; defaults to today; stored as `YYYY-MM-DD` TEXT
 - REASON TO BUY · 购买原因 (multiline, optional) — investment thesis; included in mentor's investor profile context
 - NOTES (multiline, optional)
+
+**Review Log (edit mode only):**
+- Section "REVIEW LOG · 复盘记录" with "添加复盘" toggle button.
+- Add form: date picker (defaults to today) + multiline content input + "保存" / "取消".
+- Saved via `db.addHoldingReview(holdingId, date, content)` → persisted to `holding_reviews` table.
+- List shows entries newest-first: date (mono) + content (serif) + trash icon to delete.
+- Review entries are loaded on form mount via `db.listHoldingReviews(holdingId)` and included in the "带入问道" mentor message.
 
 ### 5.6 Mentor (tab: 问道, route: `mentor`)
 
@@ -771,6 +780,8 @@ An implementation is correct if:
 24. ✅ Switching between mentor chips (e.g., 林奇 → 芒格) after loading one master's feedback shows the second master's feedback correctly — does not blank or re-show the first master's text.
 25. ✅ Tapping "带入问道继续讨论 ↗" on a feedback entry navigates to the 问道 tab and shows the trade context + mentor feedback as the opening exchange of a conversation ready for follow-up.
 26. ✅ HoldingForm shows a tappable BUY DATE field defaulting to today; tapping opens the Android native calendar picker; the selected date is displayed in the holding row as "买入 YYYY.MM.DD".
+27. ✅ Tapping "带入问道 ↗" on a holding row includes all review log entries (date + content) in the mentor context message alongside buy reason and notes.
+28. ✅ "导出 Vault" in Settings exports all thoughts as individual Markdown files under `Thoughts/`; the `profile` object passed to `exportToObsidianVault` includes `thoughts`.
 
 ---
 
