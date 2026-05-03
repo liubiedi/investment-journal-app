@@ -21,7 +21,7 @@
 
 import * as FileSystem from "expo-file-system/legacy";
 import * as Sharing from "expo-sharing";
-import { zip } from "react-native-zip-archive";
+import JSZip from "jszip";
 
 import * as db from "./db";
 import { getMaster } from "./constants";
@@ -388,47 +388,25 @@ export async function exportToObsidianVault(appData, strategyReport = null) {
     prices,
   } = appData;
 
-  // Use a fresh staging directory each time
   const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
-  const stagingRoot = `${FileSystem.cacheDirectory}vault-export-${stamp}/`;
+  const vault = new JSZip();
   const vaultName = "Investment Journal";
-  const vaultRoot = `${stagingRoot}${vaultName}/`;
-
-  // Clean any prior staging dir (cache might have leftovers)
-  try { await FileSystem.deleteAsync(stagingRoot, { idempotent: true }); } catch {}
-
-  // Create folder structure
-  const folders = [
-    `${vaultRoot}_Foundations/`,
-    `${vaultRoot}_Strategy/`,
-    `${vaultRoot}Trades/`,
-    `${vaultRoot}Thoughts/`,
-    `${vaultRoot}Weekly/`,
-    `${vaultRoot}Monthly/`,
-    `${vaultRoot}Holdings/`,
-  ];
-  for (const f of folders) {
-    await FileSystem.makeDirectoryAsync(f, { intermediates: true });
-  }
 
   let fileCount = 0;
-  const writeFile = async (relPath, content) => {
-    await FileSystem.writeAsStringAsync(`${vaultRoot}${relPath}`, content, {
-      encoding: FileSystem.EncodingType.UTF8,
-    });
+  const addFile = (relPath, content) => {
+    vault.file(`${vaultName}/${relPath}`, content);
     fileCount++;
   };
 
   // 1. Foundations
-  await writeFile("_Foundations/Philosophy.md", buildPhilosophyFile(philosophy));
-  await writeFile("_Foundations/Rules.md", buildRulesFile(rules));
+  addFile("_Foundations/Philosophy.md", buildPhilosophyFile(philosophy));
+  addFile("_Foundations/Rules.md", buildRulesFile(rules));
 
   // 2. Strategy report — if provided
   if (strategyReport) {
     const reportDate = new Date().toISOString().slice(0, 10);
-    await writeFile(`_Strategy/StrategyReport-${reportDate}.md`, strategyReport);
+    addFile(`_Strategy/StrategyReport-${reportDate}.md`, strategyReport);
   } else {
-    // Write a placeholder so the folder shows up and user knows it exists
     const placeholder = [
       fm({ type: "strategy-placeholder", tags: ["strategy"] }),
       "",
@@ -439,7 +417,7 @@ export async function exportToObsidianVault(appData, strategyReport = null) {
       "Return to the app → Settings → Generate Strategy Report to create your AI-powered analysis.",
       "",
     ].join("\n");
-    await writeFile("_Strategy/StrategyReport-placeholder.md", placeholder);
+    addFile("_Strategy/StrategyReport-placeholder.md", placeholder);
   }
 
   // 3. Trades — one file per trade
@@ -447,21 +425,20 @@ export async function exportToObsidianVault(appData, strategyReport = null) {
     const date = yyyyMmDd(t.date);
     const action = (t.action || "").toUpperCase();
     const filename = safeName(`${date} ${action} ${t.stock}`) + ".md";
-    await writeFile(`Trades/${filename}`, buildTradeFile(t));
+    addFile(`Trades/${filename}`, buildTradeFile(t));
   }
 
   // 4. Thoughts — one file per thought
-  for (const t of thoughts) {
+  for (const t of (thoughts || [])) {
     const date = yyyyMmDd(t.date);
     const firstLine = (t.content || "").split("\n")[0].slice(0, 25);
     const filename = safeName(`${date} ${firstLine}`) + ".md";
-    await writeFile(`Thoughts/${filename}`, buildThoughtFile(t));
+    addFile(`Thoughts/${filename}`, buildThoughtFile(t));
   }
 
   // 5. Weekly — one file per week
   for (const [wk, text] of Object.entries(weeklyNotes || {})) {
-    const filename = `${wk}.md`;
-    await writeFile(`Weekly/${filename}`, buildWeeklyFile(wk, text));
+    addFile(`Weekly/${wk}.md`, buildWeeklyFile(wk, text));
   }
 
   // 6. Monthly — one file per month (gather trades + cached mentor commentary)
@@ -474,26 +451,28 @@ export async function exportToObsidianVault(appData, strategyReport = null) {
     const monthTrades = trades.filter((t) => monthKey(t.date) === mk);
     if (bullets.length === 0 && monthTrades.length === 0) continue;
     const content = await buildMonthlyFile(mk, bullets, monthTrades);
-    await writeFile(`Monthly/${mk}.md`, content);
+    addFile(`Monthly/${mk}.md`, content);
   }
 
   // 7. Holdings snapshot
-  await writeFile("Holdings/Snapshot.md", buildHoldingsFile(holdings || [], prices));
+  addFile("Holdings/Snapshot.md", buildHoldingsFile(holdings || [], prices));
 
   // 8. Index
-  await writeFile("_Index.md", buildIndexFile({
+  addFile("_Index.md", buildIndexFile({
     tradeCount: trades.length,
-    thoughtCount: thoughts.length,
+    thoughtCount: (thoughts || []).length,
     weeklyCount: Object.keys(weeklyNotes || {}).length,
     monthlyCount: Object.keys(monthlyReviews || {}).length,
     holdingsCount: (holdings || []).length,
     hasStrategyReport: !!strategyReport,
   }));
 
-  // 9. Zip the entire vault
+  // 9. Generate zip in memory → write base64 to cache (no native module needed)
+  const zipBase64 = await vault.generateAsync({ type: "base64" });
   const zipPath = `${FileSystem.cacheDirectory}InvestmentJournal-${stamp}.zip`;
-  try { await FileSystem.deleteAsync(zipPath, { idempotent: true }); } catch {}
-  await zip(stagingRoot, zipPath);
+  await FileSystem.writeAsStringAsync(zipPath, zipBase64, {
+    encoding: FileSystem.EncodingType.Base64,
+  });
 
   // 10. Trigger system share sheet
   let sharedSuccessfully = false;
@@ -509,9 +488,6 @@ export async function exportToObsidianVault(appData, strategyReport = null) {
       sharedSuccessfully = false;
     }
   }
-
-  // 11. Cleanup staging dir (zip stays in cache)
-  try { await FileSystem.deleteAsync(stagingRoot, { idempotent: true }); } catch {}
 
   return { path: zipPath, fileCount, sharedSuccessfully };
 }
