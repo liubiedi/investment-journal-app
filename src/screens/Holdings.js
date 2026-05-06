@@ -401,12 +401,15 @@ function HoldingForm({ initial, onSave, onCancel, onDelete }) {
           <DateTimePicker
             value={new Date(buyDate + "T12:00:00")}
             mode="date"
-            display={Platform.OS === "ios" ? "inline" : "calendar"}
+            display={Platform.OS === "ios" ? "inline" : "default"}
             onChange={(event, selectedDate) => {
-              setShowDatePicker(false);
-              if (event.type === "set" && selectedDate) {
+              if (Platform.OS === "android") setShowDatePicker(false);
+              if (selectedDate && event.type !== "dismissed") {
                 const d = selectedDate;
                 setBuyDate(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`);
+                if (Platform.OS === "ios") setShowDatePicker(false);
+              } else if (event.type === "dismissed") {
+                setShowDatePicker(false);
               }
             }}
           />
@@ -447,12 +450,15 @@ function HoldingForm({ initial, onSave, onCancel, onDelete }) {
                 <DateTimePicker
                   value={new Date(reviewDate + "T12:00:00")}
                   mode="date"
-                  display={Platform.OS === "ios" ? "inline" : "calendar"}
+                  display={Platform.OS === "ios" ? "inline" : "default"}
                   onChange={(event, selectedDate) => {
-                    setShowReviewDatePicker(false);
-                    if (event.type === "set" && selectedDate) {
+                    if (Platform.OS === "android") setShowReviewDatePicker(false);
+                    if (selectedDate && event.type !== "dismissed") {
                       const d = selectedDate;
                       setReviewDate(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`);
+                      if (Platform.OS === "ios") setShowReviewDatePicker(false);
+                    } else if (event.type === "dismissed") {
+                      setShowReviewDatePicker(false);
                     }
                   }}
                 />

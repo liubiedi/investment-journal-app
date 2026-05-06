@@ -14,9 +14,11 @@ export async function getDb() {
 }
 
 async function initSchema(db) {
-  await db.execAsync(`
-    PRAGMA journal_mode = WAL;
+  // Set WAL mode in a separate call — iOS 26 SQLite rejects mixing PRAGMAs
+  // and DDL statements in a single execAsync batch.
+  await db.execAsync("PRAGMA journal_mode = WAL;");
 
+  await db.execAsync(`
     CREATE TABLE IF NOT EXISTS kv (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
