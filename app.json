@@ -6,7 +6,6 @@
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
-    "newArchEnabled": false,
     "splash": {
       "image": "./assets/splash.png",
       "resizeMode": "contain",
@@ -20,8 +19,6 @@
       "bundleIdentifier": "com.liubiedi.investmentjournal",
       "deploymentTarget": "16.0",
       "infoPlist": {
-        "NSMicrophoneUsageDescription": "This app uses the microphone for voice journaling.",
-        "NSSpeechRecognitionUsageDescription": "This app uses speech recognition to convert your spoken journal entries to text.",
         "NSCalendarsUsageDescription": "Allow 投资日志 to access your calendar to create trade reminders.",
         "NSCalendarsFullAccessUsageDescription": "Allow 投资日志 to access your calendar to create trade reminders."
       }
@@ -33,20 +30,12 @@
         "backgroundColor": "#f5f1e8"
       },
       "permissions": [
-        "android.permission.RECORD_AUDIO",
         "android.permission.INTERNET"
       ]
     },
     "plugins": [
       "expo-font",
       "expo-secure-store",
-      [
-        "@react-native-voice/voice",
-        {
-          "microphonePermission": "This app uses the microphone for voice journaling.",
-          "speechRecognitionPermission": "This app uses speech recognition to convert your spoken journal entries to text."
-        }
-      ],
       "@react-native-community/datetimepicker",
       [
         "expo-calendar",

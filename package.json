@@ -7,7 +7,6 @@
     "android": "expo start --android",
     "prebuild": "expo prebuild",
     "build:apk": "eas build -p android --profile preview",
-    "postinstall": "node scripts/patch-voice-gradle.js",
     "test": "jest"
   },
   "jest": {
@@ -21,15 +20,13 @@
       "^expo-clipboard$": "<rootDir>/__mocks__/expo-clipboard.js",
       "^expo-calendar$": "<rootDir>/__mocks__/expo-calendar.js",
       "^expo-print$": "<rootDir>/__mocks__/expo-print.js",
-      "^expo-sharing$": "<rootDir>/__mocks__/expo-sharing.js",
-      "^@react-native-voice/voice$": "<rootDir>/__mocks__/@react-native-voice/voice.js"
+      "^expo-sharing$": "<rootDir>/__mocks__/expo-sharing.js"
     }
   },
   "dependencies": {
     "@expo-google-fonts/fraunces": "^0.2.3",
     "@expo-google-fonts/jetbrains-mono": "^0.2.3",
     "@react-native-community/datetimepicker": "8.4.4",
-    "@react-native-voice/voice": "^3.2.4",
     "@react-navigation/bottom-tabs": "^6.6.0",
     "@react-navigation/native": "^6.1.18",
     "@react-navigation/native-stack": "^6.10.0",
