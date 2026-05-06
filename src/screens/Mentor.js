@@ -1,11 +1,11 @@
 // Mentor screen — chat with AI mentor. Auto-refreshes prices on mount if stale.
 import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import {
-  View, ScrollView, Pressable, ActivityIndicator, KeyboardAvoidingView, Platform, TextInput,
+  View, ScrollView, Pressable, ActivityIndicator, KeyboardAvoidingView, Platform, TextInput, Modal, Text,
 } from "react-native";
 import { useSafeAreaInsets, SafeAreaView } from "react-native-safe-area-context";
 import {
-  MessageCircle, Send, RotateCcw, Loader2, AlertCircle,
+  MessageCircle, Send, RotateCcw, Loader2, AlertCircle, Maximize2, X,
 } from "lucide-react-native";
 import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
 import { useFocusEffect, useRoute } from "@react-navigation/native";
@@ -354,6 +354,7 @@ export default function MentorScreen() {
 
 function MessageBubble({ role, content, masterId }) {
   const [copied, setCopied] = useState(false);
+  const [showFullText, setShowFullText] = useState(false);
 
   const handleCopy = async () => {
     await Clipboard.setStringAsync(content);
@@ -376,6 +377,7 @@ function MessageBubble({ role, content, masterId }) {
   }
 
   const master = getMaster(masterId || "default");
+  const isLongReply = content.length > 1200;
   return (
     <Pressable onLongPress={handleCopy} delayLongPress={400} style={{ marginBottom: 18 }}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 6 }}>
@@ -387,7 +389,51 @@ function MessageBubble({ role, content, masterId }) {
           <TMono style={{ fontSize: 9, color: colors.accent }}>已复制 ✓</TMono>
         )}
       </View>
-      <TSerif style={{ fontSize: 15, lineHeight: 24 }}>{content}</TSerif>
+      <TSerif style={{ fontSize: 15, lineHeight: 24 }} numberOfLines={isLongReply ? 14 : undefined}>{content}</TSerif>
+      {isLongReply && (
+        <Pressable
+          onPress={() => setShowFullText(true)}
+          style={{ flexDirection: "row", alignItems: "center", gap: 5, marginTop: 8 }}
+        >
+          <Maximize2 size={10} color={colors.inkMuted} />
+          <TMono style={{ fontSize: 10, color: colors.inkMuted }}>FULL TEXT</TMono>
+        </Pressable>
+      )}
+      <FullMessageModal
+        visible={showFullText}
+        content={content}
+        masterName={master.name}
+        onClose={() => setShowFullText(false)}
+      />
     </Pressable>
+  );
+}
+
+function FullMessageModal({ visible, content, masterName, onClose }) {
+  return (
+    <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
+        <View style={{
+          flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+          paddingHorizontal: 20, paddingVertical: 14,
+          borderBottomWidth: 1, borderBottomColor: colors.divider,
+        }}>
+          <View style={{ flex: 1, paddingRight: 12 }}>
+            <Kicker>MENTOR REPLY</Kicker>
+            <Text style={{ fontFamily: fonts.serifBold, fontSize: 18, color: colors.ink, marginTop: 2 }}>
+              {masterName}
+            </Text>
+          </View>
+          <Pressable onPress={onClose} hitSlop={12}>
+            <X size={18} color={colors.inkMuted} />
+          </Pressable>
+        </View>
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 24 }}>
+          <Text style={{ fontFamily: fonts.serif, fontSize: 16, lineHeight: 28, color: colors.ink }}>
+            {content}
+          </Text>
+        </ScrollView>
+      </SafeAreaView>
+    </Modal>
   );
 }

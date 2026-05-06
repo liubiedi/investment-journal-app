@@ -1,9 +1,9 @@
 // Home screen — philosophy, rules, default mentor, stats
 import React, { useState, useEffect } from "react";
-import { View, ScrollView, Pressable, Alert, KeyboardAvoidingView, Platform } from "react-native";
+import { View, ScrollView, Pressable, Alert, KeyboardAvoidingView, Platform, Modal, Text } from "react-native";
 import { useSafeAreaInsets, SafeAreaView } from "react-native-safe-area-context";
 import { useNavigation } from "@react-navigation/native";
-import { MessageCircle, ChevronRight, Sparkles, X, Edit2, Plus, Settings as SettingsIcon, Share2 } from "lucide-react-native";
+import { MessageCircle, ChevronRight, Sparkles, X, Edit2, Plus, Settings as SettingsIcon, Share2, Maximize2 } from "lucide-react-native";
 import * as Print from "expo-print";
 import * as Sharing from "expo-sharing";
 
@@ -11,6 +11,7 @@ import { useApp } from "../context";
 import { colors, fonts } from "../theme";
 import { monthKey, isLastWeekOfMonth, fmtDate } from "../utils";
 import { generateStrategyReport } from "../api";
+import * as db from "../db";
 import {
   TSerif, TSerifBold, TSerifItalic, TMono, Kicker,
   Section, Stat, PaperInput, FilledButton, OutlineButton, MasterChips,
@@ -32,6 +33,7 @@ export default function HomeScreen() {
   const [generatingReport, setGeneratingReport] = useState(false);
   const [reportError, setReportError] = useState("");
   const [exportingPdf, setExportingPdf] = useState(false);
+  const [showReportModal, setShowReportModal] = useState(false);
 
   const handleGenerateReport = async () => {
     setGeneratingReport(true); setReportError("");
@@ -49,7 +51,7 @@ export default function HomeScreen() {
     if (!strategyReport) return;
     setExportingPdf(true);
     try {
-      const body = strategyReport.replace(/^---[\s\S]*?---\n*/, "");
+      const body = stripReportFrontMatter(strategyReport);
       const html = `<!DOCTYPE html><html><head><meta charset="utf-8">
         <style>body{font-family:Georgia,serif;padding:48px;max-width:720px;margin:0 auto;font-size:15px;line-height:1.7;color:#1a1a1a}
         h1,h2,h3{font-weight:bold;margin-top:1.5em}pre,code{font-family:monospace;font-size:13px}
@@ -68,6 +70,15 @@ export default function HomeScreen() {
     } finally {
       setExportingPdf(false);
     }
+  };
+
+  const handleDiscussStrategyReport = async () => {
+    if (!strategyReport) return;
+    const body = stripReportFrontMatter(strategyReport);
+    await db.appendChat("user", "I want to discuss my full Investment Strategy Profile. Please help me turn it into concrete next actions.", "default");
+    await db.appendChat("assistant", body, "default");
+    setShowReportModal(false);
+    nav.navigate("mentor", { autoMaster: "default" });
   };
 
   return (
@@ -194,9 +205,21 @@ export default function HomeScreen() {
 
         {strategyReport && (
           <View style={{ marginBottom: 14, padding: 14, backgroundColor: colors.bgCard, borderWidth: 1, borderColor: colors.dividerSoft }}>
-            <TSerif style={{ fontSize: 14, lineHeight: 24, color: colors.ink }}>
-              {strategyReport.replace(/^---[\s\S]*?---\n*/, "")}
+            <TSerif style={{ fontSize: 14, lineHeight: 24, color: colors.ink }} numberOfLines={10}>
+              {stripReportFrontMatter(strategyReport)}
             </TSerif>
+            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 12, gap: 12 }}>
+              <Pressable onPress={() => setShowReportModal(true)}
+                style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
+                <Maximize2 size={11} color={colors.inkMuted} />
+                <TMono style={{ fontSize: 10, color: colors.inkMuted }}>FULL REPORT</TMono>
+              </Pressable>
+              <Pressable onPress={handleDiscussStrategyReport}
+                style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
+                <MessageCircle size={11} color={colors.accent} />
+                <TMono style={{ fontSize: 10, color: colors.accent }}>DISCUSS IN MENTOR</TMono>
+              </Pressable>
+            </View>
           </View>
         )}
 
@@ -216,7 +239,7 @@ export default function HomeScreen() {
         </FilledButton>
 
         {strategyReport && (
-          <OutlineButton onPress={handleExportPdf} disabled={exportingPdf}>
+          <OutlineButton onPress={handleExportPdf} disabled={exportingPdf} style={{ marginBottom: 8 }}>
             <Share2 size={13} color={colors.ink} />
             <TSerif style={{ fontSize: 13, color: colors.ink }}>{exportingPdf ? "生成 PDF 中…" : "导出 PDF"}</TSerif>
           </OutlineButton>
@@ -227,8 +250,84 @@ export default function HomeScreen() {
         </TSerifItalic>
       </Section>
     </ScrollView>
+    <StrategyReportModal
+      visible={showReportModal}
+      report={strategyReport}
+      exportingPdf={exportingPdf}
+      onClose={() => setShowReportModal(false)}
+      onExportPdf={handleExportPdf}
+      onDiscuss={handleDiscussStrategyReport}
+    />
     </SafeAreaView>
     </KeyboardAvoidingView>
+  );
+}
+
+function stripReportFrontMatter(report) {
+  return (report || "").replace(/^---[\s\S]*?---\n*/, "");
+}
+
+function StrategyReportModal({ visible, report, exportingPdf, onClose, onExportPdf, onDiscuss }) {
+  const body = stripReportFrontMatter(report);
+  return (
+    <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
+        <View style={{
+          flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+          paddingHorizontal: 20, paddingVertical: 14,
+          borderBottomWidth: 1, borderBottomColor: colors.divider,
+        }}>
+          <View style={{ flex: 1, paddingRight: 12 }}>
+            <Kicker>STRATEGY PROFILE</Kicker>
+            <Text style={{ fontFamily: fonts.serifBold, fontSize: 18, color: colors.ink, marginTop: 2 }}>
+              Investment Strategy Report
+            </Text>
+          </View>
+          <Pressable onPress={onClose} hitSlop={12}>
+            <X size={18} color={colors.inkMuted} />
+          </Pressable>
+        </View>
+
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 24 }}>
+          <Text style={{ fontFamily: fonts.serif, fontSize: 16, lineHeight: 28, color: colors.ink }}>
+            {body}
+          </Text>
+        </ScrollView>
+
+        <View style={{
+          paddingHorizontal: 20, paddingVertical: 16,
+          borderTopWidth: 1, borderTopColor: colors.divider,
+          gap: 10,
+        }}>
+          <Pressable
+            onPress={onDiscuss}
+            style={{
+              flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8,
+              paddingVertical: 14, backgroundColor: colors.ink,
+            }}
+          >
+            <MessageCircle size={14} color={colors.accent} />
+            <Text style={{ fontFamily: fonts.serifBold, fontSize: 14, color: colors.bg }}>
+              Discuss in Mentor
+            </Text>
+          </Pressable>
+          <Pressable
+            onPress={onExportPdf}
+            disabled={exportingPdf}
+            style={{
+              flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8,
+              paddingVertical: 12, borderWidth: 1, borderColor: colors.divider,
+              opacity: exportingPdf ? 0.5 : 1,
+            }}
+          >
+            <Share2 size={13} color={colors.ink} />
+            <Text style={{ fontFamily: fonts.serif, fontSize: 13, color: colors.ink }}>
+              {exportingPdf ? "Generating PDF..." : "Export PDF"}
+            </Text>
+          </Pressable>
+        </View>
+      </SafeAreaView>
+    </Modal>
   );
 }
 
