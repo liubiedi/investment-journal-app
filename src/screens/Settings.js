@@ -5,7 +5,7 @@ import { useSafeAreaInsets, SafeAreaView } from "react-native-safe-area-context"
 import {
   Key, Download, Upload, Info, Trash2, ExternalLink, Check, Loader2, FileText, BookMarked,
 } from "lucide-react-native";
-import * as FileSystem from "expo-file-system";
+import * as FileSystem from "expo-file-system/legacy";
 import * as Sharing from "expo-sharing";
 import * as DocumentPicker from "expo-document-picker";
 
