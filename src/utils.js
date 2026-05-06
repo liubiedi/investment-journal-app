@@ -41,7 +41,7 @@ export const isLastWeekOfMonth = () => {
 };
 
 export const fmtCurrency = (value, ccy) => {
-  const sym = { USD: "$", CNY: "¥", HKD: "HK$", EUR: "€", GBP: "£", JPY: "¥" }[ccy] || "";
+  const sym = { USD: "$", CNY: "¥", HKD: "HK$", EUR: "€", GBP: "£", JPY: "¥", SGD: "S$" }[ccy] || "";
   const abs = Math.abs(value);
   let str;
   if (abs >= 1e6) str = (value / 1e6).toFixed(2) + "M";

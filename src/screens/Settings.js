@@ -3,14 +3,15 @@ import React, { useState, useEffect } from "react";
 import { View, ScrollView, Pressable, Alert, Linking } from "react-native";
 import { useSafeAreaInsets, SafeAreaView } from "react-native-safe-area-context";
 import {
-  Key, Mic, Download, Info, Trash2, ExternalLink, Check, Loader2, FileText, BookMarked,
+  Key, Download, Upload, Info, Trash2, ExternalLink, Check, Loader2, FileText, BookMarked,
 } from "lucide-react-native";
-import * as FileSystem from "expo-file-system";
+import * as FileSystem from "expo-file-system/legacy";
 import * as Sharing from "expo-sharing";
+import * as DocumentPicker from "expo-document-picker";
 
 import { colors, fonts } from "../theme";
 import { useApp } from "../context";
-import { getApiKey, setApiKey, clearApiKey, generateStrategyReport } from "../api";
+import { getApiKey, setApiKey, clearApiKey } from "../api";
 import * as db from "../db";
 import { exportToObsidianVault } from "../markdown-export";
 
@@ -31,11 +32,7 @@ export default function SettingsScreen() {
   const [exportingVault, setExportingVault] = useState(false);
   const [exportingJson, setExportingJson] = useState(false);
   const [exportResult, setExportResult] = useState("");
-
-  // Strategy report
-  const [strategyReport, setStrategyReport] = useState(null);
-  const [generatingReport, setGeneratingReport] = useState(false);
-  const [reportError, setReportError] = useState("");
+  const [importing, setImporting] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -75,23 +72,11 @@ export default function SettingsScreen() {
     ]);
   };
 
-  const handleGenerateReport = async () => {
-    setGeneratingReport(true); setReportError("");
-    try {
-      const report = await generateStrategyReport(app.profile);
-      setStrategyReport(report);
-    } catch (e) {
-      setReportError(e.message === "NO_API_KEY" ? "请先配置 API key" : "生成失败：" + (e.message || String(e)));
-    } finally {
-      setGeneratingReport(false);
-    }
-  };
-
   const handleExportVault = async () => {
     setExportingVault(true); setExportResult("");
     try {
-      const result = await exportToObsidianVault(app.profile, strategyReport);
-      setExportResult(`✓ 已生成 ${result.fileCount} 个文件${strategyReport ? "（含策略报告）" : ""}`);
+      const result = await exportToObsidianVault(app.profile, null);
+      setExportResult(`✓ 已生成 ${result.fileCount} 个文件`);
     } catch (e) {
       setExportResult("导出失败：" + (e.message || String(e)));
     } finally {
@@ -120,6 +105,46 @@ export default function SettingsScreen() {
       setExportResult("导出失败：" + (e.message || String(e)));
     } finally {
       setExportingJson(false);
+    }
+  };
+
+  const handleImport = async () => {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({ type: "application/json", copyToCacheDirectory: true });
+      if (result.canceled) return;
+      const uri = result.assets?.[0]?.uri;
+      if (!uri) return;
+      const json = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.UTF8 });
+      const snapshot = JSON.parse(json);
+      if (!snapshot || snapshot.version !== 1) {
+        Alert.alert("格式错误", "所选文件不是有效的投资日志备份文件。");
+        return;
+      }
+      Alert.alert(
+        "恢复备份",
+        `此操作将覆盖当前所有数据（${snapshot.trades?.length ?? 0} 笔交易、${snapshot.thoughts?.length ?? 0} 条心念、${snapshot.holdings?.length ?? 0} 个持仓）。继续吗？`,
+        [
+          { text: "取消", style: "cancel" },
+          {
+            text: "覆盖恢复",
+            style: "destructive",
+            onPress: async () => {
+              setImporting(true); setExportResult("");
+              try {
+                await db.importAll(snapshot);
+                await app.reloadAll();
+                setExportResult("✓ 数据恢复成功");
+              } catch (e) {
+                setExportResult("恢复失败：" + (e.message || String(e)));
+              } finally {
+                setImporting(false);
+              }
+            },
+          },
+        ]
+      );
+    } catch (e) {
+      setExportResult("恢复失败：" + (e.message || String(e)));
     }
   };
 
@@ -188,84 +213,6 @@ export default function SettingsScreen() {
         </Pressable>
       </Section>
 
-      {/* Voice Input */}
-      <Section label="语音输入 · Voice Input" sub="系统级方案">
-        <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 10 }}>
-          <Mic size={16} color={colors.inkMuted} style={{ marginTop: 3 }} />
-          <View style={{ flex: 1 }}>
-            <TSerif style={{ fontSize: 14, lineHeight: 22 }}>
-              为获得更好的中文语音识别，建议安装 <TSerifBold style={{ fontSize: 14 }}>讯飞输入法</TSerifBold> 或搜狗输入法。
-            </TSerif>
-            <TSerif style={{ fontSize: 13, lineHeight: 20, marginTop: 6, color: colors.inkMuted }}>
-              • 在任意输入框中，点击键盘上的麦克风按钮即可语音输入（识别准确度由输入法决定）{"\n"}
-              • 或点击 App 内的麦克风图标 <Mic size={11} color={colors.inkMuted} /> 快捷录入（调用系统默认语音识别）
-            </TSerif>
-          </View>
-        </View>
-
-        <Pressable
-          onPress={() => Linking.openURL("https://play.google.com/store/search?q=讯飞输入法&c=apps")}
-          style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: 12 }}>
-          <ExternalLink size={11} color={colors.inkMuted} />
-          <TMono style={{ fontSize: 11 }}>Play Store 搜索"讯飞输入法"</TMono>
-        </Pressable>
-      </Section>
-
-      {/* Strategy Report */}
-      <Section label="投资策略报告 · Strategy Profile" sub="AI 分析你的完整日志">
-        <TSerif style={{ fontSize: 13, lineHeight: 22, color: colors.inkSoft, marginBottom: 12 }}>
-          基于你的全部交易记录、月评、周记、规则，AI 会生成一份诚实的《投资策略画像》——
-          写明你实际在做什么、情绪如何影响决策、规则执行情况、核心盲点，以及接下来 6 个月的改进重点。
-        </TSerif>
-
-        {/* Minimum data warning */}
-        {app.trades.length < 5 && (
-          <View style={{ padding: 10, marginBottom: 12, backgroundColor: colors.bgMuted, borderWidth: 1, borderColor: colors.divider }}>
-            <TSerifItalic style={{ fontSize: 12, color: colors.inkMuted }}>
-              至少记录 5 笔交易后，策略报告才有意义。目前有 {app.trades.length} 笔。
-            </TSerifItalic>
-          </View>
-        )}
-
-        {/* Generated report preview */}
-        {strategyReport && (
-          <View style={{ marginBottom: 16, padding: 12, backgroundColor: colors.bgCard, borderWidth: 1, borderColor: colors.good }}>
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 8 }}>
-              <Check size={12} color={colors.good} strokeWidth={3} />
-              <Kicker color={colors.good}>报告已生成 · READY</Kicker>
-            </View>
-            {/* Show first ~300 chars as preview */}
-            <TSerif style={{ fontSize: 12, lineHeight: 20, color: colors.inkSoft }}>
-              {strategyReport.slice(0, 280).replace(/^---[\s\S]*?---\n*/, "")}…
-            </TSerif>
-            <TSerifItalic style={{ fontSize: 11, marginTop: 8, color: colors.inkMuted }}>
-              导出 Vault 时报告会自动包含在 _Strategy/ 文件夹内。
-            </TSerifItalic>
-          </View>
-        )}
-
-        {reportError ? (
-          <TMono style={{ color: colors.bad, fontSize: 11, marginBottom: 10 }}>{reportError}</TMono>
-        ) : null}
-
-        <FilledButton
-          onPress={handleGenerateReport}
-          disabled={generatingReport || app.trades.length === 0}
-          loading={generatingReport}
-        >
-          <TSerifBold style={{ color: colors.bg, fontSize: 14 }}>
-            {generatingReport
-              ? "AI 分析中…（约 30-60 秒）"
-              : strategyReport
-              ? "重新生成报告"
-              : "生成我的投资策略报告"}
-          </TSerifBold>
-        </FilledButton>
-        <TSerifItalic style={{ fontSize: 11, marginTop: 8, color: colors.inkMuted }}>
-          约 $0.05-0.10 / 次。读取全量日志，生成结构化 Markdown 报告。
-        </TSerifItalic>
-      </Section>
-
       {/* Data Export */}
       <Section label="导出 · Export" sub="备份与外部分析">
         {/* Markdown Vault — primary, recommended */}
@@ -299,19 +246,34 @@ export default function SettingsScreen() {
           <TSerifItalic style={{ fontSize: 11, marginBottom: 8 }}>
             原始数据库 JSON，用于换设备时恢复。包含所有字段和缓存的导师点评。
           </TSerifItalic>
-          <OutlineButton onPress={handleExportJson} disabled={exportingJson}>
-            {exportingJson ? (
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                <Loader2 size={12} color={colors.ink} />
-                <TSerif style={{ fontSize: 13, color: colors.ink }}>导出中…</TSerif>
-              </View>
-            ) : (
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                <Download size={12} color={colors.ink} />
-                <TSerif style={{ fontSize: 13, color: colors.ink }}>导出 JSON 备份</TSerif>
-              </View>
-            )}
-          </OutlineButton>
+          <View style={{ flexDirection: "row", gap: 8 }}>
+            <OutlineButton onPress={handleExportJson} disabled={exportingJson} style={{ flex: 1 }}>
+              {exportingJson ? (
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                  <Loader2 size={12} color={colors.ink} />
+                  <TSerif style={{ fontSize: 13, color: colors.ink }}>导出中…</TSerif>
+                </View>
+              ) : (
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                  <Download size={12} color={colors.ink} />
+                  <TSerif style={{ fontSize: 13, color: colors.ink }}>导出备份</TSerif>
+                </View>
+              )}
+            </OutlineButton>
+            <OutlineButton onPress={handleImport} disabled={importing} style={{ flex: 1 }}>
+              {importing ? (
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                  <Loader2 size={12} color={colors.ink} />
+                  <TSerif style={{ fontSize: 13, color: colors.ink }}>恢复中…</TSerif>
+                </View>
+              ) : (
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                  <Upload size={12} color={colors.ink} />
+                  <TSerif style={{ fontSize: 13, color: colors.ink }}>恢复备份</TSerif>
+                </View>
+              )}
+            </OutlineButton>
+          </View>
         </View>
 
         {exportResult ? (

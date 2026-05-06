@@ -1,6 +1,6 @@
 // App.js — root entry with navigation, font loading, global state
 import React, { useEffect, useState, useCallback, useMemo } from "react";
-import { View, Text, ActivityIndicator } from "react-native";
+import { View, Text, ActivityIndicator, ScrollView } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
@@ -35,6 +35,44 @@ import MentorScreen from "./src/screens/Mentor";
 import SettingsScreen from "./src/screens/Settings";
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
+
+// Catches JS rendering errors so they surface as a visible message rather
+// than propagating through the RCT bridge and causing a SIGABRT.
+class AppErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { error: null };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { error };
+  }
+
+  componentDidCatch(error, info) {
+    console.error("[AppErrorBoundary]", error, info?.componentStack);
+  }
+
+  render() {
+    if (this.state.error) {
+      return (
+        <View style={{ flex: 1, backgroundColor: "#f5f1e8", alignItems: "center", justifyContent: "center", padding: 32 }}>
+          <Text style={{ fontSize: 16, fontWeight: "600", color: "#1a1611", marginBottom: 8 }}>
+            启动错误
+          </Text>
+          <Text style={{ fontSize: 13, color: "#6b5a3f", textAlign: "center", marginBottom: 16, lineHeight: 20 }}>
+            {String(this.state.error?.message || this.state.error)}
+          </Text>
+          <ScrollView style={{ maxHeight: 200, width: "100%" }}>
+            <Text style={{ fontSize: 10, color: "#8b6f47", fontFamily: "monospace" }}>
+              {this.state.error?.stack}
+            </Text>
+          </ScrollView>
+        </View>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 const Tab = createBottomTabNavigator();
 
@@ -135,8 +173,8 @@ export default function App() {
   }, []);
 
   // ---- thoughts ----
-  const addThought = useCallback(async (content, rawInput) => {
-    const created = await db.addThought(content, rawInput);
+  const addThought = useCallback(async (content, rawInput, emotion) => {
+    const created = await db.addThought(content, rawInput, emotion);
     setThoughts((prev) => [created, ...prev]);
     return created;
   }, []);
@@ -144,9 +182,9 @@ export default function App() {
     await db.deleteThought(id);
     setThoughts((prev) => prev.filter((t) => t.id !== id));
   }, []);
-  const updateThoughtById = useCallback(async (id, content) => {
-    await db.updateThought(id, content);
-    setThoughts((prev) => prev.map((t) => t.id === id ? { ...t, content } : t));
+  const updateThoughtById = useCallback(async (id, content, emotion) => {
+    await db.updateThought(id, content, emotion);
+    setThoughts((prev) => prev.map((t) => t.id === id ? { ...t, content, ...(emotion !== undefined ? { emotion } : {}) } : t));
   }, []);
   const updateThoughtFeedback = useCallback(async (id, feedbackArr) => {
     await db.updateThoughtFeedback(id, feedbackArr);
@@ -177,9 +215,27 @@ export default function App() {
     }));
   }, []);
 
+  // Reload all state from DB after a backup import
+  const reloadAll = useCallback(async () => {
+    const [p, r, dm, tr, th, hd, wn, mr, pc] = await Promise.all([
+      db.kvGet("philosophy", ""),
+      db.kvGet("rules", DEFAULT_RULES),
+      db.kvGet("defaultMaster", "default"),
+      db.listTrades(),
+      db.listThoughts(),
+      db.listHoldings(),
+      db.listWeeklyNotes(),
+      db.listMonthlyReviews(),
+      db.getPricesCache(),
+    ]);
+    setPhilosophy(p); setRules(r); setDefaultMaster(dm);
+    setTrades(tr); setThoughts(th); setHoldings(hd);
+    setWeeklyNotes(wn); setMonthlyReviews(mr); setPrices(pc);
+  }, []);
+
   const profile = useMemo(() => ({
-    philosophy, rules, weeklyNotes, monthlyReviews, trades, holdings, prices,
-  }), [philosophy, rules, weeklyNotes, monthlyReviews, trades, holdings, prices]);
+    philosophy, rules, weeklyNotes, monthlyReviews, trades, thoughts, holdings, prices,
+  }), [philosophy, rules, weeklyNotes, monthlyReviews, trades, thoughts, holdings, prices]);
 
   const ctx = {
     // state
@@ -195,6 +251,7 @@ export default function App() {
     addThought, deleteThoughtById, updateThoughtById, updateThoughtFeedback,
     addHolding, updateHoldingById, deleteHoldingById,
     savePricesData,
+    reloadAll,
   };
 
   if (!fontsLoaded || !bootstrapped) {
@@ -206,11 +263,13 @@ export default function App() {
   }
 
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
-      <SafeAreaProvider>
-        <AppInner ctx={ctx} />
-      </SafeAreaProvider>
-    </GestureHandlerRootView>
+    <AppErrorBoundary>
+      <GestureHandlerRootView style={{ flex: 1 }}>
+        <SafeAreaProvider>
+          <AppInner ctx={ctx} />
+        </SafeAreaProvider>
+      </GestureHandlerRootView>
+    </AppErrorBoundary>
   );
 }
 
