@@ -1,19 +1,25 @@
 // Domain constants: actions, emotions, master personas
-// Icons are passed in as names; components map to lucide-react-native components.
 
 export const ACTIONS = [
-  { id: "buy", label: "Buy", zh: "买入", iconName: "TrendingUp", color: "#2d5f3f" },
-  { id: "sell", label: "Sell", zh: "卖出", iconName: "TrendingDown", color: "#a03434" },
-  { id: "hold", label: "Hold", zh: "持有", iconName: "Eye", color: "#8b6f47" },
-  { id: "watch", label: "Watch", zh: "观察", iconName: "Search", color: "#3a5578" },
+  { id: "buy",         label: "Buy",         zh: "买入",  iconName: "TrendingUp",    color: "#2d5f3f" },
+  { id: "sell",        label: "Sell",        zh: "卖出",  iconName: "TrendingDown",  color: "#a03434" },
+  { id: "hold",        label: "Hold",        zh: "持有",  iconName: "Eye",           color: "#8b6f47" },
+  { id: "watch",       label: "Watch",       zh: "观察",  iconName: "Search",        color: "#3a5578" },
+  { id: "buy_option",  label: "Buy Option",  zh: "买期权", iconName: "ArrowUpRight",  color: "#1a5276" },
+  { id: "sell_option", label: "Sell Option", zh: "卖期权", iconName: "ArrowDownRight", color: "#922b21" },
 ];
 
 export const EMOTIONS = [
-  { id: "calm", label: "平静 Calm", iconName: "Smile", color: "#2d5f3f" },
-  { id: "confident", label: "笃定 Confident", iconName: "Zap", color: "#3a5578" },
-  { id: "neutral", label: "中性 Neutral", iconName: "Meh", color: "#8b6f47" },
-  { id: "anxious", label: "焦虑 Anxious", iconName: "Cloud", color: "#a07838" },
-  { id: "fearful", label: "恐惧 Fearful", iconName: "Frown", color: "#a03434" },
+  { id: "calm",       label: "平静 Calm",       emoji: "😌", color: "#2d5f3f" },
+  { id: "confident",  label: "笃定 Confident",  emoji: "😎", color: "#3a5578" },
+  { id: "neutral",    label: "中性 Neutral",    emoji: "😐", color: "#8b6f47" },
+  { id: "anxious",    label: "焦虑 Anxious",    emoji: "😰", color: "#a07838" },
+  { id: "fearful",    label: "恐惧 Fearful",    emoji: "😨", color: "#a03434" },
+  { id: "excited",    label: "兴奋 Excited",    emoji: "🤩", color: "#c45c00" },
+  { id: "greedy",     label: "贪婪 Greedy",     emoji: "🤑", color: "#7b2d00" },
+  { id: "optimistic", label: "乐观 Optimistic", emoji: "😄", color: "#5a7f2e" },
+  { id: "hesitant",   label: "犹豫 Hesitant",   emoji: "😟", color: "#6b6b2e" },
+  { id: "regretful",  label: "悔恨 Regretful",  emoji: "😔", color: "#5a3f5a" },
 ];
 
 export const MASTERS = [

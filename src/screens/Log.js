@@ -3,12 +3,11 @@
 // User must tap "求教 xx" to request feedback from a specific master.
 
 import React, { useState } from "react";
-import { View, ScrollView, Pressable, ActivityIndicator, Modal, KeyboardAvoidingView, Platform, Alert } from "react-native";
+import { View, Text, ScrollView, Pressable, ActivityIndicator, Modal, KeyboardAvoidingView, Platform, Alert } from "react-native";
 import { useSafeAreaInsets, SafeAreaView } from "react-native-safe-area-context";
 import { useNavigation } from "@react-navigation/native";
 import {
-  TrendingUp, TrendingDown, Eye, Search,
-  Smile, Meh, Frown, Zap, Cloud,
+  TrendingUp, TrendingDown, Eye, Search, ArrowUpRight, ArrowDownRight,
   FileText, Lightbulb, HelpCircle, Quote,
   Plus, Wand2, Pencil, Calendar,
   Check, Trash2, ChevronLeft, Sparkles, Loader2,
@@ -29,7 +28,15 @@ import {
 } from "../components";
 
 // Name -> icon lookup (RN can't import by name string dynamically)
-const ACTION_ICONS = { buy: TrendingUp, sell: TrendingDown, hold: Eye, watch: Search };
+const ACTION_ICONS = {
+  buy: TrendingUp, sell: TrendingDown, hold: Eye, watch: Search,
+  buy_option: ArrowUpRight, sell_option: ArrowDownRight,
+};
+
+const ACTION_LABEL = {
+  buy: "买入", sell: "卖出", hold: "持有", watch: "关注",
+  buy_option: "买期权", sell_option: "卖期权",
+};
 
 async function addTradeToCalendar(trade) {
   try {
@@ -45,7 +52,7 @@ async function addTradeToCalendar(trade) {
     tradeDate.setHours(9, 0, 0, 0);
     const endDate = new Date(tradeDate.getTime() + 60 * 60 * 1000);
     await ExpoCalendar.createEventAsync(writable.id, {
-      title: `📈 ${trade.action === "buy" ? "买入" : trade.action === "sell" ? "卖出" : "关注"} ${trade.stock}`,
+      title: `📈 ${ACTION_LABEL[trade.action] ?? trade.action} ${trade.stock}`,
       notes: trade.reason || "",
       startDate: tradeDate,
       endDate,
@@ -57,7 +64,42 @@ async function addTradeToCalendar(trade) {
     Alert.alert("日历写入失败", e.message || String(e));
   }
 }
-const EMOTION_ICONS = { calm: Smile, confident: Zap, neutral: Meh, anxious: Cloud, fearful: Frown };
+
+function EmotionPicker({ value, onChange }) {
+  const COLS = 5;
+  const rows = [EMOTIONS.slice(0, COLS), EMOTIONS.slice(COLS)];
+  const selected = EMOTIONS.find((e) => e.id === value);
+  return (
+    <View>
+      {rows.map((row, ri) => (
+        <View key={ri} style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 4 }}>
+          {row.map((e) => (
+            <Pressable
+              key={e.id}
+              onPress={() => onChange(e.id)}
+              style={{
+                flex: 1, alignItems: "center", paddingVertical: 6,
+                borderRadius: 8, marginHorizontal: 2,
+                borderWidth: 2,
+                borderColor: value === e.id ? e.color : "transparent",
+                backgroundColor: value === e.id ? e.color + "22" : "transparent",
+              }}
+            >
+              <Text style={{ fontSize: 22 }}>{e.emoji}</Text>
+            </Pressable>
+          ))}
+        </View>
+      ))}
+      <Text style={{
+        fontSize: 12, textAlign: "center", marginTop: 4, minHeight: 16,
+        color: selected?.color ?? colors.inkMuted,
+        fontFamily: fonts.mono,
+      }}>
+        {selected ? selected.label : "选择情绪状态"}
+      </Text>
+    </View>
+  );
+}
 
 export default function LogScreen() {
   const app = useApp();
@@ -117,7 +159,7 @@ export default function LogScreen() {
             onSave={async (t) => {
               const saved = await app.addTrade(t);
               setAdding(false);
-              if (t.action === "buy" || t.action === "sell") {
+              if (["buy", "sell", "buy_option", "sell_option"].includes(t.action)) {
                 setHoldingPrompt({ trade: saved });
               }
               const tradeDate = new Date(t.date);
@@ -268,7 +310,6 @@ function TradeRow({ trade, onDelete, onUpdate, onRequestFeedback, defaultMaster 
   const action = getAction(trade.action);
   const emotion = getEmotion(trade.emotion);
   const AIcon = ACTION_ICONS[trade.action] || TrendingUp;
-  const EIcon = EMOTION_ICONS[trade.emotion] || Meh;
   const hasFeedback = trade.feedback?.length > 0;
 
   return (
@@ -283,7 +324,7 @@ function TradeRow({ trade, onDelete, onUpdate, onRequestFeedback, defaultMaster 
             </TMono>
           </View>
           <TSerifBold style={{ flex: 1, fontSize: 15 }}>{trade.stock}</TSerifBold>
-          <EIcon size={13} color={emotion.color} style={{ opacity: 0.7 }} />
+          <Text style={{ fontSize: 15, opacity: 0.8 }}>{emotion.emoji ?? "🙂"}</Text>
         </View>
         <TSerif style={{ marginTop: 8, marginLeft: 80, fontSize: 14, lineHeight: 22, color: colors.inkSoft }}>
           {trade.reason}
@@ -306,7 +347,7 @@ function TradeRow({ trade, onDelete, onUpdate, onRequestFeedback, defaultMaster 
       {expanded && (
         <View style={{ marginTop: 12, marginLeft: 80, paddingTop: 12, borderTopWidth: 1, borderTopColor: colors.dividerSoft }}>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 8 }}>
-            <EIcon size={12} color={emotion.color} />
+            <Text style={{ fontSize: 14 }}>{emotion.emoji ?? "🙂"}</Text>
             <TMono style={{ fontSize: 10, color: emotion.color, letterSpacing: 1 }}>
               {emotion.label.toUpperCase()}
             </TMono>
@@ -342,20 +383,8 @@ function TradeRow({ trade, onDelete, onUpdate, onRequestFeedback, defaultMaster 
                 style={{ minHeight: 70, fontSize: 14, marginBottom: 10 }}
               />
               <Kicker style={{ marginBottom: 6 }}>EMOTION · 情绪</Kicker>
-              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
-                {EMOTIONS.map((e) => {
-                  const EI = EMOTION_ICONS[e.id] || Meh;
-                  const active = draftEmotion === e.id;
-                  return (
-                    <Pressable key={e.id} onPress={() => setDraftEmotion(e.id)}
-                      style={{ flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 6,
-                        borderWidth: 1, borderColor: active ? e.color : colors.divider,
-                        backgroundColor: active ? colors.bgElev : "transparent" }}>
-                      <EI size={11} color={e.color} />
-                      <TMono style={{ fontSize: 10, color: active ? e.color : colors.inkMuted }}>{e.label.toUpperCase()}</TMono>
-                    </Pressable>
-                  );
-                })}
+              <View style={{ marginBottom: 12 }}>
+                <EmotionPicker value={draftEmotion} onChange={setDraftEmotion} />
               </View>
               <View style={{ flexDirection: "row", gap: 10 }}>
                 <Pressable onPress={() => { onUpdate({ reason: draftReason, emotion: draftEmotion }); setEditing(false); }}
@@ -430,10 +459,9 @@ function ThoughtRow({ thought, onDelete, onUpdate, onRequestFeedback, defaultMas
         </View>
         {thought.emotion && (() => {
           const em = getEmotion(thought.emotion);
-          const EIcon = EMOTION_ICONS[thought.emotion] || Meh;
           return (
             <View style={{ marginTop: 4, marginLeft: 80, flexDirection: "row", alignItems: "center", gap: 4 }}>
-              <EIcon size={10} color={em.color} />
+              <Text style={{ fontSize: 12 }}>{em.emoji ?? "🙂"}</Text>
               <TMono style={{ fontSize: 10, color: em.color, letterSpacing: 1 }}>
                 {em.label.split(" ")[0].toUpperCase()}
               </TMono>
@@ -604,20 +632,24 @@ function TradeForm({ rules, onSave, onCancel, onSaveAsThought }) {
       )}
 
       <Field label="ACTION · 动作">
-        <View style={{ flexDirection: "row", gap: 8 }}>
-          {ACTIONS.map((a) => {
-            const AI = ACTION_ICONS[a.id];
-            const isActive = action === a.id;
-            return (
-              <Pressable key={a.id} onPress={() => setAction(a.id)}
-                style={{ flex: 1, paddingVertical: 10, alignItems: "center", gap: 4,
-                  backgroundColor: isActive ? a.color : "transparent",
-                  borderWidth: isActive ? 0 : 1, borderColor: colors.divider }}>
-                <AI size={14} color={isActive ? colors.bg : colors.inkSoft} strokeWidth={2} />
-                <TMono style={{ fontSize: 10, color: isActive ? colors.bg : colors.inkSoft }}>{a.zh}</TMono>
-              </Pressable>
-            );
-          })}
+        <View style={{ gap: 8 }}>
+          {[ACTIONS.slice(0, 4), ACTIONS.slice(4)].map((row, ri) => (
+            <View key={ri} style={{ flexDirection: "row", gap: 8 }}>
+              {row.map((a) => {
+                const AI = ACTION_ICONS[a.id];
+                const isActive = action === a.id;
+                return (
+                  <Pressable key={a.id} onPress={() => setAction(a.id)}
+                    style={{ flex: 1, paddingVertical: 10, alignItems: "center", gap: 4,
+                      backgroundColor: isActive ? a.color : "transparent",
+                      borderWidth: isActive ? 0 : 1, borderColor: colors.divider }}>
+                    <AI size={14} color={isActive ? colors.bg : colors.inkSoft} strokeWidth={2} />
+                    <TMono style={{ fontSize: 10, color: isActive ? colors.bg : colors.inkSoft }}>{a.zh}</TMono>
+                  </Pressable>
+                );
+              })}
+            </View>
+          ))}
         </View>
       </Field>
 
@@ -678,23 +710,7 @@ function TradeForm({ rules, onSave, onCancel, onSaveAsThought }) {
       </Field>
 
       <Field label="EMOTION · 情绪">
-        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-          {EMOTIONS.map((e) => {
-            const EI = EMOTION_ICONS[e.id];
-            const isActive = emotion === e.id;
-            return (
-              <Pressable key={e.id} onPress={() => setEmotion(e.id)}
-                style={{ paddingHorizontal: 12, paddingVertical: 8, flexDirection: "row", alignItems: "center", gap: 6,
-                  backgroundColor: isActive ? e.color : "transparent",
-                  borderWidth: isActive ? 0 : 1, borderColor: e.color + "60" }}>
-                <EI size={12} color={isActive ? colors.bg : e.color} />
-                <TMono style={{ fontSize: 11, color: isActive ? colors.bg : e.color }}>
-                  {e.label.split(" ")[0]}
-                </TMono>
-              </Pressable>
-            );
-          })}
-        </View>
+        <EmotionPicker value={emotion} onChange={setEmotion} />
       </Field>
 
       {rules.length > 0 && (
@@ -763,23 +779,7 @@ function ThoughtForm({ onSave, onCancel }) {
       </View>
 
       <Field label="EMOTION · 情绪">
-        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-          {EMOTIONS.map((e) => {
-            const EI = EMOTION_ICONS[e.id];
-            const isActive = emotion === e.id;
-            return (
-              <Pressable key={e.id} onPress={() => setEmotion(e.id)}
-                style={{ paddingHorizontal: 12, paddingVertical: 8, flexDirection: "row", alignItems: "center", gap: 6,
-                  backgroundColor: isActive ? e.color : "transparent",
-                  borderWidth: isActive ? 0 : 1, borderColor: e.color + "60" }}>
-                <EI size={12} color={isActive ? colors.bg : e.color} />
-                <TMono style={{ fontSize: 11, color: isActive ? colors.bg : e.color }}>
-                  {e.label.split(" ")[0]}
-                </TMono>
-              </Pressable>
-            );
-          })}
-        </View>
+        <EmotionPicker value={emotion} onChange={setEmotion} />
       </Field>
 
       <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
@@ -806,7 +806,7 @@ const CURRENCIES = ["USD", "CNY", "HKD", "EUR", "JPY"];
 function HoldingUpdateModal({ trade, holdings, onConfirm, onSkip }) {
   const sym = trade.stock.toUpperCase();
   const existing = holdings.find((h) => h.symbol.toUpperCase() === sym);
-  const isBuy = trade.action === "buy";
+  const isBuy = trade.action === "buy" || trade.action === "buy_option";
 
   const [shares, setShares] = useState("");
   const [price, setPrice] = useState("");
@@ -833,7 +833,7 @@ function HoldingUpdateModal({ trade, holdings, onConfirm, onSkip }) {
         <View style={{ backgroundColor: colors.bg, padding: 24, paddingBottom: 40, borderTopWidth: 1, borderColor: colors.divider }}>
           <Kicker style={{ marginBottom: 4 }}>更新持仓 · UPDATE HOLDINGS</Kicker>
           <TSerifBold style={{ fontSize: 18, marginBottom: 4 }}>
-            {isBuy ? "买入" : "卖出"} {trade.stock}
+            {ACTION_LABEL[trade.action] ?? trade.action} {trade.stock}
           </TSerifBold>
           {existing ? (
             <TMono style={{ fontSize: 11, color: colors.inkFaint, marginBottom: 16 }}>

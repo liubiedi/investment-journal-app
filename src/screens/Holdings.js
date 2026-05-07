@@ -1,6 +1,6 @@
 // Holdings screen — positions, live prices from Yahoo, currency-grouped totals
 import React, { useState, useMemo, useEffect, useCallback } from "react";
-import { View, ScrollView, Pressable, ActivityIndicator, Platform, KeyboardAvoidingView } from "react-native";
+import { View, ScrollView, Pressable, ActivityIndicator, Platform, KeyboardAvoidingView, Modal } from "react-native";
 import { useSafeAreaInsets, SafeAreaView } from "react-native-safe-area-context";
 import { useNavigation } from "@react-navigation/native";
 import {
@@ -10,6 +10,7 @@ import DateTimePicker from "@react-native-community/datetimepicker";
 
 import { colors, fonts } from "../theme";
 import { useApp } from "../context";
+import { MASTERS } from "../constants";
 import { fmtCurrency, ago } from "../utils";
 import { fetchLivePrices } from "../api";
 import * as db from "../db";
@@ -23,7 +24,10 @@ export default function HoldingsScreen() {
   const nav = useNavigation();
   const insets = useSafeAreaInsets();
 
-  const askMentor = async (h, price) => {
+  const [pickerVisible, setPickerVisible] = useState(false);
+  const [pendingHolding, setPendingHolding] = useState(null);
+
+  const doAskMentor = async (h, price, masterId) => {
     const ccy = h.currency || price?.currency || "";
     const lines = [`我想聊聊持仓中的 ${h.displayName || h.symbol}（${h.symbol}）：`];
     lines.push(`• 持有 ${h.shares} 股，成本 ${fmtCurrency(h.costBasis, ccy)}`);
@@ -37,10 +41,15 @@ export default function HoldingsScreen() {
       reviews.forEach((r) => lines.push(`  [${r.date}] ${r.content}`));
     }
     lines.push("请帮我分析一下这个持仓的现状，值得继续持有吗？");
-    const masterId = app.defaultMaster || "default";
     await db.appendChat("user", lines.join("\n"), masterId);
     nav.navigate("mentor", { autoMaster: masterId, autoReplyTs: Date.now() });
   };
+
+  const startAskMentor = (h, price) => {
+    setPendingHolding({ h, price });
+    setPickerVisible(true);
+  };
+
   const [adding, setAdding] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -60,8 +69,8 @@ export default function HoldingsScreen() {
     }
   };
 
-  // Group totals by currency
-  const totals = useMemo(() => {
+  // Group totals by currency + per-holding weight
+  const { totals, holdingWeights } = useMemo(() => {
     const byCcy = {};
     app.holdings.forEach((h) => {
       const p = app.prices?.data?.[h.symbol];
@@ -71,7 +80,16 @@ export default function HoldingsScreen() {
       if (p) byCcy[ccy].market += h.shares * p.price;
       else { byCcy[ccy].market += h.shares * h.costBasis; byCcy[ccy].hasLive = false; }
     });
-    return byCcy;
+    // Weight = holding market value / total market value for same currency
+    const weights = {};
+    app.holdings.forEach((h) => {
+      const p = app.prices?.data?.[h.symbol];
+      const ccy = h.currency || p?.currency || "?";
+      const mv = (p ? p.price : h.costBasis) * h.shares;
+      const total = byCcy[ccy]?.market ?? 0;
+      weights[h.id] = total > 0 ? mv / total : 0;
+    });
+    return { totals: byCcy, holdingWeights: weights };
   }, [app.holdings, app.prices]);
 
   const freshness = ago(app.prices?.lastUpdated);
@@ -197,12 +215,23 @@ export default function HoldingsScreen() {
             />
           ) : (
             <HoldingRow key={h.id} holding={h} price={app.prices?.data?.[h.symbol]}
+              weightPct={holdingWeights[h.id] ?? 0}
               onEdit={() => setEditingId(h.id)}
-              onAskMentor={() => askMentor(h, app.prices?.data?.[h.symbol])} />
+              onAskMentor={() => startAskMentor(h, app.prices?.data?.[h.symbol])} />
           )
         ))}
       </View>
     </ScrollView>
+    <MasterPickerModal
+      visible={pickerVisible}
+      onClose={() => setPickerVisible(false)}
+      onSelect={async (masterId) => {
+        setPickerVisible(false);
+        const snapshot = pendingHolding;
+        setPendingHolding(null);
+        if (snapshot) await doAskMentor(snapshot.h, snapshot.price, masterId);
+      }}
+    />
     </SafeAreaView>
     </KeyboardAvoidingView>
   );
@@ -219,7 +248,7 @@ function fmtBuyDate(iso) {
   return `${y}.${m}.${d}`;
 }
 
-function HoldingRow({ holding, price, onEdit, onAskMentor }) {
+function HoldingRow({ holding, price, weightPct, onEdit, onAskMentor }) {
   const cost = holding.shares * holding.costBasis;
   const hasLive = !!price;
   const market = hasLive ? holding.shares * price.price : cost;
@@ -276,6 +305,16 @@ function HoldingRow({ holding, price, onEdit, onAskMentor }) {
             {pos ? "+" : ""}{fmtCurrency(pnl, ccy)} ({pos ? "+" : ""}{pnlPct.toFixed(1)}%)
           </TSerifBold>
         </View>
+      )}
+      {weightPct > 0 && (
+        <TMono style={{
+          fontSize: 10, color: colors.inkMuted,
+          backgroundColor: colors.bgElev,
+          paddingHorizontal: 5, paddingVertical: 2,
+          borderRadius: 3, alignSelf: "flex-start", marginTop: 4,
+        }}>
+          仓位 {(weightPct * 100).toFixed(1)}%
+        </TMono>
       )}
       {price?.asOf && (
         <TMono style={{ fontSize: 9, marginTop: 4, color: colors.inkFaint }}>
@@ -527,5 +566,36 @@ function HoldingForm({ initial, onSave, onCancel, onDelete }) {
         </View>
       )}
     </View>
+  );
+}
+
+function MasterPickerModal({ visible, onClose, onSelect }) {
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <Pressable style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.45)" }} onPress={onClose} />
+      <View style={{
+        backgroundColor: colors.bg,
+        paddingHorizontal: 20, paddingTop: 20, paddingBottom: 36,
+        borderTopWidth: 1, borderTopColor: colors.divider,
+      }}>
+        <TSerifBold style={{ fontSize: 18, marginBottom: 4 }}>选择导师</TSerifBold>
+        <TSerifItalic style={{ fontSize: 12, marginBottom: 16 }}>以哪位大师的视角分析此持仓？</TSerifItalic>
+        {MASTERS.map((m) => (
+          <Pressable
+            key={m.id}
+            onPress={() => onSelect(m.id)}
+            style={({ pressed }) => ({
+              flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+              paddingVertical: 12,
+              borderBottomWidth: 1, borderBottomColor: colors.dividerSoft,
+              opacity: pressed ? 0.7 : 1,
+            })}
+          >
+            <TSerifBold style={{ fontSize: 15 }}>{m.zh}</TSerifBold>
+            <TMono style={{ fontSize: 11, color: colors.inkMuted }}>{m.desc}</TMono>
+          </Pressable>
+        ))}
+      </View>
+    </Modal>
   );
 }

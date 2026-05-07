@@ -9,7 +9,7 @@ import * as Sharing from "expo-sharing";
 
 import { useApp } from "../context";
 import { colors, fonts } from "../theme";
-import { monthKey, isLastWeekOfMonth, fmtDate } from "../utils";
+import { monthKey, isLastWeekOfMonth, fmtDate, ago } from "../utils";
 import { generateStrategyReport } from "../api";
 import * as db from "../db";
 import {
@@ -34,12 +34,26 @@ export default function HomeScreen() {
   const [reportError, setReportError] = useState("");
   const [exportingPdf, setExportingPdf] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
+  const [reportHistory, setReportHistory] = useState([]);
+
+  useEffect(() => {
+    (async () => {
+      const hist = (await db.kvGet("strategy_report_history")) ?? [];
+      setReportHistory(hist);
+    })();
+  }, []);
 
   const handleGenerateReport = async () => {
     setGeneratingReport(true); setReportError("");
     try {
       const report = await generateStrategyReport(app.profile);
       setStrategyReport(report);
+      const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+      const entry = { id, generatedAt: Date.now(), label: `${fmtDate(new Date().toISOString())} 策略报告`, markdown: report };
+      const hist = (await db.kvGet("strategy_report_history")) ?? [];
+      const updated = [entry, ...hist].slice(0, 20);
+      await db.kvSet("strategy_report_history", updated);
+      setReportHistory(updated);
     } catch (e) {
       setReportError(e.message === "NO_API_KEY" ? "请先在设置中配置 API key" : "生成失败：" + (e.message || String(e)));
     } finally {
@@ -248,6 +262,26 @@ export default function HomeScreen() {
         <TSerifItalic style={{ fontSize: 11, marginTop: 8, color: colors.inkMuted }}>
           约 $0.05-0.10 / 次。读取全量日志，生成结构化报告。
         </TSerifItalic>
+
+        {reportHistory.length > 0 && (
+          <View style={{ marginTop: 16 }}>
+            <Kicker style={{ marginBottom: 8 }}>历史报告</Kicker>
+            {reportHistory.map((item) => (
+              <Pressable
+                key={item.id}
+                onPress={() => { setStrategyReport(item.markdown); setShowReportModal(true); }}
+                style={({ pressed }) => ({
+                  flexDirection: "row", justifyContent: "space-between", alignItems: "center",
+                  paddingVertical: 9, borderBottomWidth: 1, borderBottomColor: colors.dividerSoft,
+                  opacity: pressed ? 0.7 : 1,
+                })}
+              >
+                <TSerif style={{ fontSize: 13, flex: 1 }}>{item.label}</TSerif>
+                <TMono style={{ fontSize: 10, color: colors.inkMuted, marginLeft: 8 }}>{ago(item.generatedAt)}</TMono>
+              </Pressable>
+            ))}
+          </View>
+        )}
       </Section>
     </ScrollView>
     <StrategyReportModal

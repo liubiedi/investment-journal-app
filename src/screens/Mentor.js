@@ -389,7 +389,7 @@ function MessageBubble({ role, content, masterId }) {
           <TMono style={{ fontSize: 9, color: colors.accent }}>已复制 ✓</TMono>
         )}
       </View>
-      <TSerif style={{ fontSize: 15, lineHeight: 24 }} numberOfLines={isLongReply ? 14 : undefined}>{content}</TSerif>
+      <TSerif selectable={!isLongReply} style={{ fontSize: 15, lineHeight: 24 }} numberOfLines={isLongReply ? 14 : undefined}>{content}</TSerif>
       {isLongReply && (
         <Pressable
           onPress={() => setShowFullText(true)}
@@ -429,7 +429,7 @@ function FullMessageModal({ visible, content, masterName, onClose }) {
           </Pressable>
         </View>
         <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 24 }}>
-          <Text style={{ fontFamily: fonts.serif, fontSize: 16, lineHeight: 28, color: colors.ink }}>
+          <Text selectable style={{ fontFamily: fonts.serif, fontSize: 16, lineHeight: 28, color: colors.ink }}>
             {content}
           </Text>
         </ScrollView>

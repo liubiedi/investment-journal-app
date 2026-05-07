@@ -234,19 +234,19 @@ ${buildProfileContext(profile)}
 
 // Parse a freeform trade description into structured fields (deepseek-v4-flash — fast + cheap).
 export async function parseTradeText(text) {
-  const prompt = `Parse this trade description into JSON. Return ONLY the JSON object — no markdown fences, no explanation.
+  const SCHEMA = [
+    '  "action": "buy" | "sell" | "hold" | "watch" | "buy_option" | "sell_option",',
+    '  "stock": string (ticker/name; "?" if unclear),',
+    '  "reason": string (clean 1-2 sentence summary in SAME language as input, under 200 chars, faithful to user\'s reasoning),',
+    '  "emotion": "calm" | "confident" | "neutral" | "anxious" | "fearful" | "excited" | "greedy" | "optimistic" | "hesitant" | "regretful"',
+  ].join('\n');
 
-Description: """${text}"""
-
-Schema:
-{
-  "action": "buy" | "sell" | "hold" | "watch",
-  "stock": string (ticker/name; "?" if unclear),
-  "reason": string (clean 1-2 sentence summary in SAME language as input, under 200 chars, faithful to user's reasoning),
-  "emotion": "calm" | "confident" | "neutral" | "anxious" | "fearful"
-}
-
-Infer emotion from tone. Match input language exactly.`;
+  const prompt =
+    'Parse this trade description into JSON. Return ONLY the JSON object — no markdown fences, no explanation.\n\n' +
+    'Description: """' + text + '"""\n\n' +
+    'Schema:\n{\n' + SCHEMA + '\n}\n\n' +
+    'Use "buy_option" / "sell_option" when the description mentions options, calls, puts, or derivatives.\n' +
+    'Infer emotion from tone (excited/greedy for euphoric; optimistic for hopeful; hesitant for uncertain; regretful for second-guessing). Match input language exactly.';
 
   const raw = await callLLM({
     messages: [{ role: "user", content: prompt }],
@@ -254,26 +254,25 @@ Infer emotion from tone. Match input language exactly.`;
     max_tokens: 512,
   });
 
-  // Strip markdown fences and normalize quotes (Chinese curly quotes → straight)
+  // Strip markdown fences and normalize quotes (Chinese curly quotes -> straight)
   const clean = raw
     .replace(/```json\s*/gi, "")
     .replace(/```/g, "")
-    .replace(/“/g, '"')
-    .replace(/”/g, '"')
+    .replace(/"/g, '"')
+    .replace(/"/g, '"')
     .trim();
 
   const s = clean.indexOf("{"), e = clean.lastIndexOf("}");
   if (s === -1) throw new Error("No JSON in response");
 
   const parsed = JSON.parse(clean.slice(s, e + 1));
-  const VALID_ACTIONS = ["buy", "sell", "hold", "watch"];
+  const VALID_ACTIONS = ["buy", "sell", "hold", "watch", "buy_option", "sell_option"];
+  const VALID_EMOTIONS = ["calm", "confident", "neutral", "anxious", "fearful", "excited", "greedy", "optimistic", "hesitant", "regretful"];
   return {
     action: VALID_ACTIONS.includes(parsed.action) ? parsed.action : "buy",
     stock: parsed.stock || "?",
     reason: typeof parsed.reason === "string" ? parsed.reason.slice(0, 200) : "",
-    emotion: ["calm", "confident", "neutral", "anxious", "fearful"].includes(parsed.emotion)
-      ? parsed.emotion
-      : "neutral",
+    emotion: VALID_EMOTIONS.includes(parsed.emotion) ? parsed.emotion : "neutral",
   };
 }
 
