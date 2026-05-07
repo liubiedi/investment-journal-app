@@ -61,6 +61,16 @@ export default function HoldingsScreen() {
     try {
       const symbols = [...new Set(app.holdings.map((h) => h.symbol))];
       const map = await fetchLivePrices(symbols);
+      // Fetch forex rates for non-USD currencies (e.g. HKDUSD=X, CNHUSD=X)
+      const currencies = new Set(
+        app.holdings.map((h) => h.currency || map[h.symbol]?.currency || "?")
+          .filter((c) => c !== "USD" && c !== "?")
+      );
+      if (currencies.size > 0) {
+        const forexPairs = [...currencies].map((c) => `${c}USD=X`);
+        const forexMap = await fetchLivePrices(forexPairs);
+        Object.assign(map, forexMap);
+      }
       await app.savePricesData(map);
     } catch {
       setRefreshError("刷新失败，请检查网络");
@@ -69,27 +79,56 @@ export default function HoldingsScreen() {
     }
   };
 
-  // Group totals by currency + per-holding weight
-  const { totals, holdingWeights } = useMemo(() => {
+  // Group totals by currency + per-holding weight (forex-adjusted to USD)
+  const { totals, holdingWeights, hasForex } = useMemo(() => {
+    const priceData = app.prices?.data || {};
+
+    // Build forex rate map: ccy -> USD rate (e.g. HKD -> 0.128)
+    const forexRates = { USD: 1 };
+    Object.entries(priceData).forEach(([sym, p]) => {
+      const m = sym.match(/^([A-Z]+)USD=X$/);
+      if (m && p?.price) forexRates[m[1]] = p.price;
+    });
+
     const byCcy = {};
     app.holdings.forEach((h) => {
-      const p = app.prices?.data?.[h.symbol];
+      const p = priceData[h.symbol];
       const ccy = h.currency || p?.currency || "?";
       if (!byCcy[ccy]) byCcy[ccy] = { cost: 0, market: 0, hasLive: true };
       byCcy[ccy].cost += h.shares * h.costBasis;
       if (p) byCcy[ccy].market += h.shares * p.price;
       else { byCcy[ccy].market += h.shares * h.costBasis; byCcy[ccy].hasLive = false; }
     });
-    // Weight = holding market value / total market value of same-currency holdings
-    const weights = {};
+
+    // Compute grand total in USD using forex rates
+    let grandTotalUSD = 0;
+    let allHaveForex = true;
     app.holdings.forEach((h) => {
-      const p = app.prices?.data?.[h.symbol];
+      const p = priceData[h.symbol];
       const ccy = h.currency || p?.currency || "?";
       const mv = (p ? p.price : h.costBasis) * h.shares;
-      const ccyTotal = byCcy[ccy]?.market ?? 0;
-      weights[h.id] = ccyTotal > 0 ? mv / ccyTotal : 0;
+      const rate = forexRates[ccy];
+      if (rate != null) grandTotalUSD += mv * rate;
+      else allHaveForex = false;
     });
-    return { totals: byCcy, holdingWeights: weights };
+
+    const weights = {};
+    app.holdings.forEach((h) => {
+      const p = priceData[h.symbol];
+      const ccy = h.currency || p?.currency || "?";
+      const mv = (p ? p.price : h.costBasis) * h.shares;
+      const rate = forexRates[ccy];
+      if (rate != null && grandTotalUSD > 0) {
+        // Cross-currency weight: this holding's USD value / total USD value
+        weights[h.id] = (mv * rate) / grandTotalUSD;
+      } else {
+        // Fallback: per-currency weight when forex not yet fetched
+        const ccyTotal = byCcy[ccy]?.market ?? 0;
+        weights[h.id] = ccyTotal > 0 ? mv / ccyTotal : 0;
+      }
+    });
+
+    return { totals: byCcy, holdingWeights: weights, hasForex: allHaveForex && grandTotalUSD > 0 };
   }, [app.holdings, app.prices]);
 
   const freshness = ago(app.prices?.lastUpdated);
@@ -227,6 +266,7 @@ export default function HoldingsScreen() {
               ) : (
                 <HoldingRow key={h.id} holding={h} price={app.prices?.data?.[h.symbol]}
                   weightPct={holdingWeights[h.id] ?? 0}
+                  weightIsForex={hasForex}
                   onEdit={() => setEditingId(h.id)}
                   onAskMentor={() => startAskMentor(h, app.prices?.data?.[h.symbol])} />
               )
@@ -261,7 +301,7 @@ function fmtBuyDate(iso) {
   return `${y}.${m}.${d}`;
 }
 
-function HoldingRow({ holding, price, weightPct, onEdit, onAskMentor }) {
+function HoldingRow({ holding, price, weightPct, weightIsForex, onEdit, onAskMentor }) {
   const cost = holding.shares * holding.costBasis;
   const hasLive = !!price;
   const market = hasLive ? holding.shares * price.price : cost;
@@ -326,7 +366,7 @@ function HoldingRow({ holding, price, weightPct, onEdit, onAskMentor }) {
           paddingHorizontal: 5, paddingVertical: 2,
           borderRadius: 3, alignSelf: "flex-start", marginTop: 4,
         }}>
-          仓位 {(weightPct * 100).toFixed(1)}%
+          {weightIsForex ? "总仓位" : "仓位"} {(weightPct * 100).toFixed(1)}%
         </TMono>
       )}
       {price?.asOf && (
