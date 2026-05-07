@@ -195,7 +195,7 @@ export default function HoldingsScreen() {
         />
       )}
 
-      {/* List */}
+      {/* List — grouped by currency */}
       <View style={{ paddingHorizontal: 20, paddingTop: 20 }}>
         {app.holdings.length === 0 && !adding && (
           <View style={{ paddingVertical: 48, alignItems: "center" }}>
@@ -204,21 +204,34 @@ export default function HoldingsScreen() {
             <TSerifItalic style={{ fontSize: 11, marginTop: 4 }}>添加后导师就能看到你当前的仓位</TSerifItalic>
           </View>
         )}
-        {app.holdings.map((h) => (
-          editingId === h.id ? (
-            <HoldingForm
-              key={h.id}
-              initial={h}
-              onSave={async (upd) => { await app.updateHoldingById(h.id, upd); setEditingId(null); }}
-              onDelete={async () => { await app.deleteHoldingById(h.id); setEditingId(null); }}
-              onCancel={() => setEditingId(null)}
-            />
-          ) : (
-            <HoldingRow key={h.id} holding={h} price={app.prices?.data?.[h.symbol]}
-              weightPct={holdingWeights[h.id] ?? 0}
-              onEdit={() => setEditingId(h.id)}
-              onAskMentor={() => startAskMentor(h, app.prices?.data?.[h.symbol])} />
-          )
+        {Object.entries(
+          app.holdings.reduce((groups, h) => {
+            const p = app.prices?.data?.[h.symbol];
+            const ccy = h.currency || p?.currency || "?";
+            if (!groups[ccy]) groups[ccy] = [];
+            groups[ccy].push(h);
+            return groups;
+          }, {})
+        ).map(([ccy, holdings]) => (
+          <View key={ccy} style={{ marginBottom: 24 }}>
+            <Kicker style={{ marginBottom: 8 }}>{ccy} · 市场</Kicker>
+            {holdings.map((h) =>
+              editingId === h.id ? (
+                <HoldingForm
+                  key={h.id}
+                  initial={h}
+                  onSave={async (upd) => { await app.updateHoldingById(h.id, upd); setEditingId(null); }}
+                  onDelete={async () => { await app.deleteHoldingById(h.id); setEditingId(null); }}
+                  onCancel={() => setEditingId(null)}
+                />
+              ) : (
+                <HoldingRow key={h.id} holding={h} price={app.prices?.data?.[h.symbol]}
+                  weightPct={holdingWeights[h.id] ?? 0}
+                  onEdit={() => setEditingId(h.id)}
+                  onAskMentor={() => startAskMentor(h, app.prices?.data?.[h.symbol])} />
+              )
+            )}
+          </View>
         ))}
       </View>
     </ScrollView>
