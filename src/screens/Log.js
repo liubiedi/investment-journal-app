@@ -106,7 +106,8 @@ export default function LogScreen() {
   const insets = useSafeAreaInsets();
   const [subTab, setSubTab] = useState("trades");
   const [adding, setAdding] = useState(false);
-  const [holdingPrompt, setHoldingPrompt] = useState(null); // { trade }
+  const [holdingPrompt, setHoldingPrompt] = useState(null);       // { trade } — stock buy/sell
+  const [optionPrompt, setOptionPrompt] = useState(null);         // { trade } — option buy/sell
 
   return (
     <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : "height"}>
@@ -159,8 +160,10 @@ export default function LogScreen() {
             onSave={async (t) => {
               const saved = await app.addTrade(t);
               setAdding(false);
-              if (["buy", "sell", "buy_option", "sell_option"].includes(t.action)) {
+              if (t.action === "buy" || t.action === "sell") {
                 setHoldingPrompt({ trade: saved });
+              } else if (t.action === "buy_option" || t.action === "sell_option") {
+                setOptionPrompt({ trade: saved });
               }
               const tradeDate = new Date(t.date);
               const isFuture = tradeDate > new Date();
@@ -238,9 +241,7 @@ export default function LogScreen() {
           onConfirm={async ({ shares, price, currency, displayName }) => {
             setHoldingPrompt(null);
             const sym = holdingPrompt.trade.stock.toUpperCase();
-            const existing = app.holdings.find(
-              (h) => h.symbol.toUpperCase() === sym
-            );
+            const existing = app.holdings.find((h) => h.symbol.toUpperCase() === sym);
             if (holdingPrompt.trade.action === "buy") {
               if (existing) {
                 const newShares = existing.shares + shares;
@@ -252,15 +253,44 @@ export default function LogScreen() {
             } else {
               if (existing) {
                 const newShares = existing.shares - shares;
-                if (newShares <= 0) {
-                  await app.deleteHoldingById(existing.id);
-                } else {
-                  await app.updateHoldingById(existing.id, { shares: newShares });
-                }
+                if (newShares <= 0) await app.deleteHoldingById(existing.id);
+                else await app.updateHoldingById(existing.id, { shares: newShares });
               }
             }
           }}
           onSkip={() => setHoldingPrompt(null)}
+        />
+      )}
+
+      {optionPrompt && (
+        <OptionUpdateModal
+          trade={optionPrompt.trade}
+          holdings={app.holdings}
+          onConfirm={async (data) => {
+            setOptionPrompt(null);
+            const sym = optionPrompt.trade.stock.toUpperCase();
+            if (optionPrompt.trade.action === "buy_option") {
+              await app.addHolding({
+                symbol: sym,
+                displayName: data.displayName,
+                shares: data.contracts,
+                costBasis: data.premium,
+                currency: data.currency,
+                buyReason: optionPrompt.trade.reason,
+                notes: data.notes,
+                buyDate: new Date(optionPrompt.trade.date).toISOString().slice(0, 10),
+              });
+            } else {
+              // sell_option: close matching position by displayName
+              const existing = app.holdings.find((h) => h.displayName === data.displayName);
+              if (existing) {
+                const remaining = existing.shares - data.contracts;
+                if (remaining <= 0) await app.deleteHoldingById(existing.id);
+                else await app.updateHoldingById(existing.id, { shares: remaining });
+              }
+            }
+          }}
+          onSkip={() => setOptionPrompt(null)}
         />
       )}
     </SafeAreaView>
@@ -806,7 +836,7 @@ const CURRENCIES = ["USD", "CNY", "HKD", "EUR", "JPY"];
 function HoldingUpdateModal({ trade, holdings, onConfirm, onSkip }) {
   const sym = trade.stock.toUpperCase();
   const existing = holdings.find((h) => h.symbol.toUpperCase() === sym);
-  const isBuy = trade.action === "buy" || trade.action === "buy_option";
+  const isBuy = trade.action === "buy";
 
   const [shares, setShares] = useState("");
   const [price, setPrice] = useState("");
@@ -909,6 +939,206 @@ function HoldingUpdateModal({ trade, holdings, onConfirm, onSkip }) {
             </FilledButton>
           </View>
         </View>
+      </KeyboardAvoidingView>
+    </Modal>
+  );
+}
+
+// ============================================================
+function OptionUpdateModal({ trade, holdings, onConfirm, onSkip }) {
+  const underlying = trade.stock.toUpperCase();
+  const isBuy = trade.action === "buy_option";
+
+  const [optionType, setOptionType] = useState("call");
+  const [strike, setStrike] = useState("");
+  const [expiry, setExpiry] = useState(() => {
+    // default to ~30 days out
+    const d = new Date();
+    d.setDate(d.getDate() + 30);
+    return d.toISOString().slice(0, 10);
+  });
+  const [showExpiryPicker, setShowExpiryPicker] = useState(false);
+  const [premium, setPremium] = useState("");
+  const [contracts, setContracts] = useState("");
+  const [currency, setCurrency] = useState("USD");
+
+  // For sell_option: list of existing option holdings on this underlying
+  const existingOptions = holdings.filter(
+    (h) => h.symbol.toUpperCase() === underlying && h.notes?.startsWith("期权类型:")
+  );
+
+  const displayName = strike
+    ? `${underlying} ${optionType === "call" ? "Call" : "Put"} $${strike} exp.${expiry}`
+    : "";
+
+  const canConfirm =
+    strike.trim() && !isNaN(parseFloat(strike)) && parseFloat(strike) > 0 &&
+    contracts.trim() && !isNaN(parseInt(contracts)) && parseInt(contracts) > 0 &&
+    expiry &&
+    (isBuy ? premium.trim() && !isNaN(parseFloat(premium)) && parseFloat(premium) > 0 : true);
+
+  const handleConfirm = () => {
+    const typeLabel = optionType === "call" ? "看涨Call" : "看跌Put";
+    onConfirm({
+      optionType,
+      strike: parseFloat(strike),
+      expiry,
+      premium: parseFloat(premium) || 0,
+      contracts: parseInt(contracts),
+      currency,
+      displayName,
+      notes: `期权类型:${typeLabel}|行权价:${strike}|到期日:${expiry}`,
+    });
+  };
+
+  return (
+    <Modal transparent animationType="slide" onRequestClose={onSkip}>
+      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>
+        <Pressable style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.4)" }} onPress={onSkip} />
+        <ScrollView
+          style={{ backgroundColor: colors.bg, borderTopWidth: 1, borderColor: colors.divider }}
+          contentContainerStyle={{ padding: 24, paddingBottom: 48 }}
+          keyboardShouldPersistTaps="handled"
+        >
+          <Kicker style={{ marginBottom: 4 }}>
+            {isBuy ? "记录期权买入 · LOG OPTION BUY" : "记录期权卖出 · LOG OPTION SELL"}
+          </Kicker>
+          <TSerifBold style={{ fontSize: 18, marginBottom: 2 }}>
+            {ACTION_LABEL[trade.action]} {underlying}
+          </TSerifBold>
+          <TSerifItalic style={{ fontSize: 12, marginBottom: 16 }}>
+            {isBuy ? "新建一条期权持仓记录" : "平仓或减仓匹配的期权持仓"}
+          </TSerifItalic>
+
+          {/* Call / Put */}
+          <Field label="期权类型 · OPTION TYPE">
+            <View style={{ flexDirection: "row", gap: 8 }}>
+              {[{ id: "call", label: "看涨 Call" }, { id: "put", label: "看跌 Put" }].map((t) => (
+                <Pressable key={t.id} onPress={() => setOptionType(t.id)}
+                  style={{ flex: 1, paddingVertical: 10, alignItems: "center",
+                    backgroundColor: optionType === t.id ? colors.ink : "transparent",
+                    borderWidth: optionType === t.id ? 0 : 1, borderColor: colors.divider }}>
+                  <TMono style={{ fontSize: 12, color: optionType === t.id ? colors.bg : colors.inkSoft }}>
+                    {t.label}
+                  </TMono>
+                </Pressable>
+              ))}
+            </View>
+          </Field>
+
+          {/* Strike + Expiry row */}
+          <View style={{ flexDirection: "row", gap: 12 }}>
+            <View style={{ flex: 1 }}>
+              <Field label="行权价 · STRIKE">
+                <PaperInput
+                  value={strike} onChangeText={setStrike}
+                  placeholder="150.00"
+                  keyboardType="decimal-pad"
+                  style={{ fontFamily: fonts.mono, fontSize: 16 }}
+                />
+              </Field>
+            </View>
+            <View style={{ flex: 1 }}>
+              <Field label="到期日 · EXPIRY">
+                <Pressable
+                  onPress={() => setShowExpiryPicker(true)}
+                  style={{ flexDirection: "row", alignItems: "center", gap: 8,
+                    paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: colors.divider }}>
+                  <Calendar size={13} color={colors.accent} strokeWidth={1.5} />
+                  <TMono style={{ fontSize: 14, color: colors.ink }}>{expiry}</TMono>
+                </Pressable>
+                {showExpiryPicker && (
+                  <DateTimePicker
+                    value={new Date(expiry + "T12:00:00")}
+                    mode="date"
+                    display={Platform.OS === "ios" ? "inline" : "default"}
+                    onChange={(event, selectedDate) => {
+                      if (Platform.OS === "android") setShowExpiryPicker(false);
+                      if (selectedDate && event.type !== "dismissed") {
+                        const d = selectedDate;
+                        setExpiry(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`);
+                        if (Platform.OS === "ios") setShowExpiryPicker(false);
+                      } else if (event.type === "dismissed") {
+                        setShowExpiryPicker(false);
+                      }
+                    }}
+                  />
+                )}
+              </Field>
+            </View>
+          </View>
+
+          {/* Contracts + Premium row */}
+          <View style={{ flexDirection: "row", gap: 12 }}>
+            <View style={{ flex: 1 }}>
+              <Field label="合约数 · CONTRACTS">
+                <PaperInput
+                  value={contracts} onChangeText={setContracts}
+                  placeholder="1"
+                  keyboardType="number-pad"
+                  style={{ fontFamily: fonts.mono, fontSize: 16 }}
+                />
+              </Field>
+            </View>
+            {isBuy && (
+              <View style={{ flex: 1 }}>
+                <Field label="权利金/张 · PREMIUM">
+                  <PaperInput
+                    value={premium} onChangeText={setPremium}
+                    placeholder="3.50"
+                    keyboardType="decimal-pad"
+                    style={{ fontFamily: fonts.mono, fontSize: 16 }}
+                  />
+                </Field>
+              </View>
+            )}
+          </View>
+
+          {/* Currency */}
+          <Field label="货币 · CURRENCY">
+            <View style={{ flexDirection: "row", gap: 6 }}>
+              {CURRENCIES.map((c) => (
+                <Pressable key={c} onPress={() => setCurrency(c)}
+                  style={{ paddingHorizontal: 10, paddingVertical: 6,
+                    backgroundColor: currency === c ? colors.ink : "transparent",
+                    borderWidth: 1, borderColor: currency === c ? colors.ink : colors.divider }}>
+                  <TMono style={{ fontSize: 11, color: currency === c ? colors.bg : colors.inkMuted }}>{c}</TMono>
+                </Pressable>
+              ))}
+            </View>
+          </Field>
+
+          {/* Preview label */}
+          {displayName ? (
+            <View style={{ marginTop: 4, marginBottom: 8, padding: 10,
+              backgroundColor: colors.bgElev, borderWidth: 1, borderColor: colors.dividerSoft }}>
+              <TMono style={{ fontSize: 10, color: colors.inkMuted, marginBottom: 2 }}>持仓标签预览</TMono>
+              <TSerif style={{ fontSize: 14 }}>{displayName}</TSerif>
+            </View>
+          ) : null}
+
+          {/* Sell: show matching existing option positions */}
+          {!isBuy && existingOptions.length > 0 && (
+            <View style={{ marginBottom: 12 }}>
+              <Kicker style={{ marginBottom: 6 }}>匹配期权持仓</Kicker>
+              {existingOptions.map((h) => (
+                <TMono key={h.id} style={{ fontSize: 11, color: colors.inkMuted, marginBottom: 2 }}>
+                  {h.displayName} · {h.shares} 张
+                </TMono>
+              ))}
+            </View>
+          )}
+
+          <View style={{ flexDirection: "row", gap: 10, marginTop: 8 }}>
+            <OutlineButton onPress={onSkip} style={{ flex: 1 }}>跳过</OutlineButton>
+            <FilledButton onPress={handleConfirm} disabled={!canConfirm} style={{ flex: 2 }}>
+              <Check size={14} color={colors.bg} />
+              <TSerifBold style={{ color: colors.bg, fontSize: 14 }}>
+                {isBuy ? "记录期权买入" : "记录期权平仓"}
+              </TSerifBold>
+            </FilledButton>
+          </View>
+        </ScrollView>
       </KeyboardAvoidingView>
     </Modal>
   );
