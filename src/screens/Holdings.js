@@ -118,11 +118,11 @@ export default function HoldingsScreen() {
       const ccy = h.currency || p?.currency || "?";
       const mv = (p ? p.price : h.costBasis) * h.shares;
       const rate = forexRates[ccy];
-      if (rate != null && grandTotalUSD > 0) {
+      if (allHaveForex && rate != null && grandTotalUSD > 0) {
         // Cross-currency weight: this holding's USD value / total USD value
         weights[h.id] = (mv * rate) / grandTotalUSD;
       } else {
-        // Fallback: per-currency weight when forex not yet fetched
+        // Fallback: per-currency weight — avoids inflated weights from partial grandTotalUSD
         const ccyTotal = byCcy[ccy]?.market ?? 0;
         weights[h.id] = ccyTotal > 0 ? mv / ccyTotal : 0;
       }
