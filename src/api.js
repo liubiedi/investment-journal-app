@@ -253,10 +253,28 @@ Infer emotion from tone. Match input language exactly.`;
     model: MODELS.fast,
     max_tokens: 512,
   });
-  const clean = raw.replace(/```json|```/g, "").trim();
+
+  // Strip markdown fences and normalize quotes (Chinese curly quotes → straight)
+  const clean = raw
+    .replace(/```json\s*/gi, "")
+    .replace(/```/g, "")
+    .replace(/“/g, '"')
+    .replace(/”/g, '"')
+    .trim();
+
   const s = clean.indexOf("{"), e = clean.lastIndexOf("}");
   if (s === -1) throw new Error("No JSON in response");
-  return JSON.parse(clean.slice(s, e + 1));
+
+  const parsed = JSON.parse(clean.slice(s, e + 1));
+  const VALID_ACTIONS = ["buy", "sell", "hold", "watch"];
+  return {
+    action: VALID_ACTIONS.includes(parsed.action) ? parsed.action : "buy",
+    stock: parsed.stock || "?",
+    reason: typeof parsed.reason === "string" ? parsed.reason.slice(0, 200) : "",
+    emotion: ["calm", "confident", "neutral", "anxious", "fearful"].includes(parsed.emotion)
+      ? parsed.emotion
+      : "neutral",
+  };
 }
 
 // Generate mentor feedback for a single trade or thought.
@@ -284,7 +302,7 @@ They are working through this. They may be torn, uncertain, or simply thinking o
 
 Give your immediate, specific reaction. Reference their history, rules, or philosophy where relevant. Be direct. 2-3 short paragraphs. Match their language.`;
 
-  const opts = { system, messages: [{ role: "user", content: user }], max_tokens: 1024 };
+  const opts = { system, messages: [{ role: "user", content: user }], max_tokens: 1800 };
   if (onChunk) return await callLLMStream({ ...opts, onChunk });
   return await callLLM(opts);
 }
@@ -316,7 +334,7 @@ export async function chatMessage(history, newUserMessage, profile, masterId = "
   // DeepSeek auto-caches the system prefix server-side.
   const trimmed = history.slice(-10);
   const messages = [...trimmed, { role: "user", content: newUserMessage }];
-  return await callLLM({ system, messages, max_tokens: 900 });
+  return await callLLM({ system, messages, max_tokens: 2200 });
 }
 
 // ============================================================
@@ -324,7 +342,7 @@ export async function chatMessage(history, newUserMessage, profile, masterId = "
 // ============================================================
 //
 // This is the most expensive call in the app (~$0.03-0.08 per run).
-// Uses max_tokens 3000 to allow a full structured report.
+// Uses a generous output budget to allow a full structured report.
 // Context is NOT cached (rare, one-off call) — pass the FULL profile.
 
 export async function generateStrategyReport(profile) {
@@ -391,7 +409,7 @@ A single sentence describing this investor's true strategy, written as though fo
   return await callLLM({
     messages: [{ role: "user", content: user }],
     system,
-    max_tokens: 3000,
+    max_tokens: 6000,
   });
 }
 

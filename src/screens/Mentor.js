@@ -1,45 +1,90 @@
 // Mentor screen — chat with AI mentor. Auto-refreshes prices on mount if stale.
 import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import {
-  View, ScrollView, Pressable, ActivityIndicator, KeyboardAvoidingView, Platform, TextInput,
+  View, ScrollView, Pressable, ActivityIndicator, KeyboardAvoidingView, Platform, TextInput, Modal, Text,
 } from "react-native";
 import { useSafeAreaInsets, SafeAreaView } from "react-native-safe-area-context";
 import {
-  MessageCircle, Send, RotateCcw, Loader2, AlertCircle, Mic, MicOff,
+  MessageCircle, Send, RotateCcw, Loader2, AlertCircle, Maximize2, X,
 } from "lucide-react-native";
-import { useFocusEffect } from "@react-navigation/native";
+import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
+import { useFocusEffect, useRoute } from "@react-navigation/native";
+import * as Clipboard from "expo-clipboard";
 
 import { colors, fonts } from "../theme";
 import { useApp } from "../context";
 import { ago } from "../utils";
 import { chatMessage, fetchLivePrices } from "../api";
-import { useSpeech } from "../voice";
+import { getMaster } from "../constants";
 import * as db from "../db";
 import {
-  TSerif, TSerifBold, TSerifItalic, TMono, Kicker, PaperInput,
+  TSerif, TSerifBold, TSerifItalic, TMono, Kicker, MasterChips,
 } from "../components";
 
 const PRICE_STALE_MS = 15 * 60 * 1000;
 
 export default function MentorScreen() {
   const app = useApp();
+  const route = useRoute();
   const insets = useSafeAreaInsets();
+  const tabBarHeight = useBottomTabBarHeight();
   const [history, setHistory] = useState([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
+  const [pendingRetry, setPendingRetry] = useState(null);
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState("");
+  const [activeMaster, setActiveMaster] = useState("default");
   const scrollRef = useRef(null);
-  const { listening, supported, start, stop } = useSpeech(setInput);
 
-  // Reload chat history each time the screen comes into focus so that
-  // entries written by "带入问道" from the Log screen appear immediately.
-  useFocusEffect(
-    useCallback(() => {
-      db.listChat().then((h) => setHistory(h));
-    }, [])
-  );
+  // Auto-switch to the master used in "带入问道" navigation
+  useEffect(() => {
+    const m = route.params?.autoMaster;
+    if (m) setActiveMaster(m);
+  }, [route.params?.autoMaster]);
+
+  // Auto-reply when Holdings pre-loads a user message and navigates here
+  useEffect(() => {
+    const ts = route.params?.autoReplyTs;
+    const m = route.params?.autoMaster || "default";
+    if (!ts) return;
+    (async () => {
+      const h = await db.listChat(m);
+      setHistory(h);
+      const last = h[h.length - 1];
+      if (!last || last.role !== "user") return;
+      setSending(true);
+      setError(""); setPendingRetry(null);
+      try {
+        const reply = await chatMessage(h.slice(0, -1), last.content, app.profile, m);
+        const updated = [...h, { role: "assistant", content: reply, masterId: m, createdAt: Date.now() }];
+        setHistory(updated);
+        await db.appendChat("assistant", reply, m);
+      } catch (e) {
+        setError(e?.message || "请求失败");
+        setPendingRetry(last.content);
+      } finally {
+        setSending(false);
+      }
+    })();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [route.params?.autoReplyTs]);
+
+  const reloadChat = useCallback(() => {
+    async function run() {
+      const h = await db.listChat(activeMaster);
+      setHistory(h);
+      setPendingRetry(null);
+      setError("");
+    }
+    run();
+  }, [activeMaster]);
+
+  // Reload on screen focus (picks up 带入问道 entries from Log screen)
+  useFocusEffect(reloadChat);
+  // Reload when master changes while screen is already focused
+  useEffect(reloadChat, [reloadChat]);
 
   // Auto price refresh on mount if stale
   useEffect(() => {
@@ -85,17 +130,37 @@ export default function MentorScreen() {
   const send = async () => {
     const text = input.trim();
     if (!text || sending) return;
-    setInput(""); setError("");
-    const userMsg = { role: "user", content: text };
+    setInput(""); setError(""); setPendingRetry(null);
+    const userMsg = { role: "user", content: text, masterId: activeMaster, createdAt: Date.now() };
     const newHistory = [...history, userMsg];
     setHistory(newHistory);
-    await db.appendChat("user", text);
+    await db.appendChat("user", text, activeMaster);
     setSending(true);
     try {
-      const reply = await chatMessage(history, text, app.profile, "default");
-      const updated = [...newHistory, { role: "assistant", content: reply }];
+      const reply = await chatMessage(history, text, app.profile, activeMaster);
+      const updated = [...newHistory, { role: "assistant", content: reply, masterId: activeMaster, createdAt: Date.now() }];
       setHistory(updated);
-      await db.appendChat("assistant", reply);
+      await db.appendChat("assistant", reply, activeMaster);
+    } catch (e) {
+      setError(e.message === "NO_API_KEY" ? "请先在设置中配置 API key" : "导师暂时失联，请稍后再试");
+      if (e.message !== "NO_API_KEY") setPendingRetry(text);
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const retry = async () => {
+    if (!pendingRetry || sending) return;
+    setError(""); setSending(true);
+    // history already has the failed user message as last item;
+    // chatMessage expects context = messages BEFORE the new user message
+    const contextHistory = history.slice(0, -1);
+    try {
+      const reply = await chatMessage(contextHistory, pendingRetry, app.profile, activeMaster);
+      const updated = [...history, { role: "assistant", content: reply, masterId: activeMaster, createdAt: Date.now() }];
+      setHistory(updated);
+      await db.appendChat("assistant", reply, activeMaster);
+      setPendingRetry(null);
     } catch (e) {
       setError(e.message === "NO_API_KEY" ? "请先在设置中配置 API key" : "导师暂时失联，请稍后再试");
     } finally {
@@ -105,8 +170,10 @@ export default function MentorScreen() {
 
   const reset = async () => {
     if (history.length === 0) return;
-    await db.clearChat();
+    await db.clearChat(activeMaster);
     setHistory([]);
+    setPendingRetry(null);
+    setError("");
   };
 
   const priceFreshness = useMemo(() => ago(app.prices?.lastUpdated), [app.prices]);
@@ -122,6 +189,11 @@ export default function MentorScreen() {
   ];
 
   return (
+    <KeyboardAvoidingView
+      style={{ flex: 1 }}
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
+      keyboardVerticalOffset={tabBarHeight}
+    >
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }} edges={["top"]}>
       {/* Header */}
       <View style={{
@@ -139,6 +211,9 @@ export default function MentorScreen() {
         </View>
         <TSerifBold style={{ fontSize: 26, letterSpacing: -0.5 }}>投资导师</TSerifBold>
         <TMono style={{ fontSize: 10, marginTop: 4, color: colors.inkMuted }}>已同步 · {ctxSummary}</TMono>
+        <View style={{ marginTop: 10 }}>
+          <MasterChips active={activeMaster} onSelect={setActiveMaster} />
+        </View>
 
         {hasHoldings && (
           <View style={{ marginTop: 8, flexDirection: "row", alignItems: "center", gap: 8 }}>
@@ -169,15 +244,11 @@ export default function MentorScreen() {
         )}
       </View>
 
-      {/* Messages */}
-      <KeyboardAvoidingView
-        style={{ flex: 1 }}
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
-        keyboardVerticalOffset={64}
-      >
+      <View style={{ flex: 1 }}>
         <ScrollView
           ref={scrollRef}
           style={{ flex: 1 }}
+          keyboardShouldPersistTaps="handled"
           contentContainerStyle={{ padding: 20, paddingBottom: 20 }}
         >
           {history.length === 0 && (
@@ -199,9 +270,26 @@ export default function MentorScreen() {
             </View>
           )}
 
-          {history.map((m, i) => (
-            <MessageBubble key={i} role={m.role} content={m.content} />
-          ))}
+          {history.map((m, i) => {
+            const prev = history[i - 1];
+            const mDate = m.createdAt ? new Date(m.createdAt).toDateString() : null;
+            const prevDate = prev?.createdAt ? new Date(prev.createdAt).toDateString() : null;
+            const showDateDivider = mDate && mDate !== prevDate;
+            return (
+              <React.Fragment key={i}>
+                {showDateDivider && (
+                  <View style={{ alignItems: "center", marginVertical: 12, flexDirection: "row", gap: 8 }}>
+                    <View style={{ flex: 1, height: 1, backgroundColor: colors.dividerSoft }} />
+                    <TMono style={{ fontSize: 9 }}>
+                      {new Date(m.createdAt).toLocaleDateString("zh-CN", { month: "short", day: "numeric" })}
+                    </TMono>
+                    <View style={{ flex: 1, height: 1, backgroundColor: colors.dividerSoft }} />
+                  </View>
+                )}
+                <MessageBubble role={m.role} content={m.content} masterId={m.masterId} />
+              </React.Fragment>
+            );
+          })}
 
           {sending && (
             <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 8 }}>
@@ -210,30 +298,28 @@ export default function MentorScreen() {
             </View>
           )}
 
-          {error ? <TMono style={{ color: colors.bad, fontSize: 11, paddingVertical: 6 }}>{error}</TMono> : null}
+          {error ? (
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 6 }}>
+              <TMono style={{ color: colors.bad, fontSize: 11, flex: 1 }}>{error}</TMono>
+              {pendingRetry && (
+                <Pressable onPress={retry} disabled={sending}
+                  style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+                  <RotateCcw size={11} color={colors.ink} />
+                  <TMono style={{ fontSize: 11 }}>重新发送</TMono>
+                </Pressable>
+              )}
+            </View>
+          ) : null}
         </ScrollView>
 
         {/* Input row */}
         <View style={{
           paddingHorizontal: 12, paddingTop: 10,
-          paddingBottom: Math.max(10, insets.bottom - 20),
+          paddingBottom: Math.max(10, insets.bottom),
           borderTopWidth: 1, borderTopColor: colors.divider,
           backgroundColor: colors.bg,
           flexDirection: "row", alignItems: "flex-end", gap: 8,
         }}>
-          {supported && (
-            <Pressable
-              onPress={() => listening ? stop() : start(input)}
-              style={{
-                width: 42, height: 42,
-                alignItems: "center", justifyContent: "center",
-                backgroundColor: listening ? colors.bad : "transparent",
-                borderWidth: listening ? 0 : 1, borderColor: colors.divider,
-              }}
-            >
-              {listening ? <MicOff size={15} color={colors.bg} /> : <Mic size={15} color={colors.inkMuted} />}
-            </Pressable>
-          )}
           <TextInput
             value={input}
             onChangeText={setInput}
@@ -260,33 +346,94 @@ export default function MentorScreen() {
             {sending ? <Loader2 size={15} color={colors.bg} /> : <Send size={15} color={colors.bg} />}
           </Pressable>
         </View>
-      </KeyboardAvoidingView>
+      </View>
     </SafeAreaView>
+    </KeyboardAvoidingView>
   );
 }
 
-function MessageBubble({ role, content }) {
+function MessageBubble({ role, content, masterId }) {
+  const [copied, setCopied] = useState(false);
+  const [showFullText, setShowFullText] = useState(false);
+
+  const handleCopy = async () => {
+    await Clipboard.setStringAsync(content);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
+
   if (role === "user") {
     return (
-      <View style={{ flexDirection: "row", justifyContent: "flex-end", marginBottom: 14 }}>
-        <View style={{
-          maxWidth: "85%", padding: 12,
-          backgroundColor: colors.ink,
-        }}>
+      <Pressable onLongPress={handleCopy} delayLongPress={400}
+        style={{ flexDirection: "row", justifyContent: "flex-end", marginBottom: 14 }}>
+        <View style={{ maxWidth: "85%", padding: 12, backgroundColor: colors.ink }}>
           <TSerif style={{ color: colors.bg, fontSize: 14, lineHeight: 22 }}>{content}</TSerif>
+          {copied && (
+            <TMono style={{ color: colors.accent, fontSize: 9, marginTop: 4, textAlign: "right" }}>已复制 ✓</TMono>
+          )}
         </View>
-      </View>
+      </Pressable>
     );
   }
+
+  const master = getMaster(masterId || "default");
+  const isLongReply = content.length > 1200;
   return (
-    <View style={{ marginBottom: 18 }}>
+    <Pressable onLongPress={handleCopy} delayLongPress={400} style={{ marginBottom: 18 }}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 6 }}>
         <View style={{ width: 18, height: 18, backgroundColor: colors.ink, alignItems: "center", justifyContent: "center" }}>
           <MessageCircle size={10} color={colors.accent} />
         </View>
-        <Kicker>MENTOR</Kicker>
+        <Kicker style={{ flex: 1 }}>{master.zh} · {master.name}</Kicker>
+        {copied && (
+          <TMono style={{ fontSize: 9, color: colors.accent }}>已复制 ✓</TMono>
+        )}
       </View>
-      <TSerif style={{ fontSize: 15, lineHeight: 24 }}>{content}</TSerif>
-    </View>
+      <TSerif style={{ fontSize: 15, lineHeight: 24 }} numberOfLines={isLongReply ? 14 : undefined}>{content}</TSerif>
+      {isLongReply && (
+        <Pressable
+          onPress={() => setShowFullText(true)}
+          style={{ flexDirection: "row", alignItems: "center", gap: 5, marginTop: 8 }}
+        >
+          <Maximize2 size={10} color={colors.inkMuted} />
+          <TMono style={{ fontSize: 10, color: colors.inkMuted }}>FULL TEXT</TMono>
+        </Pressable>
+      )}
+      <FullMessageModal
+        visible={showFullText}
+        content={content}
+        masterName={master.name}
+        onClose={() => setShowFullText(false)}
+      />
+    </Pressable>
+  );
+}
+
+function FullMessageModal({ visible, content, masterName, onClose }) {
+  return (
+    <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
+        <View style={{
+          flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+          paddingHorizontal: 20, paddingVertical: 14,
+          borderBottomWidth: 1, borderBottomColor: colors.divider,
+        }}>
+          <View style={{ flex: 1, paddingRight: 12 }}>
+            <Kicker>MENTOR REPLY</Kicker>
+            <Text style={{ fontFamily: fonts.serifBold, fontSize: 18, color: colors.ink, marginTop: 2 }}>
+              {masterName}
+            </Text>
+          </View>
+          <Pressable onPress={onClose} hitSlop={12}>
+            <X size={18} color={colors.inkMuted} />
+          </Pressable>
+        </View>
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 24 }}>
+          <Text style={{ fontFamily: fonts.serif, fontSize: 16, lineHeight: 28, color: colors.ink }}>
+            {content}
+          </Text>
+        </ScrollView>
+      </SafeAreaView>
+    </Modal>
   );
 }
