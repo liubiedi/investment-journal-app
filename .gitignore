@@ -1,9 +1,11 @@
 node_modules/
+.claude/
 .expo/
 .expo-shared/
 .env
 .env.*
 !.env.example
+nav-preview.html
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
