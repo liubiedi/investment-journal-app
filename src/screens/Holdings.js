@@ -80,13 +80,14 @@ export default function HoldingsScreen() {
       if (p) byCcy[ccy].market += h.shares * p.price;
       else { byCcy[ccy].market += h.shares * h.costBasis; byCcy[ccy].hasLive = false; }
     });
-    // Weight = holding market value / grand total across all holdings
-    const grandTotal = Object.values(byCcy).reduce((sum, g) => sum + g.market, 0);
+    // Weight = holding market value / total market value of same-currency holdings
     const weights = {};
     app.holdings.forEach((h) => {
       const p = app.prices?.data?.[h.symbol];
+      const ccy = h.currency || p?.currency || "?";
       const mv = (p ? p.price : h.costBasis) * h.shares;
-      weights[h.id] = grandTotal > 0 ? mv / grandTotal : 0;
+      const ccyTotal = byCcy[ccy]?.market ?? 0;
+      weights[h.id] = ccyTotal > 0 ? mv / ccyTotal : 0;
     });
     return { totals: byCcy, holdingWeights: weights };
   }, [app.holdings, app.prices]);
