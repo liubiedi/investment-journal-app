@@ -34,11 +34,22 @@ import ReviewScreen from "./src/screens/Review";
 import MentorScreen from "./src/screens/Mentor";
 import SettingsScreen from "./src/screens/Settings";
 
-SplashScreen.preventAutoHideAsync().catch(() => {});
+// Prevent splash from auto-hiding — must be called as early as possible.
+// Wrapped in try/catch because in some edge cases (e.g. module loaded before
+// the native bridge is fully ready under New Architecture) the call can throw
+// synchronously before the returned Promise is even constructed.
+try {
+  SplashScreen.preventAutoHideAsync().catch(() => {});
+} catch {}
 
-// Catches JS rendering errors so they surface as a visible message rather
-// than propagating through the RCT bridge and causing a SIGABRT.
-class AppErrorBoundary extends React.Component {
+const Tab = createBottomTabNavigator();
+
+// ─── Root error boundary ──────────────────────────────────────────────────────
+// Wraps the ENTIRE application tree including the loading state.
+// This is the outermost boundary — it catches errors thrown by AppContent's
+// own hooks (useFonts, useState, useEffect), which the inner AppErrorBoundary
+// cannot catch because it lives *inside* those hooks as a child.
+class RootErrorBoundary extends React.Component {
   constructor(props) {
     super(props);
     this.state = { error: null };
@@ -49,7 +60,7 @@ class AppErrorBoundary extends React.Component {
   }
 
   componentDidCatch(error, info) {
-    console.error("[AppErrorBoundary]", error, info?.componentStack);
+    console.error("[RootErrorBoundary]", error, info?.componentStack);
   }
 
   render() {
@@ -74,9 +85,50 @@ class AppErrorBoundary extends React.Component {
   }
 }
 
-const Tab = createBottomTabNavigator();
+// ─── Inner error boundary ─────────────────────────────────────────────────────
+// Second-level boundary for the fully-mounted navigation tree.
+// Catches rendering errors thrown by individual screens after bootstrap.
+class AppErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { error: null };
+  }
 
-export default function App() {
+  static getDerivedStateFromError(error) {
+    return { error };
+  }
+
+  componentDidCatch(error, info) {
+    console.error("[AppErrorBoundary]", error, info?.componentStack);
+  }
+
+  render() {
+    if (this.state.error) {
+      return (
+        <View style={{ flex: 1, backgroundColor: "#f5f1e8", alignItems: "center", justifyContent: "center", padding: 32 }}>
+          <Text style={{ fontSize: 16, fontWeight: "600", color: "#1a1611", marginBottom: 8 }}>
+            页面错误
+          </Text>
+          <Text style={{ fontSize: 13, color: "#6b5a3f", textAlign: "center", marginBottom: 16, lineHeight: 20 }}>
+            {String(this.state.error?.message || this.state.error)}
+          </Text>
+          <ScrollView style={{ maxHeight: 200, width: "100%" }}>
+            <Text style={{ fontSize: 10, color: "#8b6f47", fontFamily: "monospace" }}>
+              {this.state.error?.stack}
+            </Text>
+          </ScrollView>
+        </View>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+// ─── AppContent ───────────────────────────────────────────────────────────────
+// All hooks and state live here, inside RootErrorBoundary.
+// Previously this was App() itself — moving it one level down means
+// RootErrorBoundary (its parent) can now catch any hook-level errors.
+function AppContent() {
   const [fontsLoaded] = useFonts({
     Fraunces_400Regular_Italic,
     Fraunces_500Medium,
@@ -124,7 +176,7 @@ export default function App() {
         console.warn("Bootstrap error:", err);
       } finally {
         setBootstrapped(true);
-        await SplashScreen.hideAsync().catch(() => {});
+        try { await SplashScreen.hideAsync(); } catch {}
       }
     })();
   }, []);
@@ -270,6 +322,15 @@ export default function App() {
         </SafeAreaProvider>
       </GestureHandlerRootView>
     </AppErrorBoundary>
+  );
+}
+
+// ─── Root export ──────────────────────────────────────────────────────────────
+export default function App() {
+  return (
+    <RootErrorBoundary>
+      <AppContent />
+    </RootErrorBoundary>
   );
 }
 
