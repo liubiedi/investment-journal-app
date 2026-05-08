@@ -993,10 +993,18 @@ function OptionUpdateModal({ trade, holdings, onConfirm, onSkip }) {
 
   return (
     <Modal transparent animationType="slide" onRequestClose={onSkip}>
-      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>
-        <Pressable style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.4)" }} onPress={onSkip} />
+      {/* absoluteFill backdrop so it doesn't compete for layout space */}
+      <Pressable
+        style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(0,0,0,0.4)" }}
+        onPress={onSkip}
+      />
+      <KeyboardAvoidingView
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        style={{ flex: 1, justifyContent: "flex-end" }}
+      >
+        {/* flexShrink: 1 bounds the ScrollView height so it can actually scroll */}
         <ScrollView
-          style={{ backgroundColor: colors.bg, borderTopWidth: 1, borderColor: colors.divider }}
+          style={{ backgroundColor: colors.bg, borderTopWidth: 1, borderColor: colors.divider, flexShrink: 1 }}
           contentContainerStyle={{ padding: 24, paddingBottom: 48 }}
           keyboardShouldPersistTaps="handled"
         >
