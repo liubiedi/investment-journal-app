@@ -9,7 +9,6 @@ import {
 } from "lucide-react-native";
 import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
 import { useFocusEffect, useRoute } from "@react-navigation/native";
-import * as Clipboard from "expo-clipboard";
 
 import { colors, fonts } from "../theme";
 import { useApp } from "../context";
@@ -357,9 +356,14 @@ function MessageBubble({ role, content, masterId }) {
   const [showFullText, setShowFullText] = useState(false);
 
   const handleCopy = async () => {
-    await Clipboard.setStringAsync(content);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
+    try {
+      const Clipboard = require("expo-clipboard");
+      await Clipboard.setStringAsync(content);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // native module not linked in this build — silently ignore
+    }
   };
 
   if (role === "user") {
