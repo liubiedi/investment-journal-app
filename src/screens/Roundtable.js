@@ -68,7 +68,9 @@ export default function RoundtableModal({ visible, onClose }) {
     });
   }, []);
 
-  // ── Round 1: parallel ──────────────────────────────────────
+  // ── Round 1: concurrency-limited (2 at a time) ────────────
+  // Firing all 6 simultaneously on mobile causes silent failures / empty responses
+  // from the API. A worker pool of 2 keeps requests reliable without feeling slow.
   const startRound1 = async () => {
     const topic = topicInput.trim();
     if (!topic || selectedMasters.length === 0) return;
@@ -91,18 +93,28 @@ export default function RoundtableModal({ visible, onClose }) {
       setSessionId(dbId);
     } catch {}
 
-    selectedMasters.forEach(async (masterId) => {
-      try {
-        const { text, verdict } = await mentorPanelResponse(topic, masterId, app.profile);
-        addResponse(1, masterId, text, verdict);
-        setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 50);
-      } catch (e) {
-        const msg = e.message === "NO_API_KEY" ? "请先配置 API key" : e.message;
-        addResponse(1, masterId, `[请求失败: ${msg}]`, null);
-      } finally {
-        setLoadingMasters(prev => { const s = new Set(prev); s.delete(masterId); return s; });
+    const queue = [...selectedMasters];
+
+    const worker = async () => {
+      while (queue.length > 0) {
+        const masterId = queue.shift();
+        if (!masterId) break;
+        try {
+          const { text, verdict } = await mentorPanelResponse(topic, masterId, app.profile);
+          if (!text) throw new Error("收到空回复，请重试");
+          addResponse(1, masterId, text, verdict);
+          setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 50);
+        } catch (e) {
+          const msg = e.message === "NO_API_KEY" ? "请先配置 API key" : (e.message || "未知错误");
+          addResponse(1, masterId, `[请求失败: ${msg}]`, null);
+        } finally {
+          setLoadingMasters(prev => { const s = new Set(prev); s.delete(masterId); return s; });
+        }
       }
-    });
+    };
+
+    // 2 concurrent workers — reliable on mobile without slowing down too much
+    Promise.all([worker(), worker()]);
   };
 
   // ── Round 2+: sequential debate ───────────────────────────
