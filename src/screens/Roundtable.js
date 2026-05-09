@@ -37,6 +37,7 @@ export default function RoundtableModal({ visible, onClose }) {
 
   const [historyVisible, setHistoryVisible] = useState(false);
   const [historyItems, setHistoryItems] = useState([]);
+  const [minutesHistoryVisible, setMinutesHistoryVisible] = useState(false);
 
   const scrollRef = useRef(null);
 
@@ -241,6 +242,14 @@ export default function RoundtableModal({ visible, onClose }) {
     } catch {}
   };
 
+  const openMinutesHistory = async () => {
+    try {
+      const items = await db.listRoundtableSessions();
+      setHistoryItems(items);
+      setMinutesHistoryVisible(true);
+    } catch {}
+  };
+
   const loadFromHistory = (item) => {
     setSession(item);
     setSessionId(item.id);
@@ -291,20 +300,16 @@ export default function RoundtableModal({ visible, onClose }) {
           <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
             <Kicker>INVESTMENT COMMITTEE</Kicker>
             <View style={{ flexDirection: "row", alignItems: "center", gap: 14 }}>
-              {session && (
-                <Pressable onPress={doGenerateMinutes} disabled={generatingMinutes || isLoading} hitSlop={8}>
-                  <TMono style={{ fontSize: 10, color: (generatingMinutes || isLoading) ? colors.inkFaint : colors.ink }}>
-                    {generatingMinutes ? "生成中…" : "生成纪要"}
-                  </TMono>
-                </Pressable>
-              )}
               {session && minutes ? (
                 <Pressable onPress={() => setShowMinutes(true)} hitSlop={8}>
                   <TMono style={{ fontSize: 10, color: colors.accent }}>查看纪要</TMono>
                 </Pressable>
               ) : null}
+              <Pressable onPress={openMinutesHistory} hitSlop={8}>
+                <TMono style={{ fontSize: 10 }}>历史纪要</TMono>
+              </Pressable>
               <Pressable onPress={openHistory} hitSlop={8}>
-                <TMono style={{ fontSize: 10 }}>历史</TMono>
+                <TMono style={{ fontSize: 10 }}>历史议题</TMono>
               </Pressable>
               {session && (
                 <Pressable onPress={resetSession} hitSlop={8}>
@@ -437,27 +442,51 @@ export default function RoundtableModal({ visible, onClose }) {
                 padding: 10, marginBottom: 8, minHeight: 42,
               }}
             />
-            <Pressable
-              onPress={startDebateRound}
-              disabled={!canStartDebate}
-              style={{
-                backgroundColor: colors.ink, padding: 12, alignItems: "center",
-                opacity: canStartDebate ? 1 : 0.35,
-              }}
-            >
-              {isLoading ? (
-                <ActivityIndicator size="small" color={colors.bg} />
-              ) : (
-                <TMono style={{ color: colors.bg, fontSize: 11, letterSpacing: 0.5 }}>
-                  下一轮辩论
-                </TMono>
-              )}
-            </Pressable>
+            <View style={{ flexDirection: "row", gap: 8 }}>
+              <Pressable
+                onPress={startDebateRound}
+                disabled={!canStartDebate}
+                style={{
+                  flex: 1, backgroundColor: colors.ink, padding: 12, alignItems: "center",
+                  opacity: canStartDebate ? 1 : 0.35,
+                }}
+              >
+                {isLoading && !generatingMinutes ? (
+                  <ActivityIndicator size="small" color={colors.bg} />
+                ) : (
+                  <TMono style={{ color: colors.bg, fontSize: 11, letterSpacing: 0.5 }}>
+                    下一轮辩论
+                  </TMono>
+                )}
+              </Pressable>
+              <Pressable
+                onPress={doGenerateMinutes}
+                disabled={!canStartDebate || generatingMinutes}
+                style={{
+                  flex: 1, padding: 12, alignItems: "center",
+                  borderWidth: 1, borderColor: colors.ink,
+                  opacity: (!canStartDebate || generatingMinutes) ? 0.35 : 1,
+                }}
+              >
+                {generatingMinutes ? (
+                  <ActivityIndicator size="small" color={colors.ink} />
+                ) : (
+                  <TMono style={{ color: colors.ink, fontSize: 11, letterSpacing: 0.5 }}>
+                    终止辩论，生成纪要
+                  </TMono>
+                )}
+              </Pressable>
+            </View>
           </View>
         )}
       </SafeAreaView>
 
       <MinutesModal visible={showMinutes} minutes={minutes} onClose={() => setShowMinutes(false)} />
+      <MinutesHistoryModal
+        visible={minutesHistoryVisible}
+        items={historyItems}
+        onClose={() => setMinutesHistoryVisible(false)}
+      />
       <HistoryModal
         visible={historyVisible}
         items={historyItems}
@@ -564,6 +593,65 @@ function MasterCard({ masterId, response, loading, pending, onRetry }) {
         )}
       </View>
     </View>
+  );
+}
+
+// ──────────────────────────────────────────────────────────────
+// Minutes history modal — lists past sessions that have minutes
+// ──────────────────────────────────────────────────────────────
+function MinutesHistoryModal({ visible, items, onClose }) {
+  const [previewMinutes, setPreviewMinutes] = useState("");
+  const [previewVisible, setPreviewVisible] = useState(false);
+
+  const sessionsWithMinutes = items.filter(item => item.minutes);
+
+  return (
+    <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }} edges={["top", "bottom"]}>
+        <View style={{
+          flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+          paddingHorizontal: 20, paddingVertical: 14,
+          borderBottomWidth: 1, borderBottomColor: colors.divider,
+        }}>
+          <View>
+            <Kicker>MINUTES ARCHIVE</Kicker>
+            <TSerifBold style={{ fontSize: 18, marginTop: 2 }}>历史纪要</TSerifBold>
+          </View>
+          <Pressable onPress={onClose} hitSlop={12}>
+            <X size={18} color={colors.inkMuted} />
+          </Pressable>
+        </View>
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 20 }}>
+          {sessionsWithMinutes.length === 0 && (
+            <TSerifItalic style={{ fontSize: 14, color: colors.inkMuted, textAlign: "center", marginTop: 40 }}>
+              暂无历史纪要
+            </TSerifItalic>
+          )}
+          {sessionsWithMinutes.map(item => (
+            <Pressable
+              key={item.id}
+              onPress={() => { setPreviewMinutes(item.minutes); setPreviewVisible(true); }}
+              style={{
+                marginBottom: 12, padding: 14,
+                borderWidth: 1, borderColor: colors.divider,
+                backgroundColor: colors.bgElev,
+              }}
+            >
+              <TSerif style={{ fontSize: 14, marginBottom: 4 }} numberOfLines={2}>
+                {item.topic || "(无题)"}
+              </TSerif>
+              <TMono style={{ fontSize: 10, color: colors.inkFaint }}>
+                {item.createdAt
+                  ? new Date(item.createdAt).toLocaleDateString("zh-CN", { year: "numeric", month: "short", day: "numeric" })
+                  : ""}
+                {" · "}{item.rounds?.length ?? 0} 轮
+              </TMono>
+            </Pressable>
+          ))}
+        </ScrollView>
+      </SafeAreaView>
+      <MinutesModal visible={previewVisible} minutes={previewMinutes} onClose={() => setPreviewVisible(false)} />
+    </Modal>
   );
 }
 
