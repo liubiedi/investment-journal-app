@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from "react";
 import { View, ScrollView, Pressable, KeyboardAvoidingView, Platform } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { Users } from "lucide-react-native";
 import { weekKey, weekRange } from "../utils";
 import { colors, fonts } from "../theme";
 import { useApp } from "../context";
@@ -9,6 +10,7 @@ import {
   TSerif, TSerifBold, TSerifItalic, TMono, Kicker,
   PaperInput, FilledButton, Masthead,
 } from "../components";
+import RoundtableModal from "./Roundtable";
 
 export default function WeeklyScreen() {
   const app = useApp();
@@ -16,11 +18,18 @@ export default function WeeklyScreen() {
   const currentWeek = weekKey(new Date().toISOString());
   const [activeWeek, setActiveWeek] = useState(currentWeek);
   const [draft, setDraft] = useState(app.weeklyNotes[currentWeek] || "");
+  const [roundtableVisible, setRoundtableVisible] = useState(false);
+  const [roundtableTopic, setRoundtableTopic] = useState("");
 
   useEffect(() => { setDraft(app.weeklyNotes[activeWeek] || ""); }, [activeWeek, app.weeklyNotes]);
 
   const sortedWeeks = Object.keys(app.weeklyNotes).sort().reverse();
   const unchanged = draft === (app.weeklyNotes[activeWeek] || "");
+
+  const openRoundtable = (text, week) => {
+    setRoundtableTopic(`周记 ${week}：${text}`);
+    setRoundtableVisible(true);
+  };
 
   return (
     <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : "height"}>
@@ -53,6 +62,20 @@ export default function WeeklyScreen() {
         >
           {app.weeklyNotes[activeWeek] ? "更新本周记录" : "写入本周"}
         </FilledButton>
+
+        {!!draft.trim() && (
+          <Pressable
+            onPress={() => openRoundtable(draft, activeWeek)}
+            style={{
+              flexDirection: "row", alignItems: "center", justifyContent: "center",
+              gap: 6, marginTop: 10, paddingVertical: 10,
+              borderWidth: 1, borderColor: colors.divider,
+            }}
+          >
+            <Users size={12} color={colors.inkMuted} />
+            <TMono style={{ fontSize: 11, color: colors.inkMuted }}>带入问道</TMono>
+          </Pressable>
+        )}
       </View>
 
       {sortedWeeks.length > 0 && (
@@ -69,6 +92,16 @@ export default function WeeklyScreen() {
                   <TSerif style={{ flex: 1, fontSize: 14, lineHeight: 22 }}>
                     {app.weeklyNotes[wk] || ""}
                   </TSerif>
+                  {!!app.weeklyNotes[wk] && (
+                    <Pressable
+                      onPress={(e) => { e.stopPropagation(); openRoundtable(app.weeklyNotes[wk], wk); }}
+                      hitSlop={10}
+                      style={{ flexDirection: "row", alignItems: "center", gap: 4, paddingLeft: 8 }}
+                    >
+                      <Users size={10} color={colors.inkFaint} />
+                      <TMono style={{ fontSize: 9, color: colors.inkFaint }}>问道</TMono>
+                    </Pressable>
+                  )}
                 </View>
               </Pressable>
             ))}
@@ -76,6 +109,12 @@ export default function WeeklyScreen() {
         </View>
       )}
     </ScrollView>
+
+    <RoundtableModal
+      visible={roundtableVisible}
+      onClose={() => setRoundtableVisible(false)}
+      initialTopic={roundtableTopic}
+    />
     </KeyboardAvoidingView>
   );
 }
