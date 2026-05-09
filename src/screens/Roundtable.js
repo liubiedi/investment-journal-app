@@ -68,6 +68,40 @@ export default function RoundtableModal({ visible, onClose }) {
     });
   }, []);
 
+  const removeResponse = useCallback((roundNum, masterId) => {
+    setSession(prev => {
+      if (!prev) return prev;
+      const rounds = prev.rounds.map(r => {
+        if (r.roundNum !== roundNum) return r;
+        return { ...r, responses: r.responses.filter(x => x.masterId !== masterId) };
+      });
+      return { ...prev, rounds };
+    });
+  }, []);
+
+  const retryMaster = async (roundNum, masterId) => {
+    if (!session) return;
+    removeResponse(roundNum, masterId);
+    setLoadingMasters(prev => new Set([...prev, masterId]));
+    try {
+      const round = session.rounds.find(r => r.roundNum === roundNum);
+      const priorResponses = session.rounds
+        .filter(r => r.roundNum < roundNum)
+        .flatMap(r => r.responses);
+      const additionalQuestion = roundNum > 1 ? (round?.userInput || "") : "";
+      const { text, verdict } = await mentorPanelResponse(
+        session.topic, masterId, app.profile, priorResponses, additionalQuestion
+      );
+      if (!text) throw new Error("收到空回复，请重试");
+      addResponse(roundNum, masterId, text, verdict);
+    } catch (e) {
+      const msg = e.message === "NO_API_KEY" ? "请先配置 API key" : (e.message || "未知错误");
+      addResponse(roundNum, masterId, `[请求失败: ${msg}]`, null);
+    } finally {
+      setLoadingMasters(prev => { const s = new Set(prev); s.delete(masterId); return s; });
+    }
+  };
+
   // ── Round 1: concurrency-limited (2 at a time) ────────────
   // Firing all 6 simultaneously on mobile causes silent failures / empty responses
   // from the API. A worker pool of 2 keeps requests reliable without feeling slow.
@@ -229,9 +263,10 @@ export default function RoundtableModal({ visible, onClose }) {
     const isCurrentRound = round.roundNum === (session?.rounds.length ?? 0);
     return (session?.selectedMasters ?? []).map(masterId => {
       const response = round.responses.find(r => r.masterId === masterId);
-      const loading = isCurrentRound && loadingMasters.has(masterId);
-      const pending = isCurrentRound && !response && !loading && (isLoading);
-      return { masterId, response, loading, pending };
+      // loadingMasters check is not gated to current round so retries in past rounds show spinner
+      const loading = loadingMasters.has(masterId);
+      const pending = isCurrentRound && !response && !loading && isLoading;
+      return { masterId, response, loading, pending, onRetry: () => retryMaster(round.roundNum, masterId) };
     });
   };
 
@@ -364,13 +399,14 @@ export default function RoundtableModal({ visible, onClose }) {
                 </View>
               ) : null}
 
-              {getOrderedEntries(round).map(({ masterId, response, loading, pending }) => (
+              {getOrderedEntries(round).map(({ masterId, response, loading, pending, onRetry }) => (
                 <MasterCard
                   key={masterId}
                   masterId={masterId}
                   response={response}
                   loading={loading}
                   pending={pending}
+                  onRetry={onRetry}
                 />
               ))}
             </View>
@@ -429,7 +465,7 @@ export default function RoundtableModal({ visible, onClose }) {
 // ──────────────────────────────────────────────────────────────
 // Master response card
 // ──────────────────────────────────────────────────────────────
-function MasterCard({ masterId, response, loading, pending }) {
+function MasterCard({ masterId, response, loading, pending, onRetry }) {
   const [expanded, setExpanded] = useState(false);
   const master = getMaster(masterId);
   const role = MASTER_MEETING_ROLES[masterId];
@@ -491,6 +527,18 @@ function MasterCard({ masterId, response, loading, pending }) {
             >
               {response.text}
             </TSerif>
+            {isError && onRetry && (
+              <Pressable
+                onPress={onRetry}
+                style={{
+                  flexDirection: "row", alignItems: "center", gap: 4,
+                  marginTop: 10, paddingVertical: 6, paddingHorizontal: 10,
+                  borderWidth: 1, borderColor: colors.bad, alignSelf: "flex-start",
+                }}
+              >
+                <TMono style={{ fontSize: 10, color: colors.bad }}>重试</TMono>
+              </Pressable>
+            )}
             {longText && (
               <Pressable
                 onPress={() => setExpanded(e => !e)}
