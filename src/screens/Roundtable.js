@@ -19,7 +19,7 @@ const VERDICT_COLOR = { BULL: colors.good, BEAR: colors.bad, NEUTRAL: colors.ink
 // ──────────────────────────────────────────────────────────────
 // Main modal
 // ──────────────────────────────────────────────────────────────
-export default function RoundtableModal({ visible, onClose, initialTopic = "" }) {
+export default function RoundtableModal({ visible, onClose }) {
   const app = useApp();
 
   const [session, setSession] = useState(null);
@@ -44,13 +44,6 @@ export default function RoundtableModal({ visible, onClose, initialTopic = "" })
   const scrollRef = useRef(null);
 
   const isLoading = loadingMasters.size > 0 || isDebating;
-
-  // Pre-fill topic when opened from Weekly/Monthly screens with context
-  useEffect(() => {
-    if (visible && initialTopic && !session) {
-      setTopicInput(initialTopic);
-    }
-  }, [visible, initialTopic]);
 
   // Auto-persist whenever loading finishes
   useEffect(() => {

@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { View, ScrollView, Pressable, ActivityIndicator, KeyboardAvoidingView, Platform } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useNavigation } from "@react-navigation/native";
 import { Sparkles, Plus, Quote, Users } from "lucide-react-native";
 
 import { colors, fonts } from "../theme";
@@ -12,17 +13,17 @@ import { generateMonthlyCommentary } from "../api";
 import * as db from "../db";
 import {
   TSerif, TSerifBold, TSerifItalic, TMono, Kicker,
-  PaperInput, FilledButton, Masthead, MasterChips, HR,
+  PaperInput, FilledButton, Masthead, MasterChips, MasterPickerModal,
 } from "../components";
-import RoundtableModal from "./Roundtable";
 
 export default function MonthlyScreen() {
   const app = useApp();
+  const nav = useNavigation();
   const insets = useSafeAreaInsets();
   const current = monthKey(new Date().toISOString());
   const [activeMonth, setActiveMonth] = useState(current);
-  const [roundtableVisible, setRoundtableVisible] = useState(false);
-  const [roundtableTopic, setRoundtableTopic] = useState("");
+  const [pickerVisible, setPickerVisible] = useState(false);
+  const [pendingBullets, setPendingBullets] = useState([]);
 
   const allMonths = useMemo(() => {
     const set = new Set([current, ...Object.keys(app.monthlyReviews)]);
@@ -33,11 +34,21 @@ export default function MonthlyScreen() {
   const monthTrades = app.trades.filter((t) => monthKey(t.date) === activeMonth);
   const bullets = app.monthlyReviews[activeMonth] || ["", "", "", ""];
 
-  const openRoundtable = (month, draftBullets) => {
+  const doAskMentor = async (month, draftBullets, masterId) => {
     const nonEmpty = draftBullets.filter((b) => b.trim());
-    const topic = `月评 ${monthLabel(month)}：\n${nonEmpty.map((b) => `• ${b}`).join("\n")}`;
-    setRoundtableTopic(topic);
-    setRoundtableVisible(true);
+    const lines = [
+      `月评 ${monthLabel(month)}：`,
+      ...nonEmpty.map((b) => `• ${b}`),
+      "",
+      "请帮我从这个月的复盘总结出发，给我一些深度分析和建议。",
+    ];
+    await db.appendChat("user", lines.join("\n"), masterId);
+    nav.navigate("mentor", { autoMaster: masterId, autoReplyTs: Date.now() });
+  };
+
+  const startAskMentor = (draftBullets) => {
+    setPendingBullets(draftBullets);
+    setPickerVisible(true);
   };
 
   return (
@@ -79,20 +90,24 @@ export default function MonthlyScreen() {
         hasReview={!!app.monthlyReviews[activeMonth]}
         profile={app.profile}
         defaultMaster={app.defaultMaster}
-        onOpenRoundtable={(draftBullets) => openRoundtable(activeMonth, draftBullets)}
+        onAskMentor={startAskMentor}
       />
     </ScrollView>
 
-    <RoundtableModal
-      visible={roundtableVisible}
-      onClose={() => setRoundtableVisible(false)}
-      initialTopic={roundtableTopic}
+    <MasterPickerModal
+      visible={pickerVisible}
+      onClose={() => setPickerVisible(false)}
+      subtitle="以哪位大师的视角解读本月复盘？"
+      onSelect={async (masterId) => {
+        setPickerVisible(false);
+        await doAskMentor(activeMonth, pendingBullets, masterId);
+      }}
     />
     </KeyboardAvoidingView>
   );
 }
 
-function MonthlyEditor({ month, initial, trades, onSave, hasReview, profile, defaultMaster, onOpenRoundtable }) {
+function MonthlyEditor({ month, initial, trades, onSave, hasReview, profile, defaultMaster, onAskMentor }) {
   const [draft, setDraft] = useState(
     initial.concat(Array(Math.max(0, 4 - initial.length)).fill("")).slice(0, 5)
   );
@@ -150,23 +165,25 @@ function MonthlyEditor({ month, initial, trades, onSave, hasReview, profile, def
           </Pressable>
         )}
 
-        <FilledButton onPress={() => onSave(draft.filter((b) => b.trim()))} style={{ marginTop: 24 }}>
-          {hasReview ? "更新月评" : "归档月评"}
-        </FilledButton>
+        <View style={{ flexDirection: "row", gap: 10, marginTop: 24 }}>
+          <FilledButton onPress={() => onSave(draft.filter((b) => b.trim()))} style={{ flex: 1 }}>
+            {hasReview ? "更新月评" : "归档月评"}
+          </FilledButton>
 
-        {draft.some((b) => b.trim()) && (
-          <Pressable
-            onPress={() => onOpenRoundtable(draft)}
-            style={{
-              flexDirection: "row", alignItems: "center", justifyContent: "center",
-              gap: 6, marginTop: 10, paddingVertical: 10,
-              borderWidth: 1, borderColor: colors.divider,
-            }}
-          >
-            <Users size={12} color={colors.inkMuted} />
-            <TMono style={{ fontSize: 11, color: colors.inkMuted }}>带入问道</TMono>
-          </Pressable>
-        )}
+          {draft.some((b) => b.trim()) && (
+            <Pressable
+              onPress={() => onAskMentor(draft)}
+              style={{
+                flexDirection: "row", alignItems: "center", gap: 5,
+                paddingHorizontal: 14, paddingVertical: 10,
+                borderWidth: 1, borderColor: colors.divider,
+              }}
+            >
+              <Users size={12} color={colors.inkMuted} />
+              <TMono style={{ fontSize: 11, color: colors.inkMuted }}>导师</TMono>
+            </Pressable>
+          )}
+        </View>
       </View>
     </View>
   );
