@@ -9,7 +9,7 @@
 // API key is passed in from the caller (stored in SecureStore at app level).
 
 import * as SecureStore from "expo-secure-store";
-import { MASTER_STYLES, getMaster } from "./constants";
+import { MASTER_STYLES, MASTER_MEETING_ROLES, getMaster } from "./constants";
 import { monthLabel } from "./utils";
 
 const DEEPSEEK_URL = "https://api.deepseek.com/v1/chat/completions";
@@ -409,6 +409,144 @@ A single sentence describing this investor's true strategy, written as though fo
     messages: [{ role: "user", content: user }],
     system,
     max_tokens: 6000,
+  });
+}
+
+// ============================================================
+// Roundtable panel — multi-master investment committee
+// ============================================================
+
+function parseVerdict(text) {
+  const match = text.match(
+    /VERDICT:\s*(BULL|BEAR|NEUTRAL)\s*[·•\-]\s*Conviction\s*(HIGH|MED|LOW)\s*[·•\-]\s*(.+)/i
+  );
+  if (!match) return null;
+  return {
+    stance: match[1].toUpperCase(),
+    conviction: match[2].toUpperCase(),
+    thesis: match[3].trim().replace(/\n[\s\S]*$/, ""),
+  };
+}
+
+function buildPanelSystem(masterId, profile, priorResponses) {
+  const master = getMaster(masterId);
+  const roleInfo = MASTER_MEETING_ROLES[masterId];
+  const baseStyle = MASTER_STYLES[masterId];
+
+  let personaText = `${baseStyle}
+
+Stay in character as ${master.name}. Speak in their voice and frameworks. Keep your response to 3-4 paragraphs. Match the user's language exactly (Chinese/English/mixed). Do NOT start with "As ${master.name}..." — just speak naturally.
+
+${roleInfo.instruction}
+
+End your response with EXACTLY this line (nothing after it):
+VERDICT: [BULL|BEAR|NEUTRAL] · Conviction [HIGH|MED|LOW] · [your thesis in 15 words or fewer]`;
+
+  if (priorResponses.length > 0) {
+    const priorBlock = priorResponses.map(r => {
+      const m = getMaster(r.masterId);
+      const role = MASTER_MEETING_ROLES[r.masterId]?.roleZh || "";
+      return `${m.name}（${role}）：${r.text}`;
+    }).join("\n\n---\n\n");
+    personaText += `\n\nThe following committee members have already spoken. You may directly address, challenge, or build on their points:\n\n${priorBlock}`;
+  }
+
+  const profileText = `<investor_profile>\n${buildProfileContext({ ...profile, maxTrades: 10, maxWeekly: 4, maxMonthly: 2 })}\n</investor_profile>`;
+  return `${personaText}\n\n${profileText}`;
+}
+
+// Single master's panel response. priorResponses = all prior round responses visible to this master.
+export async function mentorPanelResponse(topic, masterId, profile, priorResponses = [], additionalQuestion = "") {
+  const system = buildPanelSystem(masterId, profile, priorResponses);
+
+  let userMessage = `Investment topic for committee discussion: ${topic}`;
+  if (additionalQuestion) {
+    userMessage += `\n\nAdditional question from the investor: ${additionalQuestion}`;
+  }
+  if (priorResponses.length > 0) {
+    userMessage += `\n\nYou have seen the prior committee views above. Give your analysis, referencing and responding to their points where relevant.`;
+  } else {
+    userMessage += `\n\nGive your independent assessment of this investment topic from your specific role's perspective.`;
+  }
+
+  const raw = await callLLM({
+    system,
+    messages: [{ role: "user", content: userMessage }],
+    max_tokens: 900,
+  });
+
+  const verdict = parseVerdict(raw);
+  const text = raw.replace(/VERDICT:.*$/m, "").trim();
+  return { text, verdict };
+}
+
+// Generate structured meeting minutes from a complete session.
+export async function generateMeetingMinutes(session, profile) {
+  const today = new Date().toISOString().slice(0, 10);
+
+  let transcript = "";
+  for (const round of session.rounds) {
+    transcript += `\n\n=== Round ${round.roundNum} (${round.type === "parallel" ? "独立发言" : "顺序辩论"}) ===\n`;
+    if (round.userInput) transcript += `Investor input: ${round.userInput}\n\n`;
+    for (const resp of round.responses) {
+      const m = getMaster(resp.masterId);
+      const roleZh = MASTER_MEETING_ROLES[resp.masterId]?.roleZh || "";
+      const v = resp.verdict ? ` [${resp.verdict.stance} · ${resp.verdict.conviction}]` : "";
+      transcript += `--- ${m.name}（${roleZh}）${v} ---\n${resp.text}\n\n`;
+    }
+  }
+
+  const memberNames = session.selectedMasters.map(id => {
+    const m = getMaster(id);
+    return `${m.name}（${MASTER_MEETING_ROLES[id]?.roleZh}）`;
+  }).join("、");
+
+  const system = `You are a neutral investment committee secretary producing meeting minutes. Write in the SAME LANGUAGE as the discussion (Chinese if most content is Chinese). Be factual, concise, and structured.`;
+
+  const user = `Full transcript of an investment committee roundtable:
+
+Topic: ${session.topic}
+Date: ${today}
+Committee: ${memberNames}
+
+TRANSCRIPT:
+${transcript}
+
+Produce meeting minutes in this EXACT Markdown format:
+
+# 投资委员会纪要
+**议题：** ${session.topic}
+**日期：** ${today}
+
+## 委员会投票
+| 宗师 | 立场 | 信念度 | 核心理由（≤15字）|
+|------|------|--------|----------------|
+[One row per member from their VERDICT lines]
+
+**多数立场：[BULL/BEAR/NEUTRAL]（X/${session.selectedMasters.length}）**
+
+## 共识观点
+- [2-3 bullets where most agree]
+
+## 核心分歧
+- [2-3 named disagreements, e.g. "Munger vs Lynch: ..."]
+
+## 最大风险（委员会排序）
+1. [Most cited risk]
+2. [Second risk]
+3. [Third risk]
+
+## 行动建议
+- [ ] [Specific actionable item]
+- [ ] [Second item]
+
+## 一句话结论
+[Single sentence summarizing the committee's overall view]`;
+
+  return await callLLM({
+    system,
+    messages: [{ role: "user", content: user }],
+    max_tokens: 1500,
   });
 }
 

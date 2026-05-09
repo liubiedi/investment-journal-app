@@ -107,6 +107,12 @@ async function initSchema(db) {
       content TEXT NOT NULL,
       created_at INTEGER NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS roundtable_sessions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      created_at INTEGER NOT NULL,
+      data TEXT NOT NULL
+    );
   `);
   // Migrations for existing databases (idempotent — fails silently if column exists).
   try { await db.runAsync("ALTER TABLE holdings ADD COLUMN buy_reason TEXT"); } catch {}
@@ -425,6 +431,38 @@ export async function savePrices(map) {
       [Date.now()]
     );
   });
+}
+
+// ---------- roundtable_sessions ----------
+export async function saveRoundtableSession(data) {
+  const db = await getDb();
+  const now = Date.now();
+  const result = await db.runAsync(
+    "INSERT INTO roundtable_sessions (created_at, data) VALUES (?, ?)",
+    [now, JSON.stringify(data)]
+  );
+  return result.lastInsertRowId;
+}
+
+export async function updateRoundtableSession(id, data) {
+  const db = await getDb();
+  await db.runAsync(
+    "UPDATE roundtable_sessions SET data = ? WHERE id = ?",
+    [JSON.stringify(data), id]
+  );
+}
+
+export async function listRoundtableSessions() {
+  const db = await getDb();
+  const rows = await db.getAllAsync(
+    "SELECT id, created_at, data FROM roundtable_sessions ORDER BY created_at DESC"
+  );
+  return rows.map(r => ({ id: r.id, createdAt: r.created_at, ...safeJson(r.data, {}) }));
+}
+
+export async function deleteRoundtableSession(id) {
+  const db = await getDb();
+  await db.runAsync("DELETE FROM roundtable_sessions WHERE id = ?", [id]);
 }
 
 // ---------- helpers ----------
