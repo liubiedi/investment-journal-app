@@ -449,3 +449,37 @@ export function FormHeader({ title, onCancel }) {
     </View>
   );
 }
+
+// ========== Master picker bottom sheet (shared across screens) ==========
+export function MasterPickerModal({ visible, onClose, onSelect, subtitle }) {
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <Pressable style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.45)" }} onPress={onClose} />
+      <View style={{
+        backgroundColor: colors.bg,
+        paddingHorizontal: 20, paddingTop: 20, paddingBottom: 36,
+        borderTopWidth: 1, borderTopColor: colors.divider,
+      }}>
+        <TSerifBold style={{ fontSize: 18, marginBottom: 4 }}>选择导师</TSerifBold>
+        <TSerifItalic style={{ fontSize: 12, marginBottom: 16 }}>
+          {subtitle || "以哪位大师的视角分析？"}
+        </TSerifItalic>
+        {MASTERS.map((m) => (
+          <Pressable
+            key={m.id}
+            onPress={() => onSelect(m.id)}
+            style={({ pressed }) => ({
+              flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+              paddingVertical: 12,
+              borderBottomWidth: 1, borderBottomColor: colors.dividerSoft,
+              opacity: pressed ? 0.7 : 1,
+            })}
+          >
+            <TSerifBold style={{ fontSize: 15 }}>{m.zh}</TSerifBold>
+            <TMono style={{ fontSize: 11, color: colors.inkMuted }}>{m.desc}</TMono>
+          </Pressable>
+        ))}
+      </View>
+    </Modal>
+  );
+}

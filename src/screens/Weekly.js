@@ -2,25 +2,47 @@
 import React, { useState, useEffect } from "react";
 import { View, ScrollView, Pressable, KeyboardAvoidingView, Platform } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useNavigation } from "@react-navigation/native";
+import { Users } from "lucide-react-native";
 import { weekKey, weekRange } from "../utils";
-import { colors, fonts } from "../theme";
+import { colors } from "../theme";
 import { useApp } from "../context";
 import {
-  TSerif, TSerifBold, TSerifItalic, TMono, Kicker,
-  PaperInput, FilledButton, Masthead,
+  TSerif, TSerifBold, TMono, Kicker,
+  PaperInput, FilledButton, Masthead, MasterPickerModal,
 } from "../components";
+import * as db from "../db";
 
 export default function WeeklyScreen() {
   const app = useApp();
+  const nav = useNavigation();
   const insets = useSafeAreaInsets();
   const currentWeek = weekKey(new Date().toISOString());
   const [activeWeek, setActiveWeek] = useState(currentWeek);
   const [draft, setDraft] = useState(app.weeklyNotes[currentWeek] || "");
+  const [pickerVisible, setPickerVisible] = useState(false);
+  const [pendingText, setPendingText] = useState({ text: "", week: "" });
 
   useEffect(() => { setDraft(app.weeklyNotes[activeWeek] || ""); }, [activeWeek, app.weeklyNotes]);
 
   const sortedWeeks = Object.keys(app.weeklyNotes).sort().reverse();
   const unchanged = draft === (app.weeklyNotes[activeWeek] || "");
+
+  const doAskMentor = async (text, week, masterId) => {
+    const lines = [
+      `本周记录（${week}）：`,
+      text,
+      "",
+      "请帮我从这周的思考出发，给我一些投资上的洞见和建议。",
+    ];
+    await db.appendChat("user", lines.join("\n"), masterId);
+    nav.navigate("mentor", { autoMaster: masterId, autoReplyTs: Date.now() });
+  };
+
+  const startAskMentor = (text, week) => {
+    setPendingText({ text, week });
+    setPickerVisible(true);
+  };
 
   return (
     <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : "height"}>
@@ -46,13 +68,29 @@ export default function WeeklyScreen() {
           style={{ minHeight: 110, fontSize: 15 }}
         />
 
-        <FilledButton
-          onPress={() => app.saveWeekly(activeWeek, draft)}
-          disabled={unchanged}
-          style={{ marginTop: 12 }}
-        >
-          {app.weeklyNotes[activeWeek] ? "更新本周记录" : "写入本周"}
-        </FilledButton>
+        <View style={{ flexDirection: "row", gap: 10, marginTop: 12 }}>
+          <FilledButton
+            onPress={() => app.saveWeekly(activeWeek, draft)}
+            disabled={unchanged}
+            style={{ flex: 1 }}
+          >
+            {app.weeklyNotes[activeWeek] ? "更新本周记录" : "写入本周"}
+          </FilledButton>
+
+          {!!draft.trim() && (
+            <Pressable
+              onPress={() => startAskMentor(draft, activeWeek)}
+              style={{
+                flexDirection: "row", alignItems: "center", gap: 5,
+                paddingHorizontal: 14, paddingVertical: 10,
+                borderWidth: 1, borderColor: colors.divider,
+              }}
+            >
+              <Users size={12} color={colors.inkMuted} />
+              <TMono style={{ fontSize: 11, color: colors.inkMuted }}>导师</TMono>
+            </Pressable>
+          )}
+        </View>
       </View>
 
       {sortedWeeks.length > 0 && (
@@ -69,6 +107,16 @@ export default function WeeklyScreen() {
                   <TSerif style={{ flex: 1, fontSize: 14, lineHeight: 22 }}>
                     {app.weeklyNotes[wk] || ""}
                   </TSerif>
+                  {!!app.weeklyNotes[wk] && (
+                    <Pressable
+                      onPress={() => startAskMentor(app.weeklyNotes[wk], wk)}
+                      hitSlop={10}
+                      style={{ flexDirection: "row", alignItems: "center", gap: 4, paddingLeft: 8 }}
+                    >
+                      <Users size={10} color={colors.inkFaint} />
+                      <TMono style={{ fontSize: 9, color: colors.inkFaint }}>导师</TMono>
+                    </Pressable>
+                  )}
                 </View>
               </Pressable>
             ))}
@@ -76,6 +124,17 @@ export default function WeeklyScreen() {
         </View>
       )}
     </ScrollView>
+
+    <MasterPickerModal
+      visible={pickerVisible}
+      onClose={() => setPickerVisible(false)}
+      subtitle="以哪位大师的视角解读本周思考？"
+      onSelect={async (masterId) => {
+        setPickerVisible(false);
+        const { text, week } = pendingText;
+        await doAskMentor(text, week, masterId);
+      }}
+    />
     </KeyboardAvoidingView>
   );
 }

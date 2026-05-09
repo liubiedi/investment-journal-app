@@ -5,7 +5,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets, SafeAreaView } from "react-native-safe-area-context";
 import {
-  MessageCircle, Send, RotateCcw, Loader2, AlertCircle, Maximize2, X,
+  MessageCircle, Send, RotateCcw, Loader2, AlertCircle, Maximize2, X, Users,
 } from "lucide-react-native";
 import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
 import { useFocusEffect, useRoute } from "@react-navigation/native";
@@ -19,6 +19,7 @@ import * as db from "../db";
 import {
   TSerif, TSerifBold, TSerifItalic, TMono, Kicker, MasterChips,
 } from "../components";
+import RoundtableModal from "./Roundtable";
 
 const PRICE_STALE_MS = 15 * 60 * 1000;
 
@@ -35,6 +36,7 @@ export default function MentorScreen() {
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState("");
   const [activeMaster, setActiveMaster] = useState("default");
+  const [roundtableVisible, setRoundtableVisible] = useState(false);
   const scrollRef = useRef(null);
 
   // Auto-switch to the master used in "带入问道" navigation
@@ -201,12 +203,21 @@ export default function MentorScreen() {
       }}>
         <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
           <Kicker>AI MENTOR</Kicker>
-          {history.length > 0 && (
-            <Pressable onPress={reset} style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
-              <RotateCcw size={10} color={colors.inkFaint} />
-              <TMono style={{ fontSize: 10 }}>RESET</TMono>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+            <Pressable
+              onPress={() => setRoundtableVisible(true)}
+              style={{ flexDirection: "row", alignItems: "center", gap: 4 }}
+            >
+              <Users size={10} color={colors.inkFaint} />
+              <TMono style={{ fontSize: 10 }}>论道</TMono>
             </Pressable>
-          )}
+            {history.length > 0 && (
+              <Pressable onPress={reset} style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+                <RotateCcw size={10} color={colors.inkFaint} />
+                <TMono style={{ fontSize: 10 }}>RESET</TMono>
+              </Pressable>
+            )}
+          </View>
         </View>
         <TSerifBold style={{ fontSize: 26, letterSpacing: -0.5 }}>投资导师</TSerifBold>
         <TMono style={{ fontSize: 10, marginTop: 4, color: colors.inkMuted }}>已同步 · {ctxSummary}</TMono>
@@ -347,6 +358,7 @@ export default function MentorScreen() {
         </View>
       </View>
     </SafeAreaView>
+      <RoundtableModal visible={roundtableVisible} onClose={() => setRoundtableVisible(false)} />
     </KeyboardAvoidingView>
   );
 }

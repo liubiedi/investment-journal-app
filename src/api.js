@@ -9,7 +9,7 @@
 // API key is passed in from the caller (stored in SecureStore at app level).
 
 import * as SecureStore from "expo-secure-store";
-import { MASTER_STYLES, getMaster } from "./constants";
+import { MASTER_STYLES, MASTER_MEETING_ROLES, getMaster } from "./constants";
 import { monthLabel } from "./utils";
 
 const DEEPSEEK_URL = "https://api.deepseek.com/v1/chat/completions";
@@ -317,12 +317,12 @@ export async function generateMonthlyCommentary(month, monthTrades, masterId, pr
 
 ${tradesList}
 
-Give your analysis of this month's trading activity. Look for patterns, emotional triggers, rule violations, or consistencies with their philosophy. Point out what was wise and what deserves scrutiny. Be specific — reference individual trades by ticker. 3-4 short paragraphs. Match their language.`;
+Give your analysis of this month's trading activity. Look for patterns, emotional triggers, rule violations, or consistencies with their philosophy. Point out what was wise and what deserves scrutiny. Be specific — reference individual trades by ticker. 3-4 short paragraphs, 150-250 words total. Always finish every sentence completely. Match their language.`;
 
   return await callLLM({
     system,
     messages: [{ role: "user", content: user }],
-    max_tokens: 900,
+    max_tokens: 1500,
   });
 }
 
@@ -410,6 +410,180 @@ A single sentence describing this investor's true strategy, written as though fo
     system,
     max_tokens: 6000,
   });
+}
+
+// ============================================================
+// Roundtable panel — multi-master investment committee
+// ============================================================
+
+function parseVerdict(text) {
+  const match = text.match(
+    /VERDICT:\s*(BULL|BEAR|NEUTRAL)\s*[·•\-]\s*Conviction\s*(HIGH|MED|LOW)\s*[·•\-]\s*(.+)/i
+  );
+  if (!match) return null;
+  return {
+    stance: match[1].toUpperCase(),
+    conviction: match[2].toUpperCase(),
+    thesis: match[3].trim().replace(/\n[\s\S]*$/, ""),
+  };
+}
+
+function detectLang(text) {
+  return /[一-鿿]/.test(text) ? "Chinese" : "English";
+}
+
+function buildPanelSystem(masterId, profile, priorResponses, topic, additionalQuestion = "") {
+  const master = getMaster(masterId);
+  const roleInfo = MASTER_MEETING_ROLES[masterId];
+  const baseStyle = MASTER_STYLES[masterId];
+
+  // Detect language from investor's own text so ALL masters reply consistently.
+  // additionalQuestion takes precedence when present (it's the most recent user input).
+  const lang = detectLang(additionalQuestion || topic);
+
+  // Topic is injected into system prompt (not just user message) so the model
+  // has the constraint present throughout, preventing drift to general philosophy.
+  let personaText = `${baseStyle}
+
+TODAY'S SINGLE AGENDA ITEM: "${topic}"
+
+You are attending an investment committee meeting as ${master.name}. This is a fast-paced committee — every speaker gets 2-3 short paragraphs, no more. Lead with your strongest point. Be direct and persuasive, not comprehensive. Your ENTIRE response must be anchored to this specific topic: "${topic}". Do NOT drift into general philosophy. LANGUAGE: Reply in ${lang} — do NOT mix languages or switch mid-response. Do NOT start with "As ${master.name}..." — just speak naturally.
+
+Your meeting role: ${roleInfo.instruction} Apply this lens directly and specifically to "${topic}".
+
+HARD RULES:
+- Total response body: 120-180 words maximum. Count mentally before writing.
+- 2-3 paragraphs, 2-4 sentences each. No more.
+- Lead with your sharpest, most contrarian insight — do not bury the lede.
+- One strong argument beats three weak ones. Pick your best point and drive it home.
+- Cut every sentence that does not add new information. No restating, no hedging, no throat-clearing.
+- Every point must be anchored to "${topic}" specifically — no free-floating philosophy.
+- Your response MUST have two parts in order:
+  PART 1 — Analysis (required first): 2-3 tight paragraphs on "${topic}", 120-180 words total.
+  PART 2 — Verdict (required last): End with EXACTLY this line and nothing after it:
+VERDICT: [BULL|BEAR|NEUTRAL] · Conviction [HIGH|MED|LOW] · [your thesis in 15 words or fewer]`;
+
+  if (priorResponses.length > 0) {
+    const priorBlock = priorResponses.map(r => {
+      const m = getMaster(r.masterId);
+      const role = MASTER_MEETING_ROLES[r.masterId]?.roleZh || "";
+      // Truncate to keep context bounded; full text already seen in UI
+      const snippet = r.text.length > 800 ? r.text.slice(0, 800) + "…" : r.text;
+      return `${m.name}（${role}）：${snippet}`;
+    }).join("\n\n---\n\n");
+    personaText += `\n\nPrior committee views on "${topic}" — address, challenge, or build on them, staying focused on the topic:\n\n${priorBlock}`;
+  }
+
+  const profileText = `<investor_profile>\n${buildProfileContext({ ...profile, maxTrades: 10, maxWeekly: 4, maxMonthly: 2 })}\n</investor_profile>`;
+  return `${personaText}\n\n${profileText}`;
+}
+
+// Single master's panel response. priorResponses = all prior round responses visible to this master.
+export async function mentorPanelResponse(topic, masterId, profile, priorResponses = [], additionalQuestion = "") {
+  const system = buildPanelSystem(masterId, profile, priorResponses, topic, additionalQuestion);
+
+  let userMessage = `Investment topic: "${topic}"`;
+  if (additionalQuestion) {
+    userMessage += `\n\nFollow-up from the investor: ${additionalQuestion}`;
+  }
+  if (priorResponses.length > 0) {
+    userMessage += `\n\nGive your analysis of "${topic}" from your role's perspective, directly engaging with the prior views above. Keep every point anchored to this specific investment.`;
+  } else {
+    userMessage += `\n\nGive your independent analysis of "${topic}" from your specific role's perspective. Ground every point in this specific investment — no general philosophy detached from the topic.`;
+  }
+
+  const raw = await callLLM({
+    system,
+    messages: [{ role: "user", content: userMessage }],
+    max_tokens: 1200,
+  });
+
+  const verdict = parseVerdict(raw);
+  const text = raw.replace(/VERDICT:.*$/m, "").trim();
+
+  // If the model only output the VERDICT line (no body), treat as a failed call
+  // rather than silently rendering a blank card.
+  if (!text) throw new Error("回复内容为空，请重试");
+
+  return { text, verdict };
+}
+
+// Generate structured meeting minutes from a complete session.
+export async function generateMeetingMinutes(session, profile) {
+  const today = new Date().toISOString().slice(0, 10);
+
+  // Truncate each response to 600 chars to keep the transcript within API
+  // context limits. Full responses are already visible in the UI.
+  const SNIPPET_LEN = 600;
+  let transcript = "";
+  for (const round of session.rounds) {
+    transcript += `\n\n=== Round ${round.roundNum} (${round.type === "parallel" ? "独立发言" : "顺序辩论"}) ===\n`;
+    if (round.userInput) transcript += `Investor input: ${round.userInput}\n\n`;
+    for (const resp of round.responses) {
+      const m = getMaster(resp.masterId);
+      const roleZh = MASTER_MEETING_ROLES[resp.masterId]?.roleZh || "";
+      const v = resp.verdict ? ` [${resp.verdict.stance} · ${resp.verdict.conviction}]` : "";
+      const snippet = resp.text.length > SNIPPET_LEN
+        ? resp.text.slice(0, SNIPPET_LEN) + "…"
+        : resp.text;
+      transcript += `--- ${m.name}（${roleZh}）${v} ---\n${snippet}\n\n`;
+    }
+  }
+
+  const memberNames = session.selectedMasters.map(id => {
+    const m = getMaster(id);
+    return `${m.name}（${MASTER_MEETING_ROLES[id]?.roleZh}）`;
+  }).join("、");
+
+  const system = `You are a neutral investment committee secretary producing meeting minutes. Write in the SAME LANGUAGE as the discussion (Chinese if most content is Chinese). Be factual, concise, and structured.`;
+
+  const user = `Full transcript of an investment committee roundtable:
+
+Topic: ${session.topic}
+Date: ${today}
+Committee: ${memberNames}
+
+TRANSCRIPT:
+${transcript}
+
+Produce meeting minutes in this EXACT Markdown format:
+
+# 投资委员会纪要
+**议题：** ${session.topic}
+**日期：** ${today}
+
+## 委员会投票
+| 宗师 | 立场 | 信念度 | 核心理由（≤15字）|
+|------|------|--------|----------------|
+[One row per member from their VERDICT lines]
+
+**多数立场：[BULL/BEAR/NEUTRAL]（X/${session.selectedMasters.length}）**
+
+## 共识观点
+- [2-3 bullets where most agree]
+
+## 核心分歧
+- [2-3 named disagreements, e.g. "Munger vs Lynch: ..."]
+
+## 最大风险（委员会排序）
+1. [Most cited risk]
+2. [Second risk]
+3. [Third risk]
+
+## 行动建议
+- [ ] [Specific actionable item]
+- [ ] [Second item]
+
+## 一句话结论
+[Single sentence summarizing the committee's overall view]`;
+
+  const result = await callLLM({
+    system,
+    messages: [{ role: "user", content: user }],
+    max_tokens: 2000,
+  });
+  if (!result) throw new Error("收到空回复，请重试");
+  return result;
 }
 
 // ============================================================

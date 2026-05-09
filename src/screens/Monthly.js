@@ -2,7 +2,8 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { View, ScrollView, Pressable, ActivityIndicator, KeyboardAvoidingView, Platform } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Sparkles, Plus, Quote } from "lucide-react-native";
+import { useNavigation } from "@react-navigation/native";
+import { Sparkles, Plus, Quote, Users, RefreshCw } from "lucide-react-native";
 
 import { colors, fonts } from "../theme";
 import { useApp } from "../context";
@@ -12,14 +13,17 @@ import { generateMonthlyCommentary } from "../api";
 import * as db from "../db";
 import {
   TSerif, TSerifBold, TSerifItalic, TMono, Kicker,
-  PaperInput, FilledButton, Masthead, MasterChips, HR,
+  PaperInput, FilledButton, Masthead, MasterChips, MasterPickerModal,
 } from "../components";
 
 export default function MonthlyScreen() {
   const app = useApp();
+  const nav = useNavigation();
   const insets = useSafeAreaInsets();
   const current = monthKey(new Date().toISOString());
   const [activeMonth, setActiveMonth] = useState(current);
+  const [pickerVisible, setPickerVisible] = useState(false);
+  const [pendingBullets, setPendingBullets] = useState([]);
 
   const allMonths = useMemo(() => {
     const set = new Set([current, ...Object.keys(app.monthlyReviews)]);
@@ -29,6 +33,23 @@ export default function MonthlyScreen() {
 
   const monthTrades = app.trades.filter((t) => monthKey(t.date) === activeMonth);
   const bullets = app.monthlyReviews[activeMonth] || ["", "", "", ""];
+
+  const doAskMentor = async (month, draftBullets, masterId) => {
+    const nonEmpty = draftBullets.filter((b) => b.trim());
+    const lines = [
+      `月评 ${monthLabel(month)}：`,
+      ...nonEmpty.map((b) => `• ${b}`),
+      "",
+      "请帮我从这个月的复盘总结出发，给我一些深度分析和建议。",
+    ];
+    await db.appendChat("user", lines.join("\n"), masterId);
+    nav.navigate("mentor", { autoMaster: masterId, autoReplyTs: Date.now() });
+  };
+
+  const startAskMentor = (draftBullets) => {
+    setPendingBullets(draftBullets);
+    setPickerVisible(true);
+  };
 
   return (
     <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : "height"}>
@@ -69,13 +90,24 @@ export default function MonthlyScreen() {
         hasReview={!!app.monthlyReviews[activeMonth]}
         profile={app.profile}
         defaultMaster={app.defaultMaster}
+        onAskMentor={startAskMentor}
       />
     </ScrollView>
+
+    <MasterPickerModal
+      visible={pickerVisible}
+      onClose={() => setPickerVisible(false)}
+      subtitle="以哪位大师的视角解读本月复盘？"
+      onSelect={async (masterId) => {
+        setPickerVisible(false);
+        await doAskMentor(activeMonth, pendingBullets, masterId);
+      }}
+    />
     </KeyboardAvoidingView>
   );
 }
 
-function MonthlyEditor({ month, initial, trades, onSave, hasReview, profile, defaultMaster }) {
+function MonthlyEditor({ month, initial, trades, onSave, hasReview, profile, defaultMaster, onAskMentor }) {
   const [draft, setDraft] = useState(
     initial.concat(Array(Math.max(0, 4 - initial.length)).fill("")).slice(0, 5)
   );
@@ -133,9 +165,25 @@ function MonthlyEditor({ month, initial, trades, onSave, hasReview, profile, def
           </Pressable>
         )}
 
-        <FilledButton onPress={() => onSave(draft.filter((b) => b.trim()))} style={{ marginTop: 24 }}>
-          {hasReview ? "更新月评" : "归档月评"}
-        </FilledButton>
+        <View style={{ flexDirection: "row", gap: 10, marginTop: 24 }}>
+          <FilledButton onPress={() => onSave(draft.filter((b) => b.trim()))} style={{ flex: 1 }}>
+            {hasReview ? "更新月评" : "归档月评"}
+          </FilledButton>
+
+          {draft.some((b) => b.trim()) && (
+            <Pressable
+              onPress={() => onAskMentor(draft)}
+              style={{
+                flexDirection: "row", alignItems: "center", gap: 5,
+                paddingHorizontal: 14, paddingVertical: 10,
+                borderWidth: 1, borderColor: colors.divider,
+              }}
+            >
+              <Users size={12} color={colors.inkMuted} />
+              <TMono style={{ fontSize: 11, color: colors.inkMuted }}>导师</TMono>
+            </Pressable>
+          )}
+        </View>
       </View>
     </View>
   );
@@ -147,13 +195,13 @@ function MonthlyMentor({ month, trades, profile, defaultMaster }) {
   const [loading, setLoading] = useState(null);
   const [error, setError] = useState("");
 
-  // Load any cached commentary for this month from DB
   useEffect(() => {
     (async () => {
       const loaded = {};
       for (const m of ["default", "lynch", "buffett", "munger", "dalio", "marks", "graham"]) {
         const text = await db.getMonthlyMentor(month, m);
-        if (text) loaded[m] = text;
+        // Skip entries that look truncated (ends abruptly without sentence-ending punctuation)
+        if (text && /[。！？.!?"]$/.test(text.trimEnd())) loaded[m] = text;
       }
       setCache(loaded);
     })();
@@ -196,7 +244,16 @@ function MonthlyMentor({ month, trades, profile, defaultMaster }) {
             <TSerifItalic style={{ fontSize: 12 }}>{getMaster(active).zh}正在复盘本月…</TSerifItalic>
           </View>
         ) : current ? (
-          <TSerif style={{ fontSize: 13, lineHeight: 22 }}>{current}</TSerif>
+          <View>
+            <TSerif style={{ fontSize: 13, lineHeight: 22 }}>{current}</TSerif>
+            <Pressable
+              onPress={() => { setCache((prev) => { const next = { ...prev }; delete next[active]; return next; }); request(active); }}
+              style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: 10, alignSelf: "flex-end" }}
+            >
+              <RefreshCw size={10} color={colors.inkFaint} />
+              <TMono style={{ fontSize: 10, color: colors.inkFaint }}>重新生成</TMono>
+            </Pressable>
+          </View>
         ) : (
           <Pressable onPress={() => request(active)}
             style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
