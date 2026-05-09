@@ -109,7 +109,7 @@ export default function WeeklyScreen() {
                   </TSerif>
                   {!!app.weeklyNotes[wk] && (
                     <Pressable
-                      onPress={(e) => { e.stopPropagation(); startAskMentor(app.weeklyNotes[wk], wk); }}
+                      onPress={() => startAskMentor(app.weeklyNotes[wk], wk)}
                       hitSlop={10}
                       style={{ flexDirection: "row", alignItems: "center", gap: 4, paddingLeft: 8 }}
                     >

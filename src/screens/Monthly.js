@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo } from "react";
 import { View, ScrollView, Pressable, ActivityIndicator, KeyboardAvoidingView, Platform } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useNavigation } from "@react-navigation/native";
-import { Sparkles, Plus, Quote, Users } from "lucide-react-native";
+import { Sparkles, Plus, Quote, Users, RefreshCw } from "lucide-react-native";
 
 import { colors, fonts } from "../theme";
 import { useApp } from "../context";
@@ -195,13 +195,13 @@ function MonthlyMentor({ month, trades, profile, defaultMaster }) {
   const [loading, setLoading] = useState(null);
   const [error, setError] = useState("");
 
-  // Load any cached commentary for this month from DB
   useEffect(() => {
     (async () => {
       const loaded = {};
       for (const m of ["default", "lynch", "buffett", "munger", "dalio", "marks", "graham"]) {
         const text = await db.getMonthlyMentor(month, m);
-        if (text) loaded[m] = text;
+        // Skip entries that look truncated (ends abruptly without sentence-ending punctuation)
+        if (text && /[。！？.!?"]$/.test(text.trimEnd())) loaded[m] = text;
       }
       setCache(loaded);
     })();
@@ -244,7 +244,16 @@ function MonthlyMentor({ month, trades, profile, defaultMaster }) {
             <TSerifItalic style={{ fontSize: 12 }}>{getMaster(active).zh}正在复盘本月…</TSerifItalic>
           </View>
         ) : current ? (
-          <TSerif style={{ fontSize: 13, lineHeight: 22 }}>{current}</TSerif>
+          <View>
+            <TSerif style={{ fontSize: 13, lineHeight: 22 }}>{current}</TSerif>
+            <Pressable
+              onPress={() => { setCache((prev) => { const next = { ...prev }; delete next[active]; return next; }); request(active); }}
+              style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: 10, alignSelf: "flex-end" }}
+            >
+              <RefreshCw size={10} color={colors.inkFaint} />
+              <TMono style={{ fontSize: 10, color: colors.inkFaint }}>重新生成</TMono>
+            </Pressable>
+          </View>
         ) : (
           <Pressable onPress={() => request(active)}
             style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
