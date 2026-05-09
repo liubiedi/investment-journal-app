@@ -17,11 +17,13 @@
     ],
     "ios": {
       "supportsTablet": true,
+      "buildNumber": "11",
       "bundleIdentifier": "com.liubiedi.investmentjournal",
       "deploymentTarget": "16.0",
       "infoPlist": {
         "NSCalendarsUsageDescription": "Allow 投资日志 to access your calendar to create trade reminders.",
-        "NSCalendarsFullAccessUsageDescription": "Allow 投资日志 to access your calendar to create trade reminders."
+        "NSCalendarsFullAccessUsageDescription": "Allow 投资日志 to access your calendar to create trade reminders.",
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
