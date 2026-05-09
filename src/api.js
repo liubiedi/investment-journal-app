@@ -317,12 +317,12 @@ export async function generateMonthlyCommentary(month, monthTrades, masterId, pr
 
 ${tradesList}
 
-Give your analysis of this month's trading activity. Look for patterns, emotional triggers, rule violations, or consistencies with their philosophy. Point out what was wise and what deserves scrutiny. Be specific — reference individual trades by ticker. 3-4 short paragraphs. Match their language.`;
+Give your analysis of this month's trading activity. Look for patterns, emotional triggers, rule violations, or consistencies with their philosophy. Point out what was wise and what deserves scrutiny. Be specific — reference individual trades by ticker. 3-4 short paragraphs, 150-250 words total. Always finish every sentence completely. Match their language.`;
 
   return await callLLM({
     system,
     messages: [{ role: "user", content: user }],
-    max_tokens: 900,
+    max_tokens: 1500,
   });
 }
 
