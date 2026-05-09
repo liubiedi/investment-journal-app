@@ -493,6 +493,9 @@ export async function mentorPanelResponse(topic, masterId, profile, priorRespons
 export async function generateMeetingMinutes(session, profile) {
   const today = new Date().toISOString().slice(0, 10);
 
+  // Truncate each response to 600 chars to keep the transcript within API
+  // context limits. Full responses are already visible in the UI.
+  const SNIPPET_LEN = 600;
   let transcript = "";
   for (const round of session.rounds) {
     transcript += `\n\n=== Round ${round.roundNum} (${round.type === "parallel" ? "独立发言" : "顺序辩论"}) ===\n`;
@@ -501,7 +504,10 @@ export async function generateMeetingMinutes(session, profile) {
       const m = getMaster(resp.masterId);
       const roleZh = MASTER_MEETING_ROLES[resp.masterId]?.roleZh || "";
       const v = resp.verdict ? ` [${resp.verdict.stance} · ${resp.verdict.conviction}]` : "";
-      transcript += `--- ${m.name}（${roleZh}）${v} ---\n${resp.text}\n\n`;
+      const snippet = resp.text.length > SNIPPET_LEN
+        ? resp.text.slice(0, SNIPPET_LEN) + "…"
+        : resp.text;
+      transcript += `--- ${m.name}（${roleZh}）${v} ---\n${snippet}\n\n`;
     }
   }
 
@@ -552,11 +558,13 @@ Produce meeting minutes in this EXACT Markdown format:
 ## 一句话结论
 [Single sentence summarizing the committee's overall view]`;
 
-  return await callLLM({
+  const result = await callLLM({
     system,
     messages: [{ role: "user", content: user }],
-    max_tokens: 1500,
+    max_tokens: 2000,
   });
+  if (!result) throw new Error("收到空回复，请重试");
+  return result;
 }
 
 // ============================================================

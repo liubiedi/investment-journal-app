@@ -225,7 +225,8 @@ export default function RoundtableModal({ visible, onClose }) {
       if (sessionId) await db.updateRoundtableSession(sessionId, updated);
       setShowMinutes(true);
     } catch (e) {
-      Alert.alert("生成失败", e.message === "NO_API_KEY" ? "请先配置 API key" : "纪要生成失败，请稍后重试");
+      const msg = e.message === "NO_API_KEY" ? "请先配置 API key" : (e.message || "纪要生成失败，请稍后重试");
+      Alert.alert("生成失败", msg);
     } finally {
       setGeneratingMinutes(false);
     }
