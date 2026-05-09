@@ -38,6 +38,8 @@ export default function RoundtableModal({ visible, onClose }) {
   const [historyVisible, setHistoryVisible] = useState(false);
   const [historyItems, setHistoryItems] = useState([]);
   const [minutesHistoryVisible, setMinutesHistoryVisible] = useState(false);
+  const [previewMinutes, setPreviewMinutes] = useState("");
+  const [showMinutesPreview, setShowMinutesPreview] = useState(false);
 
   const scrollRef = useRef(null);
 
@@ -86,9 +88,13 @@ export default function RoundtableModal({ visible, onClose }) {
     setLoadingMasters(prev => new Set([...prev, masterId]));
     try {
       const round = session.rounds.find(r => r.roundNum === roundNum);
-      // Use only the immediately preceding round to avoid context explosion
       const prevRound = session.rounds.find(r => r.roundNum === roundNum - 1);
-      const priorResponses = prevRound ? prevRound.responses : [];
+      // Include siblings already answered in the same round so the retried
+      // master sees what others said in this round, not just the previous one.
+      const currentSiblings = round
+        ? round.responses.filter(r => r.masterId !== masterId)
+        : [];
+      const priorResponses = [...(prevRound?.responses ?? []), ...currentSiblings];
       const additionalQuestion = roundNum > 1 ? (round?.userInput || "") : "";
       const { text, verdict } = await mentorPanelResponse(
         session.topic, masterId, app.profile, priorResponses, additionalQuestion
@@ -148,8 +154,9 @@ export default function RoundtableModal({ visible, onClose }) {
       }
     };
 
-    // 2 concurrent workers — reliable on mobile without slowing down too much
-    Promise.all([worker(), worker()]);
+    // Intentionally not awaited — workers update state independently via
+    // functional updates; isLoading tracks completion via loadingMasters.
+    void Promise.all([worker(), worker()]);
   };
 
   // ── Round 2+: sequential debate ───────────────────────────
@@ -254,11 +261,19 @@ export default function RoundtableModal({ visible, onClose }) {
     setSession(item);
     setSessionId(item.id);
     setMinutes(item.minutes || "");
+    // Clear any in-flight state from a previous session
+    setLoadingMasters(new Set());
+    setIsDebating(false);
     setHistoryVisible(false);
   };
 
   const deleteHistoryItem = async (id) => {
-    await db.deleteRoundtableSession(id);
+    try {
+      await db.deleteRoundtableSession(id);
+    } catch {
+      Alert.alert("删除失败", "无法删除该记录，请稍后重试");
+      return;
+    }
     setHistoryItems(prev => prev.filter(h => h.id !== id));
     if (sessionId === id) { setSession(null); setSessionId(null); }
   };
@@ -482,10 +497,16 @@ export default function RoundtableModal({ visible, onClose }) {
       </SafeAreaView>
 
       <MinutesModal visible={showMinutes} minutes={minutes} onClose={() => setShowMinutes(false)} />
+      <MinutesModal
+        visible={showMinutesPreview}
+        minutes={previewMinutes}
+        onClose={() => setShowMinutesPreview(false)}
+      />
       <MinutesHistoryModal
         visible={minutesHistoryVisible}
         items={historyItems}
         onClose={() => setMinutesHistoryVisible(false)}
+        onPreview={(mins) => { setPreviewMinutes(mins); setShowMinutesPreview(true); }}
       />
       <HistoryModal
         visible={historyVisible}
@@ -599,10 +620,7 @@ function MasterCard({ masterId, response, loading, pending, onRetry }) {
 // ──────────────────────────────────────────────────────────────
 // Minutes history modal — lists past sessions that have minutes
 // ──────────────────────────────────────────────────────────────
-function MinutesHistoryModal({ visible, items, onClose }) {
-  const [previewMinutes, setPreviewMinutes] = useState("");
-  const [previewVisible, setPreviewVisible] = useState(false);
-
+function MinutesHistoryModal({ visible, items, onClose, onPreview }) {
   const sessionsWithMinutes = items.filter(item => item.minutes);
 
   return (
@@ -630,7 +648,7 @@ function MinutesHistoryModal({ visible, items, onClose }) {
           {sessionsWithMinutes.map(item => (
             <Pressable
               key={item.id}
-              onPress={() => { setPreviewMinutes(item.minutes); setPreviewVisible(true); }}
+              onPress={() => onPreview(item.minutes)}
               style={{
                 marginBottom: 12, padding: 14,
                 borderWidth: 1, borderColor: colors.divider,
@@ -650,7 +668,6 @@ function MinutesHistoryModal({ visible, items, onClose }) {
           ))}
         </ScrollView>
       </SafeAreaView>
-      <MinutesModal visible={previewVisible} minutes={previewMinutes} onClose={() => setPreviewVisible(false)} />
     </Modal>
   );
 }
