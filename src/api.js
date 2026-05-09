@@ -428,18 +428,25 @@ function parseVerdict(text) {
   };
 }
 
-function buildPanelSystem(masterId, profile, priorResponses) {
+function buildPanelSystem(masterId, profile, priorResponses, topic) {
   const master = getMaster(masterId);
   const roleInfo = MASTER_MEETING_ROLES[masterId];
   const baseStyle = MASTER_STYLES[masterId];
 
+  // Topic is injected into system prompt (not just user message) so the model
+  // has the constraint present throughout, preventing drift to general philosophy.
   let personaText = `${baseStyle}
 
-Stay in character as ${master.name}. Speak in their voice and frameworks. Be thorough but focused — aim for 3-5 paragraphs and always finish your thought completely before the VERDICT line. Match the user's language exactly (Chinese/English/mixed). Do NOT start with "As ${master.name}..." — just speak naturally.
+TODAY'S SINGLE AGENDA ITEM: "${topic}"
 
-${roleInfo.instruction}
+You are attending an investment committee meeting as ${master.name}. Your ENTIRE response must analyze this specific investment topic. Apply all your frameworks and principles directly to "${topic}" — do NOT give general investment philosophy or advice unanchored to this specific asset, company, or theme. If you make a general point (e.g. about moats, cycles, or margin of safety), immediately tie it back to concrete evidence about "${topic}". Match the user's language exactly (Chinese/English/mixed). Do NOT start with "As ${master.name}..." — just speak naturally. Be thorough but focused — aim for 3-5 paragraphs and always finish your thought completely before the VERDICT line.
 
-End your response with EXACTLY this line (nothing after it):
+Your meeting role: ${roleInfo.instruction} Apply this lens directly and specifically to "${topic}".
+
+HARD RULES:
+- Every paragraph must be grounded in analysis of "${topic}" specifically.
+- No tangential advice or generic examples not tied to this investment.
+- End your response with EXACTLY this line and nothing after it:
 VERDICT: [BULL|BEAR|NEUTRAL] · Conviction [HIGH|MED|LOW] · [your thesis in 15 words or fewer]`;
 
   if (priorResponses.length > 0) {
@@ -448,7 +455,7 @@ VERDICT: [BULL|BEAR|NEUTRAL] · Conviction [HIGH|MED|LOW] · [your thesis in 15 
       const role = MASTER_MEETING_ROLES[r.masterId]?.roleZh || "";
       return `${m.name}（${role}）：${r.text}`;
     }).join("\n\n---\n\n");
-    personaText += `\n\nThe following committee members have already spoken. You may directly address, challenge, or build on their points:\n\n${priorBlock}`;
+    personaText += `\n\nPrior committee views on "${topic}" — address, challenge, or build on them, staying focused on the topic:\n\n${priorBlock}`;
   }
 
   const profileText = `<investor_profile>\n${buildProfileContext({ ...profile, maxTrades: 10, maxWeekly: 4, maxMonthly: 2 })}\n</investor_profile>`;
@@ -457,16 +464,16 @@ VERDICT: [BULL|BEAR|NEUTRAL] · Conviction [HIGH|MED|LOW] · [your thesis in 15 
 
 // Single master's panel response. priorResponses = all prior round responses visible to this master.
 export async function mentorPanelResponse(topic, masterId, profile, priorResponses = [], additionalQuestion = "") {
-  const system = buildPanelSystem(masterId, profile, priorResponses);
+  const system = buildPanelSystem(masterId, profile, priorResponses, topic);
 
-  let userMessage = `Investment topic for committee discussion: ${topic}`;
+  let userMessage = `Investment topic: "${topic}"`;
   if (additionalQuestion) {
-    userMessage += `\n\nAdditional question from the investor: ${additionalQuestion}`;
+    userMessage += `\n\nFollow-up from the investor: ${additionalQuestion}`;
   }
   if (priorResponses.length > 0) {
-    userMessage += `\n\nYou have seen the prior committee views above. Give your analysis, referencing and responding to their points where relevant.`;
+    userMessage += `\n\nGive your analysis of "${topic}" from your role's perspective, directly engaging with the prior views above. Keep every point anchored to this specific investment.`;
   } else {
-    userMessage += `\n\nGive your independent assessment of this investment topic from your specific role's perspective.`;
+    userMessage += `\n\nGive your independent analysis of "${topic}" from your specific role's perspective. Ground every point in this specific investment — no general philosophy detached from the topic.`;
   }
 
   const raw = await callLLM({
