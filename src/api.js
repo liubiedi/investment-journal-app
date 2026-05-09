@@ -428,10 +428,18 @@ function parseVerdict(text) {
   };
 }
 
-function buildPanelSystem(masterId, profile, priorResponses, topic) {
+function detectLang(text) {
+  return /[一-鿿]/.test(text) ? "Chinese" : "English";
+}
+
+function buildPanelSystem(masterId, profile, priorResponses, topic, additionalQuestion = "") {
   const master = getMaster(masterId);
   const roleInfo = MASTER_MEETING_ROLES[masterId];
   const baseStyle = MASTER_STYLES[masterId];
+
+  // Detect language from investor's own text so ALL masters reply consistently.
+  // additionalQuestion takes precedence when present (it's the most recent user input).
+  const lang = detectLang(additionalQuestion || topic);
 
   // Topic is injected into system prompt (not just user message) so the model
   // has the constraint present throughout, preventing drift to general philosophy.
@@ -439,7 +447,7 @@ function buildPanelSystem(masterId, profile, priorResponses, topic) {
 
 TODAY'S SINGLE AGENDA ITEM: "${topic}"
 
-You are attending an investment committee meeting as ${master.name}. Your ENTIRE response must analyze this specific investment topic. Apply all your frameworks and principles directly to "${topic}" — do NOT give general investment philosophy or advice unanchored to this specific asset, company, or theme. If you make a general point (e.g. about moats, cycles, or margin of safety), immediately tie it back to concrete evidence about "${topic}". Match the user's language exactly (Chinese/English/mixed). Do NOT start with "As ${master.name}..." — just speak naturally.
+You are attending an investment committee meeting as ${master.name}. Your ENTIRE response must analyze this specific investment topic. Apply all your frameworks and principles directly to "${topic}" — do NOT give general investment philosophy or advice unanchored to this specific asset, company, or theme. If you make a general point (e.g. about moats, cycles, or margin of safety), immediately tie it back to concrete evidence about "${topic}". LANGUAGE: Reply in ${lang} — do NOT mix languages or switch mid-response. Do NOT start with "As ${master.name}..." — just speak naturally.
 
 Your meeting role: ${roleInfo.instruction} Apply this lens directly and specifically to "${topic}".
 
@@ -468,7 +476,7 @@ VERDICT: [BULL|BEAR|NEUTRAL] · Conviction [HIGH|MED|LOW] · [your thesis in 15 
 
 // Single master's panel response. priorResponses = all prior round responses visible to this master.
 export async function mentorPanelResponse(topic, masterId, profile, priorResponses = [], additionalQuestion = "") {
-  const system = buildPanelSystem(masterId, profile, priorResponses, topic);
+  const system = buildPanelSystem(masterId, profile, priorResponses, topic, additionalQuestion);
 
   let userMessage = `Investment topic: "${topic}"`;
   if (additionalQuestion) {
