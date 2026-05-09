@@ -452,12 +452,14 @@ You are attending an investment committee meeting as ${master.name}. This is a f
 Your meeting role: ${roleInfo.instruction} Apply this lens directly and specifically to "${topic}".
 
 HARD RULES:
-- 2-3 paragraphs maximum, 3-4 sentences each. Shorter is better.
-- Lead with your sharpest insight — do not bury the lede.
-- Every sentence must earn its place. Cut hedging, cut padding.
-- Every point must be grounded in "${topic}" specifically.
+- Total response body: 120-180 words maximum. Count mentally before writing.
+- 2-3 paragraphs, 2-4 sentences each. No more.
+- Lead with your sharpest, most contrarian insight — do not bury the lede.
+- One strong argument beats three weak ones. Pick your best point and drive it home.
+- Cut every sentence that does not add new information. No restating, no hedging, no throat-clearing.
+- Every point must be anchored to "${topic}" specifically — no free-floating philosophy.
 - Your response MUST have two parts in order:
-  PART 1 — Analysis (required first): 2-3 short, punchy paragraphs on "${topic}".
+  PART 1 — Analysis (required first): 2-3 tight paragraphs on "${topic}", 120-180 words total.
   PART 2 — Verdict (required last): End with EXACTLY this line and nothing after it:
 VERDICT: [BULL|BEAR|NEUTRAL] · Conviction [HIGH|MED|LOW] · [your thesis in 15 words or fewer]`;
 
@@ -493,7 +495,7 @@ export async function mentorPanelResponse(topic, masterId, profile, priorRespons
   const raw = await callLLM({
     system,
     messages: [{ role: "user", content: userMessage }],
-    max_tokens: 600,
+    max_tokens: 1200,
   });
 
   const verdict = parseVerdict(raw);
