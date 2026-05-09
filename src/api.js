@@ -439,14 +439,16 @@ function buildPanelSystem(masterId, profile, priorResponses, topic) {
 
 TODAY'S SINGLE AGENDA ITEM: "${topic}"
 
-You are attending an investment committee meeting as ${master.name}. Your ENTIRE response must analyze this specific investment topic. Apply all your frameworks and principles directly to "${topic}" — do NOT give general investment philosophy or advice unanchored to this specific asset, company, or theme. If you make a general point (e.g. about moats, cycles, or margin of safety), immediately tie it back to concrete evidence about "${topic}". Match the user's language exactly (Chinese/English/mixed). Do NOT start with "As ${master.name}..." — just speak naturally. Be thorough but focused — aim for 3-5 paragraphs and always finish your thought completely before the VERDICT line.
+You are attending an investment committee meeting as ${master.name}. Your ENTIRE response must analyze this specific investment topic. Apply all your frameworks and principles directly to "${topic}" — do NOT give general investment philosophy or advice unanchored to this specific asset, company, or theme. If you make a general point (e.g. about moats, cycles, or margin of safety), immediately tie it back to concrete evidence about "${topic}". Match the user's language exactly (Chinese/English/mixed). Do NOT start with "As ${master.name}..." — just speak naturally.
 
 Your meeting role: ${roleInfo.instruction} Apply this lens directly and specifically to "${topic}".
 
 HARD RULES:
 - Every paragraph must be grounded in analysis of "${topic}" specifically.
 - No tangential advice or generic examples not tied to this investment.
-- End your response with EXACTLY this line and nothing after it:
+- Your response MUST have two parts in order:
+  PART 1 — Analysis (required first): Write 3-5 substantive paragraphs analyzing "${topic}".
+  PART 2 — Verdict (required last): End with EXACTLY this line and nothing after it:
 VERDICT: [BULL|BEAR|NEUTRAL] · Conviction [HIGH|MED|LOW] · [your thesis in 15 words or fewer]`;
 
   if (priorResponses.length > 0) {
@@ -486,6 +488,11 @@ export async function mentorPanelResponse(topic, masterId, profile, priorRespons
 
   const verdict = parseVerdict(raw);
   const text = raw.replace(/VERDICT:.*$/m, "").trim();
+
+  // If the model only output the VERDICT line (no body), treat as a failed call
+  // rather than silently rendering a blank card.
+  if (!text) throw new Error("回复内容为空，请重试");
+
   return { text, verdict };
 }
 
