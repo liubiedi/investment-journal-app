@@ -2,8 +2,8 @@
 
 ## 投资日志 · The Investor's Ledger
 
-**Version:** 1.3
-**Date:** 2026-05-01
+**Version:** 1.4
+**Date:** 2026-05-10
 **Format:** Android mobile application
 **Target:** AI coding agents (single-source-of-truth for autonomous implementation)
 
@@ -20,6 +20,7 @@ A personal, offline-first investment journaling Android app that combines struct
 4. **Voice-first input** — every text field supports speech-to-text.
 5. **Local-only data** — SQLite on device, never cloud-synced. User owns their data.
 6. **Token-frugal AI** — feedback is on-demand (never auto-triggered), prompt caching reduces cost ~90% for chat.
+7. **华山论道 roundtable** — launch a multi-master AI investment committee discussion on any topic or holding; masters debate in structured rounds with meeting minutes auto-generated at the end.
 
 ---
 
@@ -157,6 +158,24 @@ CREATE TABLE chat_history (
   created_at INTEGER NOT NULL
 );
 
+-- Roundtable discussion sessions
+CREATE TABLE roundtable_sessions (
+  id TEXT PRIMARY KEY,             -- session_<timestamp>_<random>
+  topic TEXT NOT NULL,             -- the discussion topic/question
+  masters TEXT NOT NULL,           -- JSON string[] of master IDs in this session
+  data TEXT NOT NULL,              -- JSON: { rounds: [{masterId, text, verdict}[]], minutes: string }
+  created_at INTEGER NOT NULL
+);
+
+-- Per-holding review log entries
+CREATE TABLE holding_reviews (
+  id TEXT PRIMARY KEY,
+  holding_id TEXT NOT NULL,        -- FK → holdings.id
+  date TEXT NOT NULL,              -- YYYY-MM-DD
+  content TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+
 -- Yahoo Finance price cache
 CREATE TABLE prices_cache (
   symbol TEXT PRIMARY KEY,
@@ -212,7 +231,8 @@ Sub-tab switcher: two full-width buttons at the top; active tab has ink backgrou
 - Large multiline PaperInput (min 110pt height) for the week's note.
 - VoiceMic button (size 32) to the right of the week title for voice-to-text.
 - Save button label: "写入本周" or "更新本周记录", disabled when unchanged.
-- **Archive section** below: list all past weeks (sorted descending) with week_key in mono + first line of note in serif. Tap loads that week into the editor.
+- **导师 button** beside the save button (shown when draft is non-empty): opens `MasterPickerModal` → on master selection, appends the week note as a user message to `chat_history` (with week label + prompt), then navigates to the 问道 tab with the selected master pre-loaded. Same pattern as Holdings "带入问道".
+- **Archive section** below: list all past weeks (sorted descending) with week_key in mono + first line of note in serif. Tap loads that week into the editor. Each archive row also has a small 导师 icon button for sending that week's note to the mentor.
 
 **Data operations:**
 - Load: `db.listWeeklyNotes()` on mount.
@@ -226,8 +246,10 @@ Sub-tab switcher: two full-width buttons at the top; active tab has ink backgrou
 - **Mentor monthly commentary block** (conditional: only if `monthTrades.length > 0`):
   - Title: "MONTHLY VIEW · 导师月度点评"
   - MasterChips selector (default = user's defaultMaster)
-  - Box shows cached text from `monthly_mentor_cache` if exists; otherwise a "请 {master.zh} 点评本月" button that calls `generateMonthlyCommentary(month, monthTrades, masterId, profile)` and caches result to DB.
+  - Box shows cached text from `monthly_mentor_cache` if exists **and passes truncation check** (must end in sentence-final punctuation `。！？.!?"`); otherwise shows "请 {master.zh} 点评本月" button that calls `generateMonthlyCommentary(month, monthTrades, masterId, profile)` and caches result to DB.
+  - "重新生成" button appears below any displayed commentary; clears cache for that master and fetches fresh.
 - **Review bullets editor**: 4-5 bullet inputs, each with VoiceMic. Placeholders rotate: ["最成功的一笔决策？", "最想重来的一笔？", "这个月学到了什么？", "下月要改什么？", "其他观察…"]. "+ ADD BULLET" to grow to 5.
+- **导师 button** beside the save button (shown when any bullet is non-empty): opens `MasterPickerModal` → on master selection, appends the month label + bullet points as a user message to `chat_history`, then navigates to the 问道 tab with the selected master pre-loaded. Same pattern as Holdings "带入问道".
 - Save button: "归档月评" (new) or "更新月评" (existing).
 
 **Data operations:**
@@ -328,7 +350,28 @@ Sub-tab switcher: two full-width buttons at the top; active tab has ink backgrou
 **Chat reload on focus:** The screen uses `useFocusEffect` to reload `chat_history` from DB each time it gains focus. This ensures that entries written by "带入问道" from the Log screen appear immediately without requiring a manual refresh.
 
 
-### 5.7 Settings (hidden screen, route: `settings`)
+### 5.7 Roundtable (hidden screen, route: `roundtable`)
+
+**华山论道** — an AI investment committee that debates a topic through multiple structured rounds. Launched from Holdings "带入问道 ↗" or from any context that pushes `{ topic }` via navigation params.
+
+**Features:**
+- **Topic display**: shows the discussion topic at the top (e.g., a holding's full context or a user-typed question).
+- **Master selector**: multi-select chips (up to 6 masters). At least 2 required to start.
+- **Round structure**: each round, every selected master gives a response (120-180 words, 2-3 paragraphs). Masters are shown as cards, one per master.
+- **VERDICT line**: each response includes a `VERDICT: BUY/HOLD/SELL/WATCH` line (stripped from display, used for UI tally). A verdict bar at the top tallies all masters' current stances.
+- **Round navigation**: "下一轮" button advances to next round (min 2, max 4 rounds). Each subsequent round sees all previous responses in context.
+- **Per-master retry**: if a master's response fails to load, a retry button appears on that card.
+- **Meeting minutes** (会议纪要): button generates a structured summary of the full discussion via DeepSeek (150-250 words). Cached for the session.
+- **Language consistency**: all master responses are in the same language as the discussion topic (detected via `/[一-鿿]/` regex).
+
+**Prompt discipline:**
+- Round 1: each master responds independently based on topic + investor profile.
+- Round 2+: each master sees all Round 1 responses (as attributed quotes) plus prior rounds. Stays on topic.
+- Word count enforced via prompt instruction (not `max_tokens` ceiling). `max_tokens: 1200` is the output ceiling, never a length target.
+
+**Data:** sessions persisted to `roundtable_sessions` table; full round data (responses + verdicts + minutes) stored as JSON in `data` column.
+
+### 5.8 Settings (hidden screen, route: `settings`)
 
 Accessible via the ⚙ gear icon in the 心法 (Home) masthead. Not shown in the tab bar.
 
@@ -504,6 +547,7 @@ cool:       "#3a5578"
 - `<FilledButton>` — ink background, paper text, serif bold
 - `<OutlineButton>` — transparent with divider border
 - `<MasterChips active onSelect>` — horizontal scrollable persona selector
+- `<MasterPickerModal visible onClose onSelect subtitle>` — slide-up modal listing all masters; `subtitle` is optional. Used by Holdings, Weekly, Monthly to let user pick a master before launching the mentor chat flow.
 - `<FeedbackBlock feedback onRequestMaster pending defaultMaster onContinueInMentor>` — entry feedback with master switcher. `onContinueInMentor(masterId, text)` is optional; when provided, renders "带入问道继续讨论 ↗" button below any loaded feedback text. Uses internal `localCache` + `streamAccumRef` so multi-master switching never blanks already-loaded feedback.
 - `<VoiceMic currentText onChange size>` — microphone toggle button
 - `<FormHeader title onCancel>` — back + kicker row in forms
@@ -563,10 +607,11 @@ investment-journal-app/
 │   └── screens/
 │       ├── Home.js                 # 心法 tab — philosophy, rules, mentor default, stats
 │       ├── Review.js               # 复盘 tab — sub-tab container for Weekly + Monthly
-│       ├── Weekly.js               # 周记 sub-tab (inside Review)
-│       ├── Monthly.js              # 月评 sub-tab (inside Review)
+│       ├── Weekly.js               # 周记 sub-tab (inside Review); 导师 button → mentor chat
+│       ├── Monthly.js              # 月评 sub-tab (inside Review); 导师 button → mentor chat
 │       ├── Log.js                  # 记录 tab — trades + thoughts (sub-tabs)
 │       ├── Holdings.js             # 持仓 tab
+│       ├── Roundtable.js           # 华山论道 — hidden screen, multi-master roundtable
 │       ├── Mentor.js               # 问道 tab
 │       └── Settings.js             # hidden screen — accessible via gear icon in Home
 └── assets/
@@ -590,7 +635,14 @@ clearApiKey(): Promise<void>
 parseTradeText(text: string): Promise<{action, stock, reason, emotion}>
 generateEntryFeedback(entry, entryType: "trade"|"thought", masterId, profile): Promise<string>
 generateMonthlyCommentary(month, monthTrades, masterId, profile): Promise<string>
+// max_tokens: 1500; prompt enforces 150-250 words; result cached in monthly_mentor_cache
+mentorPanelResponse(topic, masterId, profile, previousRounds, additionalQuestion): Promise<{text, verdict}>
+// Roundtable: one master's response for a given round. 120-180 words, VERDICT line stripped from display.
 chatMessage(history, newUserMessage, profile, masterId="default"): Promise<string>
+
+// Internal helpers
+detectLang(text: string): "Chinese" | "English"
+// Detects user content language via /[一-鿿]/ — result injected as LANGUAGE directive in all master prompts
 
 // Yahoo Finance (no key, no throws from missing key)
 fetchLivePrices(symbols: string[]): Promise<{[symbol]: {price, currency, changePercent, resolvedTicker, asOf}}>
@@ -639,7 +691,16 @@ clearChat(): Promise<void>
 getPricesCache(): Promise<{data: {[symbol]: {...}}, lastUpdated: number|null}>
 savePrices(map): Promise<void>
 
-exportAll(): Promise<FullExportObject>              // For Settings > Export JSON
+addHoldingReview(holdingId, date, content): Promise<void>
+listHoldingReviews(holdingId): Promise<{id, date, content, createdAt}[]>
+deleteHoldingReview(id): Promise<void>
+
+listRoundtableSessions(): Promise<RoundtableSession[]>
+addRoundtableSession(topic, masters, data): Promise<RoundtableSession>
+deleteRoundtableSession(id): Promise<void>
+
+exportAll(): Promise<FullExportObject>              // Covers all tables including roundtable_sessions, holding_reviews, monthly_mentor_cache
+importAll(data): Promise<void>
 ```
 
 ### `src/voice.js`
