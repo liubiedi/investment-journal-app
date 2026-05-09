@@ -453,7 +453,9 @@ VERDICT: [BULL|BEAR|NEUTRAL] · Conviction [HIGH|MED|LOW] · [your thesis in 15 
     const priorBlock = priorResponses.map(r => {
       const m = getMaster(r.masterId);
       const role = MASTER_MEETING_ROLES[r.masterId]?.roleZh || "";
-      return `${m.name}（${role}）：${r.text}`;
+      // Truncate to keep context bounded; full text already seen in UI
+      const snippet = r.text.length > 800 ? r.text.slice(0, 800) + "…" : r.text;
+      return `${m.name}（${role}）：${snippet}`;
     }).join("\n\n---\n\n");
     personaText += `\n\nPrior committee views on "${topic}" — address, challenge, or build on them, staying focused on the topic:\n\n${priorBlock}`;
   }

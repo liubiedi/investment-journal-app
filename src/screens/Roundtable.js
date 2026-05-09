@@ -85,9 +85,9 @@ export default function RoundtableModal({ visible, onClose }) {
     setLoadingMasters(prev => new Set([...prev, masterId]));
     try {
       const round = session.rounds.find(r => r.roundNum === roundNum);
-      const priorResponses = session.rounds
-        .filter(r => r.roundNum < roundNum)
-        .flatMap(r => r.responses);
+      // Use only the immediately preceding round to avoid context explosion
+      const prevRound = session.rounds.find(r => r.roundNum === roundNum - 1);
+      const priorResponses = prevRound ? prevRound.responses : [];
       const additionalQuestion = roundNum > 1 ? (round?.userInput || "") : "";
       const { text, verdict } = await mentorPanelResponse(
         session.topic, masterId, app.profile, priorResponses, additionalQuestion
@@ -155,9 +155,10 @@ export default function RoundtableModal({ visible, onClose }) {
   const startDebateRound = async () => {
     if (!session || isLoading) return;
 
-    const round1Done = session.rounds[0]?.responses.length >= session.selectedMasters.length;
-    if (!round1Done) {
-      Alert.alert("请等待", "第一轮发言尚未完成，请稍候。");
+    // Check the most recent round is fully complete (not just round 1)
+    const lastRound = session.rounds[session.rounds.length - 1];
+    if (!lastRound || lastRound.responses.length < session.selectedMasters.length) {
+      Alert.alert("请等待", "上一轮发言尚未完成，请稍候。");
       return;
     }
 
@@ -170,7 +171,10 @@ export default function RoundtableModal({ visible, onClose }) {
     setIsDebating(true);
     setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
 
-    const allPrior = session.rounds.flatMap(r => r.responses);
+    // Only pass the immediately preceding round as context — not all rounds.
+    // Accumulating all rounds causes context explosion (27k+ tokens after round 3)
+    // which makes the API silently return empty responses.
+    const priorRoundResponses = lastRound.responses;
     const roundAccum = [];
 
     for (const masterId of session.selectedMasters) {
@@ -178,9 +182,10 @@ export default function RoundtableModal({ visible, onClose }) {
       try {
         const { text, verdict } = await mentorPanelResponse(
           session.topic, masterId, app.profile,
-          [...allPrior, ...roundAccum],
+          [...priorRoundResponses, ...roundAccum],
           additionalQuestion
         );
+        if (!text) throw new Error("收到空回复，请重试");
         const resp = { masterId, text, verdict };
         roundAccum.push(resp);
         setSession(prev => {
@@ -270,8 +275,9 @@ export default function RoundtableModal({ visible, onClose }) {
     });
   };
 
+  const lastRound = session?.rounds[session.rounds.length - 1];
   const canStartDebate = !!session && !isLoading &&
-    (session.rounds[0]?.responses.length ?? 0) >= (session.selectedMasters?.length ?? 1);
+    (lastRound?.responses.length ?? 0) >= (session.selectedMasters?.length ?? 1);
 
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
