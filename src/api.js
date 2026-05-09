@@ -435,7 +435,7 @@ function buildPanelSystem(masterId, profile, priorResponses) {
 
   let personaText = `${baseStyle}
 
-Stay in character as ${master.name}. Speak in their voice and frameworks. Keep your response to 3-4 paragraphs. Match the user's language exactly (Chinese/English/mixed). Do NOT start with "As ${master.name}..." — just speak naturally.
+Stay in character as ${master.name}. Speak in their voice and frameworks. Be thorough but focused — aim for 3-5 paragraphs and always finish your thought completely before the VERDICT line. Match the user's language exactly (Chinese/English/mixed). Do NOT start with "As ${master.name}..." — just speak naturally.
 
 ${roleInfo.instruction}
 
@@ -472,7 +472,7 @@ export async function mentorPanelResponse(topic, masterId, profile, priorRespons
   const raw = await callLLM({
     system,
     messages: [{ role: "user", content: userMessage }],
-    max_tokens: 900,
+    max_tokens: 1800,
   });
 
   const verdict = parseVerdict(raw);
