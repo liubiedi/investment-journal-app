@@ -189,6 +189,7 @@ export async function deleteTrade(id) {
 function rowToTrade(r) {
   return {
     id: r.id, date: r.date, action: r.action, stock: r.stock,
+    stockName: r.stock_name || undefined,
     reason: r.reason, emotion: r.emotion,
     rulesChecked: safeJson(r.rules_checked, []),
     rawInput: r.raw_input || undefined,
@@ -473,14 +474,14 @@ function safeJson(s, fallback) {
 
 // Export all app data as a single JSON for backup
 export async function exportAll() {
-  const [kvRows, trades, thoughts, holdings, weekly, monthly, chat, prices, roundtable] = await Promise.all([
-    (async () => {
-      const db = await getDb();
-      return db.getAllAsync("SELECT * FROM kv");
-    })(),
+  const database = await getDb();
+  const [kvRows, trades, thoughts, holdings, weekly, monthly, chat, prices, roundtable, holdingReviews, mentorCache] = await Promise.all([
+    database.getAllAsync("SELECT * FROM kv"),
     listTrades(), listThoughts(), listHoldings(),
     listWeeklyNotes(), listMonthlyReviews(), listChat(), getPricesCache(),
     listRoundtableSessions(),
+    database.getAllAsync("SELECT * FROM holding_reviews"),
+    database.getAllAsync("SELECT * FROM monthly_mentor_cache"),
   ]);
   return {
     version: 1,
@@ -488,6 +489,8 @@ export async function exportAll() {
     kv: Object.fromEntries(kvRows.map(r => [r.key, safeJson(r.value, r.value)])),
     trades, thoughts, holdings, weeklyNotes: weekly, monthlyReviews: monthly,
     chatHistory: chat, prices, roundtableSessions: roundtable,
+    holdingReviews: holdingReviews.map(r => ({ id: r.id, holdingId: r.holding_id, date: r.date, content: r.content, createdAt: r.created_at })),
+    monthlyMentorCache: mentorCache.map(r => ({ monthKey: r.month_key, masterId: r.master_id, text: r.text, createdAt: r.created_at })),
   };
 }
 
@@ -564,6 +567,22 @@ export async function importAll(snapshot) {
       await database.runAsync(
         "INSERT INTO roundtable_sessions (id, created_at, data) VALUES (?,?,?)",
         [s.id, s.createdAt || Date.now(), JSON.stringify(s)]
+      );
+    }
+    // holding reviews (user-written notes per holding)
+    await database.runAsync("DELETE FROM holding_reviews");
+    for (const r of snapshot.holdingReviews || []) {
+      await database.runAsync(
+        "INSERT INTO holding_reviews (id, holding_id, date, content, created_at) VALUES (?,?,?,?,?)",
+        [r.id, r.holdingId, r.date, r.content, r.createdAt || Date.now()]
+      );
+    }
+    // monthly mentor cache (AI commentary per month/master — saves regeneration cost)
+    await database.runAsync("DELETE FROM monthly_mentor_cache");
+    for (const c of snapshot.monthlyMentorCache || []) {
+      await database.runAsync(
+        "INSERT INTO monthly_mentor_cache (month_key, master_id, text, created_at) VALUES (?,?,?,?)",
+        [c.monthKey, c.masterId, c.text, c.createdAt || Date.now()]
       );
     }
   });
