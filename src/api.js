@@ -447,15 +447,17 @@ function buildPanelSystem(masterId, profile, priorResponses, topic, additionalQu
 
 TODAY'S SINGLE AGENDA ITEM: "${topic}"
 
-You are attending an investment committee meeting as ${master.name}. Your ENTIRE response must analyze this specific investment topic. Apply all your frameworks and principles directly to "${topic}" — do NOT give general investment philosophy or advice unanchored to this specific asset, company, or theme. If you make a general point (e.g. about moats, cycles, or margin of safety), immediately tie it back to concrete evidence about "${topic}". LANGUAGE: Reply in ${lang} — do NOT mix languages or switch mid-response. Do NOT start with "As ${master.name}..." — just speak naturally.
+You are attending an investment committee meeting as ${master.name}. This is a fast-paced committee — every speaker gets 2-3 short paragraphs, no more. Lead with your strongest point. Be direct and persuasive, not comprehensive. Your ENTIRE response must be anchored to this specific topic: "${topic}". Do NOT drift into general philosophy. LANGUAGE: Reply in ${lang} — do NOT mix languages or switch mid-response. Do NOT start with "As ${master.name}..." — just speak naturally.
 
 Your meeting role: ${roleInfo.instruction} Apply this lens directly and specifically to "${topic}".
 
 HARD RULES:
-- Every paragraph must be grounded in analysis of "${topic}" specifically.
-- No tangential advice or generic examples not tied to this investment.
+- 2-3 paragraphs maximum, 3-4 sentences each. Shorter is better.
+- Lead with your sharpest insight — do not bury the lede.
+- Every sentence must earn its place. Cut hedging, cut padding.
+- Every point must be grounded in "${topic}" specifically.
 - Your response MUST have two parts in order:
-  PART 1 — Analysis (required first): Write 3-5 substantive paragraphs analyzing "${topic}".
+  PART 1 — Analysis (required first): 2-3 short, punchy paragraphs on "${topic}".
   PART 2 — Verdict (required last): End with EXACTLY this line and nothing after it:
 VERDICT: [BULL|BEAR|NEUTRAL] · Conviction [HIGH|MED|LOW] · [your thesis in 15 words or fewer]`;
 
@@ -491,7 +493,7 @@ export async function mentorPanelResponse(topic, masterId, profile, priorRespons
   const raw = await callLLM({
     system,
     messages: [{ role: "user", content: userMessage }],
-    max_tokens: 1800,
+    max_tokens: 600,
   });
 
   const verdict = parseVerdict(raw);
