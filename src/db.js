@@ -473,20 +473,21 @@ function safeJson(s, fallback) {
 
 // Export all app data as a single JSON for backup
 export async function exportAll() {
-  const [kvRows, trades, thoughts, holdings, weekly, monthly, chat, prices] = await Promise.all([
+  const [kvRows, trades, thoughts, holdings, weekly, monthly, chat, prices, roundtable] = await Promise.all([
     (async () => {
       const db = await getDb();
       return db.getAllAsync("SELECT * FROM kv");
     })(),
     listTrades(), listThoughts(), listHoldings(),
     listWeeklyNotes(), listMonthlyReviews(), listChat(), getPricesCache(),
+    listRoundtableSessions(),
   ]);
   return {
     version: 1,
     exportedAt: new Date().toISOString(),
     kv: Object.fromEntries(kvRows.map(r => [r.key, safeJson(r.value, r.value)])),
     trades, thoughts, holdings, weeklyNotes: weekly, monthlyReviews: monthly,
-    chatHistory: chat, prices,
+    chatHistory: chat, prices, roundtableSessions: roundtable,
   };
 }
 
@@ -555,6 +556,14 @@ export async function importAll(snapshot) {
       await database.runAsync(
         "INSERT INTO chat_history (role, content, master_id, created_at) VALUES (?,?,?,?)",
         [m.role, m.content, m.masterId || "default", m.createdAt || Date.now()]
+      );
+    }
+    // roundtable sessions (includes meeting minutes stored inside session data)
+    await database.runAsync("DELETE FROM roundtable_sessions");
+    for (const s of snapshot.roundtableSessions || []) {
+      await database.runAsync(
+        "INSERT INTO roundtable_sessions (id, created_at, data) VALUES (?,?,?)",
+        [s.id, s.createdAt || Date.now(), JSON.stringify(s)]
       );
     }
   });
