@@ -4,7 +4,7 @@ import { View, ScrollView, Pressable, ActivityIndicator, Platform, KeyboardAvoid
 import { useSafeAreaInsets, SafeAreaView } from "react-native-safe-area-context";
 import { useNavigation } from "@react-navigation/native";
 import {
-  Plus, RefreshCw, Loader2, Wallet, Trash2, ChevronLeft, Calendar, MessageCircle,
+  Plus, RefreshCw, Loader2, Wallet, Trash2, ChevronLeft, Calendar, MessageCircle, Pencil,
 } from "lucide-react-native";
 import DateTimePicker from "@react-native-community/datetimepicker";
 
@@ -401,6 +401,10 @@ function HoldingForm({ initial, onSave, onCancel, onDelete }) {
   const [reviewDate, setReviewDate] = useState(todayISO());
   const [showReviewDatePicker, setShowReviewDatePicker] = useState(false);
   const [addingReview, setAddingReview] = useState(false);
+  const [editingReviewId, setEditingReviewId] = useState(null);
+  const [editReviewText, setEditReviewText] = useState("");
+  const [editReviewDate, setEditReviewDate] = useState(todayISO());
+  const [showEditReviewDatePicker, setShowEditReviewDatePicker] = useState(false);
 
   const loadReviews = useCallback(async () => {
     if (!initial?.id) return;
@@ -581,13 +585,69 @@ function HoldingForm({ initial, onSave, onCancel, onDelete }) {
           ) : (
             reviews.map((r) => (
               <View key={r.id} style={{ marginBottom: 10, paddingBottom: 10, borderBottomWidth: 1, borderBottomColor: colors.dividerSoft }}>
-                <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
-                  <TMono style={{ fontSize: 10, color: colors.inkMuted }}>{r.date}</TMono>
-                  <Pressable onPress={async () => { await db.deleteHoldingReview(r.id); loadReviews(); }}>
-                    <Trash2 size={10} color={colors.inkFaint} />
-                  </Pressable>
-                </View>
-                <TSerif style={{ fontSize: 13, lineHeight: 20 }}>{r.content}</TSerif>
+                {editingReviewId === r.id ? (
+                  <View style={{ padding: 12, backgroundColor: colors.bgElev, borderWidth: 1, borderColor: colors.divider }}>
+                    <Pressable onPress={() => setShowEditReviewDatePicker(true)}
+                      style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                      <Calendar size={12} color={colors.accent} strokeWidth={1.5} />
+                      <TMono style={{ fontSize: 12 }}>{editReviewDate}</TMono>
+                    </Pressable>
+                    {showEditReviewDatePicker && (
+                      <DateTimePicker
+                        value={new Date(editReviewDate + "T12:00:00")}
+                        mode="date"
+                        display={Platform.OS === "ios" ? "inline" : "default"}
+                        onChange={(event, selectedDate) => {
+                          if (Platform.OS === "android") setShowEditReviewDatePicker(false);
+                          if (selectedDate && event.type !== "dismissed") {
+                            const d = selectedDate;
+                            setEditReviewDate(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`);
+                            if (Platform.OS === "ios") setShowEditReviewDatePicker(false);
+                          } else if (event.type === "dismissed") {
+                            setShowEditReviewDatePicker(false);
+                          }
+                        }}
+                      />
+                    )}
+                    <PaperInput multiline value={editReviewText} onChangeText={setEditReviewText}
+                      style={{ minHeight: 80, fontSize: 13, marginBottom: 8 }} />
+                    <View style={{ flexDirection: "row", gap: 8 }}>
+                      <Pressable
+                        onPress={async () => {
+                          if (!editReviewText.trim()) return;
+                          await db.updateHoldingReview(r.id, editReviewDate, editReviewText.trim());
+                          setEditingReviewId(null);
+                          loadReviews();
+                        }}
+                        style={{ paddingHorizontal: 14, paddingVertical: 7, backgroundColor: colors.ink }}>
+                        <TMono style={{ fontSize: 10, color: colors.bg, fontWeight: "600" }}>保存</TMono>
+                      </Pressable>
+                      <Pressable onPress={() => { setEditingReviewId(null); }}>
+                        <TMono style={{ fontSize: 10, marginTop: 7 }}>取消</TMono>
+                      </Pressable>
+                    </View>
+                  </View>
+                ) : (
+                  <>
+                    <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+                      <TMono style={{ fontSize: 10, color: colors.inkMuted }}>{r.date}</TMono>
+                      <View style={{ flexDirection: "row", gap: 12, alignItems: "center" }}>
+                        <Pressable onPress={() => {
+                          setEditingReviewId(r.id);
+                          setEditReviewText(r.content);
+                          setEditReviewDate(r.date);
+                          setShowEditReviewDatePicker(false);
+                        }}>
+                          <Pencil size={10} color={colors.inkFaint} />
+                        </Pressable>
+                        <Pressable onPress={async () => { await db.deleteHoldingReview(r.id); loadReviews(); }}>
+                          <Trash2 size={10} color={colors.inkFaint} />
+                        </Pressable>
+                      </View>
+                    </View>
+                    <TSerif style={{ fontSize: 13, lineHeight: 20 }}>{r.content}</TSerif>
+                  </>
+                )}
               </View>
             ))
           )}

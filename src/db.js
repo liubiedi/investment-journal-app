@@ -305,6 +305,11 @@ export async function deleteHoldingReview(id) {
   await db.runAsync("DELETE FROM holding_reviews WHERE id = ?", [id]);
 }
 
+export async function updateHoldingReview(id, date, content) {
+  const db = await getDb();
+  await db.runAsync("UPDATE holding_reviews SET date = ?, content = ? WHERE id = ?", [date, content, id]);
+}
+
 // ---------- weekly_notes ----------
 export async function listWeeklyNotes() {
   const db = await getDb();
