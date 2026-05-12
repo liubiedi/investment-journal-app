@@ -3,7 +3,7 @@
 // User must tap "求教 xx" to request feedback from a specific master.
 
 import React, { useState } from "react";
-import { View, Text, ScrollView, Pressable, ActivityIndicator, Modal, KeyboardAvoidingView, Platform, Alert } from "react-native";
+import { View, Text, ScrollView, Pressable, ActivityIndicator, KeyboardAvoidingView, Platform, Alert } from "react-native";
 import { useSafeAreaInsets, SafeAreaView } from "react-native-safe-area-context";
 import { useNavigation } from "@react-navigation/native";
 import {
@@ -23,7 +23,7 @@ import { parseTradeText, generateEntryFeedback } from "../api";
 import * as db from "../db";
 import {
   TSerif, TSerifBold, TSerifItalic, TMono, Kicker,
-  PaperInput, StockSearchInput, FilledButton, OutlineButton, MasterChips, FeedbackBlock,
+  PaperInput, StockSearchInput, FilledButton, MasterChips, FeedbackBlock,
   Masthead, FormHeader, Field, HR,
 } from "../components";
 
@@ -37,6 +37,8 @@ const ACTION_LABEL = {
   buy: "买入", sell: "卖出", hold: "持有", watch: "关注",
   buy_option: "买期权", sell_option: "卖期权",
 };
+
+const CURRENCIES = ["USD", "CNY", "HKD", "EUR", "JPY"];
 
 async function addTradeToCalendar(trade) {
   try {
@@ -106,8 +108,6 @@ export default function LogScreen() {
   const insets = useSafeAreaInsets();
   const [subTab, setSubTab] = useState("trades");
   const [adding, setAdding] = useState(false);
-  const [holdingPrompt, setHoldingPrompt] = useState(null);       // { trade } — stock buy/sell
-  const [optionPrompt, setOptionPrompt] = useState(null);         // { trade } — option buy/sell
 
   return (
     <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : "height"}>
@@ -160,11 +160,6 @@ export default function LogScreen() {
             onSave={async (t) => {
               const saved = await app.addTrade(t);
               setAdding(false);
-              if (t.action === "buy" || t.action === "sell") {
-                setHoldingPrompt({ trade: saved });
-              } else if (t.action === "buy_option" || t.action === "sell_option") {
-                setOptionPrompt({ trade: saved });
-              }
               const tradeDate = new Date(t.date);
               const isFuture = tradeDate > new Date();
               if (isFuture) {
@@ -199,6 +194,58 @@ export default function LogScreen() {
                 <TradeRow key={t.id} trade={t}
                   onDelete={() => app.deleteTradeById(t.id)}
                   onUpdate={(fields) => app.updateTradeById(t.id, fields)}
+                  onExecute={async (trade) => {
+                    const sym = trade.stock.toUpperCase();
+                    const qty = trade.quantity || 0;
+                    if (trade.action === "buy") {
+                      const price = trade.entryPrice || 0;
+                      const existing = app.holdings.find((h) => h.symbol.toUpperCase() === sym);
+                      if (existing) {
+                        const newShares = existing.shares + qty;
+                        const newCost = (existing.shares * existing.costBasis + qty * price) / newShares;
+                        await app.updateHoldingById(existing.id, { shares: newShares, costBasis: newCost });
+                      } else {
+                        await app.addHolding({
+                          symbol: sym, displayName: trade.stockName || sym,
+                          shares: qty, costBasis: price,
+                          currency: trade.currency || "USD",
+                          buyReason: trade.reason, notes: "",
+                        });
+                      }
+                    } else if (trade.action === "sell") {
+                      const existing = app.holdings.find((h) => h.symbol.toUpperCase() === sym);
+                      if (!existing) {
+                        Alert.alert("执行失败", `持仓中未找到 ${sym}，无法执行卖出。`);
+                        return;
+                      }
+                      const newShares = existing.shares - qty;
+                      if (newShares <= 0) await app.deleteHoldingById(existing.id);
+                      else await app.updateHoldingById(existing.id, { shares: newShares });
+                    } else if (trade.action === "buy_option") {
+                      const optLabel = trade.optionType === "call" ? "Call" : "Put";
+                      const displayName = `${sym} ${optLabel} $${trade.strike} exp.${trade.expiry}`;
+                      await app.addHolding({
+                        symbol: sym, displayName,
+                        shares: qty, costBasis: trade.entryPrice || 0,
+                        currency: trade.currency || "USD",
+                        buyReason: trade.reason,
+                        notes: `期权类型:${trade.optionType === "call" ? "看涨Call" : "看跌Put"}|行权价:${trade.strike}|到期日:${trade.expiry}`,
+                        buyDate: new Date(trade.date).toISOString().slice(0, 10),
+                      });
+                    } else if (trade.action === "sell_option") {
+                      const optLabel = trade.optionType === "call" ? "Call" : "Put";
+                      const displayName = `${sym} ${optLabel} $${trade.strike} exp.${trade.expiry}`;
+                      const existingOpt = app.holdings.find((h) => h.displayName === displayName);
+                      if (!existingOpt) {
+                        Alert.alert("执行失败", `未找到匹配的期权持仓 (${displayName})，无法平仓。`);
+                        return;
+                      }
+                      const remaining = existingOpt.shares - qty;
+                      if (remaining <= 0) await app.deleteHoldingById(existingOpt.id);
+                      else await app.updateHoldingById(existingOpt.id, { shares: remaining });
+                    }
+                    await app.updateTradeById(trade.id, { executed: 1 });
+                  }}
                   onRequestFeedback={async (masterId, onChunk) => {
                     const text = await generateEntryFeedback(t, "trade", masterId, app.profile, onChunk);
                     const current = app.trades.find(x => x.id === t.id);
@@ -234,65 +281,6 @@ export default function LogScreen() {
         </View>
       </ScrollView>
 
-      {holdingPrompt && (
-        <HoldingUpdateModal
-          trade={holdingPrompt.trade}
-          holdings={app.holdings}
-          onConfirm={async ({ shares, price, currency, displayName }) => {
-            setHoldingPrompt(null);
-            const sym = holdingPrompt.trade.stock.toUpperCase();
-            const existing = app.holdings.find((h) => h.symbol.toUpperCase() === sym);
-            if (holdingPrompt.trade.action === "buy") {
-              if (existing) {
-                const newShares = existing.shares + shares;
-                const newCost = (existing.shares * existing.costBasis + shares * price) / newShares;
-                await app.updateHoldingById(existing.id, { shares: newShares, costBasis: newCost });
-              } else {
-                await app.addHolding({ symbol: sym, displayName: displayName || sym, shares, costBasis: price, currency, buyReason: holdingPrompt.trade.reason, notes: "" });
-              }
-            } else {
-              if (existing) {
-                const newShares = existing.shares - shares;
-                if (newShares <= 0) await app.deleteHoldingById(existing.id);
-                else await app.updateHoldingById(existing.id, { shares: newShares });
-              }
-            }
-          }}
-          onSkip={() => setHoldingPrompt(null)}
-        />
-      )}
-
-      {optionPrompt && (
-        <OptionUpdateModal
-          trade={optionPrompt.trade}
-          holdings={app.holdings}
-          onConfirm={async (data) => {
-            setOptionPrompt(null);
-            const sym = optionPrompt.trade.stock.toUpperCase();
-            if (optionPrompt.trade.action === "buy_option") {
-              await app.addHolding({
-                symbol: sym,
-                displayName: data.displayName,
-                shares: data.contracts,
-                costBasis: data.premium,
-                currency: data.currency,
-                buyReason: optionPrompt.trade.reason,
-                notes: data.notes,
-                buyDate: new Date(optionPrompt.trade.date).toISOString().slice(0, 10),
-              });
-            } else {
-              // sell_option: close matching position by displayName
-              const existing = app.holdings.find((h) => h.displayName === data.displayName);
-              if (existing) {
-                const remaining = existing.shares - data.contracts;
-                if (remaining <= 0) await app.deleteHoldingById(existing.id);
-                else await app.updateHoldingById(existing.id, { shares: remaining });
-              }
-            }
-          }}
-          onSkip={() => setOptionPrompt(null)}
-        />
-      )}
     </SafeAreaView>
     </KeyboardAvoidingView>
   );
@@ -323,13 +311,38 @@ function EmptyState({ icon, text, hint }) {
 }
 
 // ============================================================
-function TradeRow({ trade, onDelete, onUpdate, onRequestFeedback, defaultMaster }) {
+function TradeRow({ trade, onDelete, onUpdate, onExecute, onRequestFeedback, defaultMaster }) {
   const nav = useNavigation();
   const [expanded, setExpanded] = useState(false);
   const [confirm, setConfirm] = useState(false);
   const [editing, setEditing] = useState(false);
+  const [executing, setExecuting] = useState(false);
   const [draftReason, setDraftReason] = useState(trade.reason);
   const [draftEmotion, setDraftEmotion] = useState(trade.emotion);
+
+  const isExecutable = (trade.action === "buy" || trade.action === "sell" ||
+    trade.action === "buy_option" || trade.action === "sell_option") &&
+    !trade.executed && !!trade.quantity;
+
+  const handleExecute = async () => {
+    setExecuting(true);
+    try { await onExecute(trade); } finally { setExecuting(false); }
+  };
+
+  const quantitySummary = (() => {
+    if (!trade.quantity) return null;
+    if (trade.action === "buy" || trade.action === "sell") {
+      const parts = [`${trade.quantity} 股`];
+      if (trade.action === "buy" && trade.entryPrice) parts.push(`@ ${trade.entryPrice}`);
+      if (trade.currency) parts.push(trade.currency);
+      return parts.join(" · ");
+    }
+    if (trade.action === "buy_option" || trade.action === "sell_option") {
+      const typeLabel = trade.optionType === "call" ? "Call" : trade.optionType === "put" ? "Put" : "";
+      return [`${trade.quantity} 张`, typeLabel, trade.strike ? `行权价 $${trade.strike}` : null, trade.expiry ? `到期 ${trade.expiry}` : null].filter(Boolean).join(" · ");
+    }
+    return null;
+  })();
 
   const handleContinueInMentor = async (masterId, feedbackText) => {
     const master = getMaster(masterId);
@@ -359,6 +372,17 @@ function TradeRow({ trade, onDelete, onUpdate, onRequestFeedback, defaultMaster 
         <TSerif style={{ marginTop: 8, marginLeft: 80, fontSize: 14, lineHeight: 22, color: colors.inkSoft }}>
           {trade.reason}
         </TSerif>
+        {quantitySummary && (
+          <View style={{ marginTop: 4, marginLeft: 80, flexDirection: "row", alignItems: "center", gap: 6 }}>
+            <TMono style={{ fontSize: 10, color: colors.inkMuted }}>{quantitySummary}</TMono>
+            {trade.executed ? (
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 3 }}>
+                <Check size={9} color={colors.good} strokeWidth={3} />
+                <TMono style={{ fontSize: 10, color: colors.good }}>已执行</TMono>
+              </View>
+            ) : null}
+          </View>
+        )}
         {hasFeedback && !expanded && (
           <View style={{ marginTop: 6, marginLeft: 80, flexDirection: "row", alignItems: "center", gap: 6 }}>
             <Quote size={9} color={colors.accent} />
@@ -373,6 +397,25 @@ function TradeRow({ trade, onDelete, onUpdate, onRequestFeedback, defaultMaster 
           </View>
         )}
       </Pressable>
+
+      {isExecutable && !expanded && (
+        <Pressable
+          onPress={handleExecute}
+          disabled={executing}
+          style={{
+            marginTop: 8, marginLeft: 80, alignSelf: "flex-start",
+            flexDirection: "row", alignItems: "center", gap: 6,
+            paddingHorizontal: 12, paddingVertical: 6,
+            backgroundColor: colors.accent,
+            opacity: executing ? 0.5 : 1,
+          }}
+        >
+          {executing ? <ActivityIndicator size="small" color={colors.ink} /> : <Check size={11} color={colors.ink} strokeWidth={3} />}
+          <TMono style={{ fontSize: 10, color: colors.ink, fontWeight: "600" }}>
+            {executing ? "执行中…" : "执行 EXECUTE"}
+          </TMono>
+        </Pressable>
+      )}
 
       {expanded && (
         <View style={{ marginTop: 12, marginLeft: 80, paddingTop: 12, borderTopWidth: 1, borderTopColor: colors.dividerSoft }}>
@@ -435,7 +478,24 @@ function TradeRow({ trade, onDelete, onUpdate, onRequestFeedback, defaultMaster 
             />
           )}
 
-          <View style={{ marginTop: 12, flexDirection: "row", gap: 16, alignItems: "center" }}>
+          <View style={{ marginTop: 12, flexDirection: "row", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
+            {!editing && isExecutable && (
+              <Pressable
+                onPress={handleExecute}
+                disabled={executing}
+                style={{
+                  flexDirection: "row", alignItems: "center", gap: 6,
+                  paddingHorizontal: 10, paddingVertical: 5,
+                  backgroundColor: colors.accent,
+                  opacity: executing ? 0.5 : 1,
+                }}
+              >
+                {executing ? <ActivityIndicator size="small" color={colors.ink} /> : <Check size={10} color={colors.ink} strokeWidth={3} />}
+                <TMono style={{ fontSize: 10, color: colors.ink, fontWeight: "600" }}>
+                  {executing ? "执行中…" : "执行 EXECUTE"}
+                </TMono>
+              </Pressable>
+            )}
             {!editing && (
               <Pressable onPress={() => { setEditing(true); setConfirm(false); }}
                 style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
@@ -580,6 +640,20 @@ function TradeForm({ rules, onSave, onCancel, onSaveAsThought }) {
   const [parsing, setParsing] = useState(false);
   const [parsed, setParsed] = useState(false);
   const [error, setError] = useState("");
+  const [quantity, setQuantity] = useState("");
+  const [entryPrice, setEntryPrice] = useState("");
+  const [currency, setCurrency] = useState("USD");
+  const [optionType, setOptionType] = useState("call");
+  const [strike, setStrike] = useState("");
+  const [expiry, setExpiry] = useState(() => {
+    const d = new Date(); d.setDate(d.getDate() + 30);
+    return d.toISOString().slice(0, 10);
+  });
+  const [showExpiryPicker, setShowExpiryPicker] = useState(false);
+
+  const isStock = action === "buy" || action === "sell";
+  const isOption = action === "buy_option" || action === "sell_option";
+  const isBuy = action === "buy" || action === "buy_option";
 
   const generate = async () => {
     if (!rawInput.trim()) return;
@@ -733,6 +807,127 @@ function TradeForm({ rules, onSave, onCancel, onSaveAsThought }) {
         )}
       </Field>
 
+      {isStock && (
+        <>
+          <View style={{ flexDirection: "row", gap: 12 }}>
+            <View style={{ flex: 1 }}>
+              <Field label={action === "buy" ? "计划买入股数" : "计划卖出股数"}>
+                <PaperInput
+                  value={quantity} onChangeText={setQuantity}
+                  placeholder="0" keyboardType="decimal-pad"
+                  style={{ fontFamily: fonts.mono, fontSize: 16 }}
+                />
+              </Field>
+            </View>
+            {action === "buy" && (
+              <View style={{ flex: 1 }}>
+                <Field label="目标买入价">
+                  <PaperInput
+                    value={entryPrice} onChangeText={setEntryPrice}
+                    placeholder="0.00" keyboardType="decimal-pad"
+                    style={{ fontFamily: fonts.mono, fontSize: 16 }}
+                  />
+                </Field>
+              </View>
+            )}
+          </View>
+          <Field label="货币 · CURRENCY">
+            <View style={{ flexDirection: "row", gap: 6 }}>
+              {CURRENCIES.map((c) => (
+                <Pressable key={c} onPress={() => setCurrency(c)}
+                  style={{ paddingHorizontal: 10, paddingVertical: 6,
+                    backgroundColor: currency === c ? colors.ink : "transparent",
+                    borderWidth: 1, borderColor: currency === c ? colors.ink : colors.divider }}>
+                  <TMono style={{ fontSize: 11, color: currency === c ? colors.bg : colors.inkMuted }}>{c}</TMono>
+                </Pressable>
+              ))}
+            </View>
+          </Field>
+        </>
+      )}
+
+      {isOption && (
+        <>
+          <Field label="期权类型 · OPTION TYPE">
+            <View style={{ flexDirection: "row", gap: 8 }}>
+              {[{ id: "call", label: "看涨 Call" }, { id: "put", label: "看跌 Put" }].map((t) => (
+                <Pressable key={t.id} onPress={() => setOptionType(t.id)}
+                  style={{ flex: 1, paddingVertical: 10, alignItems: "center",
+                    backgroundColor: optionType === t.id ? colors.ink : "transparent",
+                    borderWidth: optionType === t.id ? 0 : 1, borderColor: colors.divider }}>
+                  <TMono style={{ fontSize: 12, color: optionType === t.id ? colors.bg : colors.inkSoft }}>
+                    {t.label}
+                  </TMono>
+                </Pressable>
+              ))}
+            </View>
+          </Field>
+          <View style={{ flexDirection: "row", gap: 12 }}>
+            <View style={{ flex: 1 }}>
+              <Field label="行权价 · STRIKE">
+                <PaperInput value={strike} onChangeText={setStrike}
+                  placeholder="150.00" keyboardType="decimal-pad"
+                  style={{ fontFamily: fonts.mono, fontSize: 16 }} />
+              </Field>
+            </View>
+            <View style={{ flex: 1 }}>
+              <Field label="到期日 · EXPIRY">
+                <Pressable onPress={() => setShowExpiryPicker(true)}
+                  style={{ flexDirection: "row", alignItems: "center", gap: 8,
+                    paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: colors.divider }}>
+                  <Calendar size={13} color={colors.accent} strokeWidth={1.5} />
+                  <TMono style={{ fontSize: 14, color: colors.ink }}>{expiry}</TMono>
+                </Pressable>
+                {showExpiryPicker && (
+                  <DateTimePicker
+                    value={new Date(expiry + "T12:00:00")} mode="date"
+                    display={Platform.OS === "ios" ? "inline" : "default"}
+                    onChange={(event, selectedDate) => {
+                      if (Platform.OS === "android") setShowExpiryPicker(false);
+                      if (selectedDate && event.type !== "dismissed") {
+                        const d = selectedDate;
+                        setExpiry(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`);
+                        if (Platform.OS === "ios") setShowExpiryPicker(false);
+                      } else if (event.type === "dismissed") { setShowExpiryPicker(false); }
+                    }}
+                  />
+                )}
+              </Field>
+            </View>
+          </View>
+          <View style={{ flexDirection: "row", gap: 12 }}>
+            <View style={{ flex: 1 }}>
+              <Field label="合约数 · CONTRACTS">
+                <PaperInput value={quantity} onChangeText={setQuantity}
+                  placeholder="1" keyboardType="number-pad"
+                  style={{ fontFamily: fonts.mono, fontSize: 16 }} />
+              </Field>
+            </View>
+            {isBuy && (
+              <View style={{ flex: 1 }}>
+                <Field label="权利金/张 · PREMIUM">
+                  <PaperInput value={entryPrice} onChangeText={setEntryPrice}
+                    placeholder="3.50" keyboardType="decimal-pad"
+                    style={{ fontFamily: fonts.mono, fontSize: 16 }} />
+                </Field>
+              </View>
+            )}
+          </View>
+          <Field label="货币 · CURRENCY">
+            <View style={{ flexDirection: "row", gap: 6 }}>
+              {CURRENCIES.map((c) => (
+                <Pressable key={c} onPress={() => setCurrency(c)}
+                  style={{ paddingHorizontal: 10, paddingVertical: 6,
+                    backgroundColor: currency === c ? colors.ink : "transparent",
+                    borderWidth: 1, borderColor: currency === c ? colors.ink : colors.divider }}>
+                  <TMono style={{ fontSize: 11, color: currency === c ? colors.bg : colors.inkMuted }}>{c}</TMono>
+                </Pressable>
+              ))}
+            </View>
+          </Field>
+        </>
+      )}
+
       <Field label="REASON · 为什么">
         <PaperInput multiline value={reason} onChangeText={setReason}
           placeholder="写在交易之前。为什么是这只？为什么是现在？预期什么会发生？"
@@ -767,12 +962,23 @@ function TradeForm({ rules, onSave, onCancel, onSaveAsThought }) {
       )}
 
       <FilledButton
-        onPress={() => onSave({
-          action, stock: stock.trim(), stockName: stockName.trim() || undefined,
-          reason: reason.trim(), emotion,
-          date: new Date(date).toISOString(), rulesChecked,
-          rawInput: mode === "smart" && rawInput.trim() ? rawInput.trim() : undefined,
-        })}
+        onPress={() => {
+          const qNum = parseFloat(quantity);
+          const pNum = parseFloat(entryPrice);
+          onSave({
+            action, stock: stock.trim(), stockName: stockName.trim() || undefined,
+            reason: reason.trim(), emotion,
+            date: new Date(date).toISOString(), rulesChecked,
+            rawInput: mode === "smart" && rawInput.trim() ? rawInput.trim() : undefined,
+            quantity: isNaN(qNum) || qNum <= 0 ? undefined : qNum,
+            entryPrice: !isNaN(pNum) && pNum > 0 ? pNum : undefined,
+            currency: (isStock || isOption) ? currency : undefined,
+            optionType: isOption ? optionType : undefined,
+            strike: isOption ? (parseFloat(strike) || undefined) : undefined,
+            expiry: isOption ? expiry : undefined,
+            premium: isOption && isBuy && !isNaN(pNum) && pNum > 0 ? pNum : undefined,
+          });
+        }}
         disabled={!canSave}
         style={{ marginTop: 16, paddingVertical: 16 }}
       >
@@ -829,325 +1035,4 @@ function ThoughtForm({ onSave, onCancel }) {
     </View>
   );
 }
-
-// ============================================================
-const CURRENCIES = ["USD", "CNY", "HKD", "EUR", "JPY"];
-
-function HoldingUpdateModal({ trade, holdings, onConfirm, onSkip }) {
-  const sym = trade.stock.toUpperCase();
-  const existing = holdings.find((h) => h.symbol.toUpperCase() === sym);
-  const isBuy = trade.action === "buy";
-
-  const [shares, setShares] = useState("");
-  const [price, setPrice] = useState("");
-  const [currency, setCurrency] = useState(existing?.currency || "USD");
-  const [displayName, setDisplayName] = useState(existing?.displayName || trade.stock);
-
-  const canConfirm = shares.trim() && (isBuy ? price.trim() : true) &&
-    !isNaN(parseFloat(shares)) && parseFloat(shares) > 0 &&
-    (isBuy ? !isNaN(parseFloat(price)) && parseFloat(price) > 0 : true);
-
-  const handleConfirm = () => {
-    onConfirm({
-      shares: parseFloat(shares),
-      price: parseFloat(price) || 0,
-      currency,
-      displayName: displayName.trim() || sym,
-    });
-  };
-
-  return (
-    <Modal transparent animationType="slide" onRequestClose={onSkip}>
-      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>
-        <Pressable style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.4)" }} onPress={onSkip} />
-        <View style={{ backgroundColor: colors.bg, padding: 24, paddingBottom: 40, borderTopWidth: 1, borderColor: colors.divider }}>
-          <Kicker style={{ marginBottom: 4 }}>更新持仓 · UPDATE HOLDINGS</Kicker>
-          <TSerifBold style={{ fontSize: 18, marginBottom: 4 }}>
-            {ACTION_LABEL[trade.action] ?? trade.action} {trade.stock}
-          </TSerifBold>
-          {existing ? (
-            <TMono style={{ fontSize: 11, color: colors.inkFaint, marginBottom: 16 }}>
-              当前持仓 {existing.shares} 股 · 均价 {existing.costBasis}
-            </TMono>
-          ) : isBuy ? (
-            <TMono style={{ fontSize: 11, color: colors.inkFaint, marginBottom: 16 }}>
-              持仓中未找到 {sym}，将新建
-            </TMono>
-          ) : (
-            <TMono style={{ fontSize: 11, color: colors.bad, marginBottom: 16 }}>
-              持仓中未找到 {sym}，无法更新
-            </TMono>
-          )}
-
-          {(!existing && isBuy) && (
-            <Field label="显示名称">
-              <PaperInput value={displayName} onChangeText={setDisplayName} placeholder={sym} />
-            </Field>
-          )}
-
-          <View style={{ flexDirection: "row", gap: 12 }}>
-            <View style={{ flex: 1 }}>
-              <Field label={isBuy ? "买入股数" : "卖出股数"}>
-                <PaperInput
-                  value={shares} onChangeText={setShares}
-                  placeholder="0"
-                  keyboardType="decimal-pad"
-                  style={{ fontFamily: fonts.mono, fontSize: 16 }}
-                />
-              </Field>
-            </View>
-            {isBuy && (
-              <View style={{ flex: 1 }}>
-                <Field label="成交价">
-                  <PaperInput
-                    value={price} onChangeText={setPrice}
-                    placeholder="0.00"
-                    keyboardType="decimal-pad"
-                    style={{ fontFamily: fonts.mono, fontSize: 16 }}
-                  />
-                </Field>
-              </View>
-            )}
-          </View>
-
-          {(!existing || isBuy) && (
-            <Field label="货币">
-              <View style={{ flexDirection: "row", gap: 6 }}>
-                {CURRENCIES.map((c) => (
-                  <Pressable key={c} onPress={() => setCurrency(c)}
-                    style={{ paddingHorizontal: 10, paddingVertical: 6,
-                      backgroundColor: currency === c ? colors.ink : "transparent",
-                      borderWidth: 1, borderColor: currency === c ? colors.ink : colors.divider }}>
-                    <TMono style={{ fontSize: 11, color: currency === c ? colors.bg : colors.inkMuted }}>{c}</TMono>
-                  </Pressable>
-                ))}
-              </View>
-            </Field>
-          )}
-
-          <View style={{ flexDirection: "row", gap: 10, marginTop: 8 }}>
-            <OutlineButton onPress={onSkip} style={{ flex: 1 }}>
-              跳过
-            </OutlineButton>
-            <FilledButton
-              onPress={handleConfirm}
-              disabled={!canConfirm || (!existing && !isBuy)}
-              style={{ flex: 2 }}
-            >
-              <Check size={14} color={colors.bg} />
-              <TSerifBold style={{ color: colors.bg, fontSize: 14 }}>确认更新持仓</TSerifBold>
-            </FilledButton>
-          </View>
-        </View>
-      </KeyboardAvoidingView>
-    </Modal>
-  );
-}
-
-// ============================================================
-function OptionUpdateModal({ trade, holdings, onConfirm, onSkip }) {
-  const underlying = trade.stock.toUpperCase();
-  const isBuy = trade.action === "buy_option";
-
-  const [optionType, setOptionType] = useState("call");
-  const [strike, setStrike] = useState("");
-  const [expiry, setExpiry] = useState(() => {
-    // default to ~30 days out
-    const d = new Date();
-    d.setDate(d.getDate() + 30);
-    return d.toISOString().slice(0, 10);
-  });
-  const [showExpiryPicker, setShowExpiryPicker] = useState(false);
-  const [premium, setPremium] = useState("");
-  const [contracts, setContracts] = useState("");
-  const [currency, setCurrency] = useState("USD");
-
-  // For sell_option: list of existing option holdings on this underlying
-  const existingOptions = holdings.filter(
-    (h) => h.symbol.toUpperCase() === underlying && h.notes?.startsWith("期权类型:")
-  );
-
-  const displayName = strike
-    ? `${underlying} ${optionType === "call" ? "Call" : "Put"} $${strike} exp.${expiry}`
-    : "";
-
-  const canConfirm =
-    strike.trim() && !isNaN(parseFloat(strike)) && parseFloat(strike) > 0 &&
-    contracts.trim() && !isNaN(parseInt(contracts)) && parseInt(contracts) > 0 &&
-    expiry &&
-    (isBuy ? premium.trim() && !isNaN(parseFloat(premium)) && parseFloat(premium) > 0 : true);
-
-  const handleConfirm = () => {
-    const typeLabel = optionType === "call" ? "看涨Call" : "看跌Put";
-    onConfirm({
-      optionType,
-      strike: parseFloat(strike),
-      expiry,
-      premium: parseFloat(premium) || 0,
-      contracts: parseInt(contracts),
-      currency,
-      displayName,
-      notes: `期权类型:${typeLabel}|行权价:${strike}|到期日:${expiry}`,
-    });
-  };
-
-  return (
-    <Modal transparent animationType="slide" onRequestClose={onSkip}>
-      {/* absoluteFill backdrop so it doesn't compete for layout space */}
-      <Pressable
-        style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(0,0,0,0.4)" }}
-        onPress={onSkip}
-      />
-      <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
-        style={{ flex: 1, justifyContent: "flex-end" }}
-      >
-        {/* flexShrink: 1 bounds the ScrollView height so it can actually scroll */}
-        <ScrollView
-          style={{ backgroundColor: colors.bg, borderTopWidth: 1, borderColor: colors.divider, flexShrink: 1 }}
-          contentContainerStyle={{ padding: 24, paddingBottom: 48 }}
-          keyboardShouldPersistTaps="handled"
-        >
-          <Kicker style={{ marginBottom: 4 }}>
-            {isBuy ? "记录期权买入 · LOG OPTION BUY" : "记录期权卖出 · LOG OPTION SELL"}
-          </Kicker>
-          <TSerifBold style={{ fontSize: 18, marginBottom: 2 }}>
-            {ACTION_LABEL[trade.action]} {underlying}
-          </TSerifBold>
-          <TSerifItalic style={{ fontSize: 12, marginBottom: 16 }}>
-            {isBuy ? "新建一条期权持仓记录" : "平仓或减仓匹配的期权持仓"}
-          </TSerifItalic>
-
-          {/* Call / Put */}
-          <Field label="期权类型 · OPTION TYPE">
-            <View style={{ flexDirection: "row", gap: 8 }}>
-              {[{ id: "call", label: "看涨 Call" }, { id: "put", label: "看跌 Put" }].map((t) => (
-                <Pressable key={t.id} onPress={() => setOptionType(t.id)}
-                  style={{ flex: 1, paddingVertical: 10, alignItems: "center",
-                    backgroundColor: optionType === t.id ? colors.ink : "transparent",
-                    borderWidth: optionType === t.id ? 0 : 1, borderColor: colors.divider }}>
-                  <TMono style={{ fontSize: 12, color: optionType === t.id ? colors.bg : colors.inkSoft }}>
-                    {t.label}
-                  </TMono>
-                </Pressable>
-              ))}
-            </View>
-          </Field>
-
-          {/* Strike + Expiry row */}
-          <View style={{ flexDirection: "row", gap: 12 }}>
-            <View style={{ flex: 1 }}>
-              <Field label="行权价 · STRIKE">
-                <PaperInput
-                  value={strike} onChangeText={setStrike}
-                  placeholder="150.00"
-                  keyboardType="decimal-pad"
-                  style={{ fontFamily: fonts.mono, fontSize: 16 }}
-                />
-              </Field>
-            </View>
-            <View style={{ flex: 1 }}>
-              <Field label="到期日 · EXPIRY">
-                <Pressable
-                  onPress={() => setShowExpiryPicker(true)}
-                  style={{ flexDirection: "row", alignItems: "center", gap: 8,
-                    paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: colors.divider }}>
-                  <Calendar size={13} color={colors.accent} strokeWidth={1.5} />
-                  <TMono style={{ fontSize: 14, color: colors.ink }}>{expiry}</TMono>
-                </Pressable>
-                {showExpiryPicker && (
-                  <DateTimePicker
-                    value={new Date(expiry + "T12:00:00")}
-                    mode="date"
-                    display={Platform.OS === "ios" ? "inline" : "default"}
-                    onChange={(event, selectedDate) => {
-                      if (Platform.OS === "android") setShowExpiryPicker(false);
-                      if (selectedDate && event.type !== "dismissed") {
-                        const d = selectedDate;
-                        setExpiry(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`);
-                        if (Platform.OS === "ios") setShowExpiryPicker(false);
-                      } else if (event.type === "dismissed") {
-                        setShowExpiryPicker(false);
-                      }
-                    }}
-                  />
-                )}
-              </Field>
-            </View>
-          </View>
-
-          {/* Contracts + Premium row */}
-          <View style={{ flexDirection: "row", gap: 12 }}>
-            <View style={{ flex: 1 }}>
-              <Field label="合约数 · CONTRACTS">
-                <PaperInput
-                  value={contracts} onChangeText={setContracts}
-                  placeholder="1"
-                  keyboardType="number-pad"
-                  style={{ fontFamily: fonts.mono, fontSize: 16 }}
-                />
-              </Field>
-            </View>
-            {isBuy && (
-              <View style={{ flex: 1 }}>
-                <Field label="权利金/张 · PREMIUM">
-                  <PaperInput
-                    value={premium} onChangeText={setPremium}
-                    placeholder="3.50"
-                    keyboardType="decimal-pad"
-                    style={{ fontFamily: fonts.mono, fontSize: 16 }}
-                  />
-                </Field>
-              </View>
-            )}
-          </View>
-
-          {/* Currency */}
-          <Field label="货币 · CURRENCY">
-            <View style={{ flexDirection: "row", gap: 6 }}>
-              {CURRENCIES.map((c) => (
-                <Pressable key={c} onPress={() => setCurrency(c)}
-                  style={{ paddingHorizontal: 10, paddingVertical: 6,
-                    backgroundColor: currency === c ? colors.ink : "transparent",
-                    borderWidth: 1, borderColor: currency === c ? colors.ink : colors.divider }}>
-                  <TMono style={{ fontSize: 11, color: currency === c ? colors.bg : colors.inkMuted }}>{c}</TMono>
-                </Pressable>
-              ))}
-            </View>
-          </Field>
-
-          {/* Preview label */}
-          {displayName ? (
-            <View style={{ marginTop: 4, marginBottom: 8, padding: 10,
-              backgroundColor: colors.bgElev, borderWidth: 1, borderColor: colors.dividerSoft }}>
-              <TMono style={{ fontSize: 10, color: colors.inkMuted, marginBottom: 2 }}>持仓标签预览</TMono>
-              <TSerif style={{ fontSize: 14 }}>{displayName}</TSerif>
-            </View>
-          ) : null}
-
-          {/* Sell: show matching existing option positions */}
-          {!isBuy && existingOptions.length > 0 && (
-            <View style={{ marginBottom: 12 }}>
-              <Kicker style={{ marginBottom: 6 }}>匹配期权持仓</Kicker>
-              {existingOptions.map((h) => (
-                <TMono key={h.id} style={{ fontSize: 11, color: colors.inkMuted, marginBottom: 2 }}>
-                  {h.displayName} · {h.shares} 张
-                </TMono>
-              ))}
-            </View>
-          )}
-
-          <View style={{ flexDirection: "row", gap: 10, marginTop: 8 }}>
-            <OutlineButton onPress={onSkip} style={{ flex: 1 }}>跳过</OutlineButton>
-            <FilledButton onPress={handleConfirm} disabled={!canConfirm} style={{ flex: 2 }}>
-              <Check size={14} color={colors.bg} />
-              <TSerifBold style={{ color: colors.bg, fontSize: 14 }}>
-                {isBuy ? "记录期权买入" : "记录期权平仓"}
-              </TSerifBold>
-            </FilledButton>
-          </View>
-        </ScrollView>
-      </KeyboardAvoidingView>
-    </Modal>
-  );
-}
+
