@@ -1,6 +1,6 @@
 // App.js — root entry with navigation, font loading, global state
-import React, { useEffect, useState, useCallback, useMemo } from "react";
-import { View, Text, ActivityIndicator, ScrollView } from "react-native";
+import React, { useEffect, useRef, useState, useCallback, useMemo } from "react";
+import { AppState, View, Text, ActivityIndicator, ScrollView } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
@@ -25,7 +25,10 @@ import { AppCtx, useApp } from "./src/context";
 import { colors, fonts } from "./src/theme";
 import { DEFAULT_RULES } from "./src/constants";
 import * as db from "./src/db";
-import { getApiKey } from "./src/api";
+import { getApiKey, callFlash } from "./src/api";
+import { initHotCache, updateHotCache, setDNA, getDNA, getHotCache } from "./src/memory/HotCache";
+import { memoryManager } from "./src/memory/MemoryManager";
+import { dreamJob } from "./src/memory/background/DreamJob";
 
 import HomeScreen from "./src/screens/Home";
 import LogScreen from "./src/screens/Log";
@@ -124,6 +127,34 @@ class AppErrorBoundary extends React.Component {
   }
 }
 
+// Runs DNA distillation + dream consolidation when enough data is available.
+// Module-level so it doesn't cause re-renders and can be called from AppState listener.
+async function _runMemoryJobs(trades, weeklyNotes, monthlyReviews, apiKey) {
+  if (!apiKey || !trades || trades.length < 5) return;
+
+  // DNA distillation — only if expired
+  await memoryManager.triggerDNA({
+    trades,
+    weeklyNotes,
+    monthlyReviews,
+    callFlash,
+  });
+
+  // Dream job — only if enough new entries accumulated
+  const shouldDream = await dreamJob.shouldRun();
+  if (shouldDream) {
+    const { philosophy, rules } = getHotCache();
+    await dreamJob.run({
+      philosophy,
+      rules,
+      trades,
+      weeklyNotes,
+      monthlyReviews,
+      callFlash,
+    });
+  }
+}
+
 // ─── AppContent ───────────────────────────────────────────────────────────────
 // All hooks and state live here, inside RootErrorBoundary.
 // Previously this was App() itself — moving it one level down means
@@ -151,45 +182,99 @@ function AppContent() {
   const [prices, setPrices] = useState({ data: {}, lastUpdated: null });
   const [apiKeyPresent, setApiKeyPresent] = useState(false);
 
-  // Bootstrap: load everything from SQLite
+  // Bootstrap — split into fast path (renders Home) + lazy path (loads everything else).
   useEffect(() => {
     (async () => {
       try {
-        await db.getDb(); // triggers schema init
-        const [p, r, dm, tr, th, hd, wn, mr, pc, key] = await Promise.all([
+        await db.getDb(); // schema init: creates FTS5 tables, triggers, semantic_memory
+
+        // ── Fast path: only kv + API key + cached DNA ──────────────────────
+        const [p, r, dm, key, dnaRow] = await Promise.all([
           db.kvGet("philosophy", ""),
           db.kvGet("rules", DEFAULT_RULES),
           db.kvGet("defaultMaster", "default"),
+          getApiKey(),
+          db.getSemanticMemory("investor_dna"),
+        ]);
+
+        setPhilosophy(p); setRules(r); setDefaultMaster(dm);
+        setApiKeyPresent(!!key);
+
+        // Populate HotCache for sync reads throughout the session
+        initHotCache({ philosophy: p, rules: r, defaultMaster: dm });
+        if (dnaRow?.structured_data) {
+          try { setDNA(JSON.parse(dnaRow.structured_data)); } catch {}
+        }
+      } catch (err) {
+        console.warn("Bootstrap fast-path error:", err);
+      } finally {
+        setBootstrapped(true); // Home screen renders here (~100ms)
+        try { await SplashScreen.hideAsync(); } catch {}
+      }
+
+      // ── Lazy path: load remaining data after UI is visible ────────────────
+      try {
+        const [tr, th, hd, wn, mr, pc] = await Promise.all([
           db.listTrades(),
           db.listThoughts(),
           db.listHoldings(),
           db.listWeeklyNotes(),
           db.listMonthlyReviews(),
           db.getPricesCache(),
-          getApiKey(),
         ]);
-        setPhilosophy(p); setRules(r); setDefaultMaster(dm);
         setTrades(tr); setThoughts(th); setHoldings(hd);
-        setWeeklyNotes(wn); setMonthlyReviews(mr);
-        setPrices(pc); setApiKeyPresent(!!key);
+        setWeeklyNotes(wn); setMonthlyReviews(mr); setPrices(pc);
+
+        // Backfill FTS5 for pre-existing entries (no-op if already done)
+        db.backfillFts().catch(() => {});
+
+        const key = await getApiKey();
+        if (key) {
+          // Trigger DNA distillation and dream job with loaded data
+          _runMemoryJobs(tr, wn, mr, key).catch(() => {});
+        }
       } catch (err) {
-        console.warn("Bootstrap error:", err);
-      } finally {
-        setBootstrapped(true);
-        try { await SplashScreen.hideAsync(); } catch {}
+        console.warn("Bootstrap lazy-path error:", err);
       }
     })();
   }, []);
 
+  // ---- memory jobs (DNA distillation + dream consolidation) ----
+  // Stable ref so AppState listener always sees current state without re-registering
+  const latestStateRef = useRef({});
+  useEffect(() => {
+    latestStateRef.current = { trades, weeklyNotes, monthlyReviews, philosophy, rules, apiKeyPresent };
+  });
+
+  // Run on foreground resume — silently, non-blocking
+  useEffect(() => {
+    if (!bootstrapped) return;
+    const sub = AppState.addEventListener("change", (nextState) => {
+      if (nextState !== "active") return;
+      const s = latestStateRef.current;
+      if (!s.apiKeyPresent) return;
+      getApiKey().then(key => {
+        if (key) _runMemoryJobs(s.trades, s.weeklyNotes, s.monthlyReviews, key).catch(() => {});
+      }).catch(() => {});
+    });
+    return () => sub.remove();
+  }, [bootstrapped]);
+
   // ---- action handlers ----
   const savePhilosophy = useCallback(async (v) => {
-    setPhilosophy(v); await db.kvSet("philosophy", v);
+    setPhilosophy(v);
+    await db.kvSet("philosophy", v);
+    updateHotCache("philosophy", v);
   }, []);
   const saveRules = useCallback(async (v) => {
-    setRules(v); await db.kvSet("rules", v);
+    setRules(v);
+    await db.kvSet("rules", v);
+    updateHotCache("rules", v);
   }, []);
   const saveDefaultMaster = useCallback(async (v) => {
-    setDefaultMaster(v); await db.kvSet("defaultMaster", v);
+    setDefaultMaster(v);
+    await db.kvSet("defaultMaster", v);
+    updateHotCache("defaultMaster", v);
   }, []);
   const saveWeekly = useCallback(async (key, text) => {
     await db.saveWeeklyNote(key, text);

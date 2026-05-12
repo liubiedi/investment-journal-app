@@ -26,6 +26,7 @@ import JSZip from "jszip";
 import * as db from "./db";
 import { getMaster } from "./constants";
 import { fmtDate, monthKey, monthLabel, weekKey, weekRange } from "./utils";
+import { InvestorDNA } from "./memory/entities/InvestorDNA";
 
 // ============================================================
 // Helpers
@@ -323,6 +324,10 @@ function buildIndexFile(stats) {
     ? `- [[_Strategy/StrategyReport-${new Date().toISOString().slice(0, 10)}]] — AI 生成的投资策略画像 ⭐`
     : `- \`_Strategy/\` — 生成策略报告后会出现在这里`;
 
+  const memoryStatus = stats.hasDNA
+    ? `- [[_Memory/InvestorDNA]] — 行为画像 ⭐ (${stats.dreamSessionCount} dream sessions)`
+    : `- \`_Memory/\` — 积累更多日记后自动生成`;
+
   const lines = [
     fm({ type: "index", generatedAt: new Date().toISOString(), tags: ["index"] }),
     "",
@@ -337,32 +342,192 @@ function buildIndexFile(stats) {
     `- 周记 Weekly: **${stats.weeklyCount}**`,
     `- 月评 Monthly: **${stats.monthlyCount}**`,
     `- 持仓 Holdings: **${stats.holdingsCount}**`,
+    `- 股票主页 Stocks: **${stats.stockCount || 0}**`,
+    `- 梦境记录 Dream Sessions: **${stats.dreamSessionCount || 0}**`,
     "",
     "## 文件夹 · Folders",
     "",
     "- [[_Foundations/Philosophy]] — 投资信条",
     "- [[_Foundations/Rules]] — 规则",
     strategyLink,
-    "- `Trades/` — 每笔交易一个文件，文件名 `YYYY-MM-DD ACTION TICKER`",
+    memoryStatus,
+    "- [[_Memory/DreamSessions]] — 记忆整合记录",
+    "- `Stocks/` — 每个交易过的股票一个主页（含历史 + 导师洞见）",
+    "- `Trades/` — 每笔交易一个文件",
     "- `Thoughts/` — 每条心念一个文件",
-    "- `Weekly/` — 每周记一个文件，按 ISO 周编号",
-    "- `Monthly/` — 每月一个文件，含月评 bullets + 各导师月度点评",
+    "- `Weekly/` — 周记",
+    "- `Monthly/` — 月评",
     "- [[Holdings/Snapshot]] — 当前持仓快照",
     "",
     "## 给 AI 的提示 · For AI",
     "",
-    "If you're an AI tasked with summarizing this user's investment style, start with:",
+    "If you're an AI tasked with understanding this investor, read in this order:",
     "",
-    "1. `_Strategy/` — the pre-generated strategy profile (if present) is your best starting point",
-    "2. `_Foundations/Philosophy.md` + `_Foundations/Rules.md` — their stated worldview",
-    "3. `Monthly/` files in chronological order — their reflective synthesis",
-    "4. The `emotion` front-matter pattern across `Trades/` — do they trade calm or anxious?",
-    "5. The gap between `_Foundations/Rules.md` and what actually happened in `Trades/`",
+    "1. [[_Memory/InvestorDNA]] — the distilled behavioral profile (start here)",
+    "2. [[_Memory/DreamSessions]] — recent pattern consolidation",
+    "3. `Stocks/` — per-ticker history with mentor insights",
+    "4. `_Strategy/` — comprehensive strategy report (if present)",
+    "5. `Monthly/` in chronological order — reflective synthesis",
+    "6. The `emotion` front-matter across `Trades/` — anxiety patterns",
     "",
-    "The gap between aspiration (rules) and behavior (trades) is where the real strategy lives.",
+    "The gap between [[_Foundations/Rules]] and what actually happened in `Trades/` is where the real strategy lives.",
     "",
   ];
   return lines.join("\n");
+}
+
+// ============================================================
+// Memory section builders
+// ============================================================
+
+function buildInvestorDNAFile(dnaRow) {
+  const dna = dnaRow ? new InvestorDNA(dnaRow.structured_data
+    ? JSON.parse(dnaRow.structured_data)
+    : {}) : null;
+
+  const age = dnaRow
+    ? Math.floor((Date.now() - dnaRow.distilled_at) / 86400000)
+    : null;
+
+  const rulesSection = dna && (dna.rules || []).length > 0
+    ? (dna.rules).map((r, i) => {
+        const compliance = dna.ruleAudit?.[i] ? ` — *${dna.ruleAudit[i]}*` : "";
+        return `${i + 1}. ${r}${compliance}`;
+      }).join("\n")
+    : "*Rules not defined.*";
+
+  const strengthsList = (dna?.keyStrengths || []).map(s => `- ${s}`).join("\n");
+  const blindSpotsList = (dna?.keyBlindSpots || []).map(s => `- ${s}`).join("\n");
+
+  return [
+    fm({
+      type: "investor-dna",
+      tags: ["memory", "profile", "behavioral-analysis"],
+      source_entries: dnaRow?.source_entries || 0,
+      model: dnaRow?.model_id || "unknown",
+      distilled_at: dnaRow ? new Date(dnaRow.distilled_at).toISOString().slice(0, 10) : null,
+    }),
+    "",
+    "# 投资者 DNA · Investor Profile",
+    "",
+    `> Auto-distilled from ${dnaRow?.source_entries || 0} journal entries${age !== null ? ` · ${age} days ago` : ""}`,
+    "",
+    "## 投资哲学 · Philosophy",
+    "",
+    dna?.philosophy ? `> "${dna.philosophy}"` : "*Not defined.*",
+    "",
+    "## 规则 · Rules",
+    "",
+    rulesSection,
+    "",
+    "## 行为画像 · Behavioral Profile",
+    "",
+    dna?.behavioralProfile || "*Insufficient data — add more journal entries.*",
+    "",
+    "## 情绪触发器 · Emotional Triggers",
+    "",
+    dna?.emotionalTriggers || "*Insufficient data.*",
+    "",
+    "## 交易模式 · Trading Patterns",
+    "",
+    dna?.tradingPatterns || "*Insufficient data.*",
+    "",
+    ...(strengthsList ? ["## 优势 · Key Strengths", "", strengthsList, ""] : []),
+    ...(blindSpotsList ? ["## 盲点 · Known Blind Spots", "", blindSpotsList, ""] : []),
+    "---",
+    "",
+    "*This profile is rebuilt automatically as your journal grows. The more you write, the sharper it becomes.*",
+    "",
+  ].join("\n");
+}
+
+function buildDreamSessionsFile(dreamSessions) {
+  if (!dreamSessions || dreamSessions.length === 0) {
+    return [
+      fm({ type: "dream-sessions", tags: ["memory", "consolidation"] }),
+      "",
+      "# 梦境记录 · Dream Sessions",
+      "",
+      "*No dream sessions yet. Dreams run automatically after every 10 new journal entries.*",
+      "",
+    ].join("\n");
+  }
+
+  const sessionBlocks = dreamSessions.slice(0, 10).map(s => {
+    const date = new Date(s.distilled_at).toISOString().slice(0, 10);
+    const structured = s.structured_data ? JSON.parse(s.structured_data) : {};
+    const newPatterns = (structured.patternsNew || []).map(p => `  - 🆕 ${p}`).join("\n");
+    const confirmed = (structured.patternsConfirmed || []).map(p => `  - ✓ ${p}`).join("\n");
+    const entryCount = s.source_entries || "?";
+    return [
+      `## ${date} · ${entryCount} entries`,
+      "",
+      s.content || structured.dreamSummary || "*(no summary)*",
+      ...(newPatterns ? ["", "**New patterns identified:**", newPatterns] : []),
+      ...(confirmed ? ["", "**Confirmed patterns:**", confirmed] : []),
+      "",
+    ].join("\n");
+  });
+
+  return [
+    fm({
+      type: "dream-sessions",
+      tags: ["memory", "consolidation"],
+      session_count: dreamSessions.length,
+    }),
+    "",
+    "# 梦境记录 · Dream Sessions",
+    "",
+    "> Automatic memory consolidation — patterns distilled from journal entries over time.",
+    "",
+    sessionBlocks.join("\n---\n\n"),
+  ].join("\n");
+}
+
+function buildStockFile(ticker, { trades, thoughts, insights, thesis }) {
+  const tradeRows = trades.map(t => {
+    const date = yyyyMmDd(t.date);
+    const fname = `${date} ${(t.action || "").toUpperCase()} ${t.stock}`;
+    return `| [[${fname}]] | ${(t.action || "").toUpperCase()} | ${t.emotion} | ${t.reason?.slice(0, 60)} |`;
+  }).join("\n");
+
+  const insightBlocks = insights.map(i => {
+    const date = new Date(i.distilled_at).toISOString().slice(0, 10);
+    return `> [${date}] ${i.content}`;
+  }).join("\n\n");
+
+  return [
+    fm({
+      type: "stock",
+      ticker,
+      trade_count: trades.length,
+      tags: ["stock", ticker],
+      last_trade: trades[0] ? yyyyMmDd(trades[0].date) : null,
+    }),
+    "",
+    `# ${ticker}`,
+    "",
+    ...(thesis ? [
+      "## 研究结论 · Research Thesis",
+      "",
+      thesis.content,
+      "",
+    ] : []),
+    ...(insights.length > 0 ? [
+      "## 导师洞见 · Mentor Insights",
+      "",
+      insightBlocks,
+      "",
+    ] : []),
+    trades.length > 0 ? [
+      "## 交易记录 · Trade History",
+      "",
+      "| Trade | Action | Emotion | Reasoning |",
+      "|-------|--------|---------|-----------|",
+      tradeRows,
+      "",
+    ].join("\n") : "",
+  ].filter(Boolean).join("\n");
 }
 
 // ============================================================
@@ -457,7 +622,30 @@ export async function exportToObsidianVault(appData, strategyReport = null) {
   // 7. Holdings snapshot
   addFile("Holdings/Snapshot.md", buildHoldingsFile(holdings || [], prices));
 
-  // 8. Index
+  // 8. Memory — load from semantic_memory and generate dedicated files
+  const [dnaRow, dreamSessions, mentorInsights, stockTheses] = await Promise.all([
+    db.getSemanticMemory("investor_dna"),
+    db.listSemanticMemory("dream_session"),
+    db.listSemanticMemory("mentor_insight"),
+    db.listSemanticMemory("stock_thesis"),
+  ]);
+
+  addFile("_Memory/InvestorDNA.md", buildInvestorDNAFile(dnaRow));
+  addFile("_Memory/DreamSessions.md", buildDreamSessionsFile(dreamSessions));
+
+  // Per-stock pages — group trades + insights + thesis by ticker
+  const tickerSet = new Set(trades.map(t => t.stock).filter(Boolean));
+  for (const ticker of tickerSet) {
+    const stockTrades = trades.filter(t => t.stock === ticker);
+    const stockInsights = mentorInsights.filter(i => i.scope === ticker.toUpperCase());
+    const stockThesis = stockTheses.find(t => t.scope === ticker.toUpperCase()) || null;
+    addFile(
+      `Stocks/${ticker}.md`,
+      buildStockFile(ticker, { trades: stockTrades, thoughts: [], insights: stockInsights, thesis: stockThesis })
+    );
+  }
+
+  // 9. Index
   addFile("_Index.md", buildIndexFile({
     tradeCount: trades.length,
     thoughtCount: (thoughts || []).length,
@@ -465,16 +653,19 @@ export async function exportToObsidianVault(appData, strategyReport = null) {
     monthlyCount: Object.keys(monthlyReviews || {}).length,
     holdingsCount: (holdings || []).length,
     hasStrategyReport: !!strategyReport,
+    stockCount: tickerSet.size,
+    hasDNA: !!dnaRow,
+    dreamSessionCount: dreamSessions.length,
   }));
 
-  // 9. Generate zip in memory → write base64 to cache (no native module needed)
+  // 10. Generate zip in memory → write base64 to cache (no native module needed)
   const zipBase64 = await vault.generateAsync({ type: "base64" });
   const zipPath = `${FileSystem.cacheDirectory}InvestmentJournal-${stamp}.zip`;
   await FileSystem.writeAsStringAsync(zipPath, zipBase64, {
     encoding: FileSystem.EncodingType.Base64,
   });
 
-  // 10. Trigger system share sheet
+  // 11. Trigger system share sheet
   let sharedSuccessfully = false;
   if (await Sharing.isAvailableAsync()) {
     try {
