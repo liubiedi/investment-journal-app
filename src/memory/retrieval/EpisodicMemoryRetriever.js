@@ -29,7 +29,7 @@ export class EpisodicMemoryRetriever {
     const {
       limit = 10,
       daysBack = 90,
-      sourceTypes = ["trade", "thought", "weekly"],
+      sourceTypes = ["trade", "thought", "weekly", "monthly"],
     } = opts;
 
     const db = await this._getDb();
@@ -140,6 +140,21 @@ export class EpisodicMemoryRetriever {
             relevanceWeight: 1.0,
             week: w.week_key,
             text: w.text,
+            date: row.entry_date,
+          };
+        }
+        case "monthly": {
+          const m = await db.getFirstAsync(
+            "SELECT month_key, bullets FROM monthly_reviews WHERE month_key = ?",
+            [row.source_id]
+          );
+          if (!m) return null;
+          return {
+            type: "monthly",
+            bm25Score: row.bm25_score,
+            relevanceWeight: 1.0,
+            month: m.month_key,
+            bullets: JSON.parse(m.bullets || "[]"),
             date: row.entry_date,
           };
         }

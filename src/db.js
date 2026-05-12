@@ -165,6 +165,19 @@ async function initSchema(db) {
       DELETE FROM journal_fts WHERE source_id = OLD.week_key AND source_type = 'weekly';
     END;
 
+    CREATE TRIGGER IF NOT EXISTS monthly_fts_ai AFTER INSERT ON monthly_reviews BEGIN
+      INSERT INTO journal_fts(content, ticker_mentions, source_type, source_id, entry_date, emotion)
+      VALUES(NEW.bullets, '', 'monthly', NEW.month_key, NEW.month_key || '-01', '');
+    END;
+    CREATE TRIGGER IF NOT EXISTS monthly_fts_au AFTER UPDATE OF bullets ON monthly_reviews BEGIN
+      DELETE FROM journal_fts WHERE source_id = OLD.month_key AND source_type = 'monthly';
+      INSERT INTO journal_fts(content, ticker_mentions, source_type, source_id, entry_date, emotion)
+      VALUES(NEW.bullets, '', 'monthly', NEW.month_key, NEW.month_key || '-01', '');
+    END;
+    CREATE TRIGGER IF NOT EXISTS monthly_fts_ad AFTER DELETE ON monthly_reviews BEGIN
+      DELETE FROM journal_fts WHERE source_id = OLD.month_key AND source_type = 'monthly';
+    END;
+
     CREATE TABLE IF NOT EXISTS semantic_memory (
       id TEXT PRIMARY KEY,
       memory_type TEXT NOT NULL,
@@ -187,6 +200,21 @@ async function initSchema(db) {
   // Memory architecture migrations
   try { await db.runAsync("ALTER TABLE trades ADD COLUMN relevance_weight REAL NOT NULL DEFAULT 1.0"); } catch {}
   try { await db.runAsync("ALTER TABLE thoughts ADD COLUMN relevance_weight REAL NOT NULL DEFAULT 1.0"); } catch {}
+  // Backfill monthly reviews into journal_fts for existing DBs (idempotent via DELETE+INSERT).
+  try {
+    const months = await db.getAllAsync("SELECT month_key, bullets FROM monthly_reviews");
+    if (months.length > 0) {
+      await db.withTransactionAsync(async () => {
+        for (const m of months) {
+          await db.runAsync("DELETE FROM journal_fts WHERE source_id = ? AND source_type = 'monthly'", [m.month_key]);
+          await db.runAsync(
+            "INSERT INTO journal_fts(content, ticker_mentions, source_type, source_id, entry_date, emotion) VALUES(?,?,?,?,?,?)",
+            [m.bullets, '', 'monthly', m.month_key, m.month_key + '-01', '']
+          );
+        }
+      });
+    }
+  } catch {}
 }
 
 const newId = (prefix) => `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -265,15 +293,19 @@ function rowToTrade(r) {
 }
 
 // ---------- thoughts ----------
-export async function listThoughts() {
-  const db = await getDb();
-  const rows = await db.getAllAsync("SELECT * FROM thoughts ORDER BY date DESC");
-  return rows.map(r => ({
+function rowToThought(r) {
+  return {
     id: r.id, date: r.date, content: r.content,
     emotion: r.emotion || undefined,
     rawInput: r.raw_input || undefined,
     feedback: safeJson(r.feedback, []),
-  }));
+  };
+}
+
+export async function listThoughts() {
+  const db = await getDb();
+  const rows = await db.getAllAsync("SELECT * FROM thoughts ORDER BY date DESC");
+  return rows.map(rowToThought);
 }
 
 export async function addThought(content, rawInput, emotion) {
@@ -666,8 +698,10 @@ export async function getRecentInsights(scope, limit = 3) {
 
 export async function countEntriesSince(timestamp) {
   const db = await getDb();
-  const t = await db.getFirstAsync("SELECT count(*) as n FROM trades WHERE created_at > ?", [timestamp]);
-  const th = await db.getFirstAsync("SELECT count(*) as n FROM thoughts WHERE created_at > ?", [timestamp]);
+  const [t, th] = await Promise.all([
+    db.getFirstAsync("SELECT count(*) as n FROM trades WHERE created_at > ?", [timestamp]),
+    db.getFirstAsync("SELECT count(*) as n FROM thoughts WHERE created_at > ?", [timestamp]),
+  ]);
   return (t?.n || 0) + (th?.n || 0);
 }
 
@@ -680,36 +714,25 @@ export async function listTradesSince(timestamp) {
 export async function listThoughtsSince(timestamp) {
   const db = await getDb();
   const rows = await db.getAllAsync("SELECT * FROM thoughts WHERE created_at > ? ORDER BY date DESC", [timestamp]);
-  return rows.map(r => ({
-    id: r.id, date: r.date, content: r.content,
-    emotion: r.emotion || undefined,
-    feedback: safeJson(r.feedback, []),
-  }));
+  return rows.map(rowToThought);
 }
 
 // Decay relevance weight for entries older than 30 days (5% per dream cycle, floor 0.1)
 export async function applyRelevanceDecay() {
   const db = await getDb();
   const cutoff = Date.now() - 30 * 86400000;
-  await db.runAsync(
-    "UPDATE trades SET relevance_weight = MAX(0.1, relevance_weight * 0.95) WHERE created_at < ?",
-    [cutoff]
-  );
-  await db.runAsync(
-    "UPDATE thoughts SET relevance_weight = MAX(0.1, relevance_weight * 0.95) WHERE created_at < ?",
-    [cutoff]
-  );
+  await Promise.all([
+    db.runAsync("UPDATE trades SET relevance_weight = MAX(0.1, relevance_weight * 0.95) WHERE created_at < ?", [cutoff]),
+    db.runAsync("UPDATE thoughts SET relevance_weight = MAX(0.1, relevance_weight * 0.95) WHERE created_at < ?", [cutoff]),
+  ]);
 }
 
 // Reinforce an entry identified as significant by the dream job (+0.2, cap 2.0)
 export async function reinforceEntry(entryId) {
   const db = await getDb();
+  const table = entryId.startsWith("trade_") ? "trades" : "thoughts";
   await db.runAsync(
-    "UPDATE trades SET relevance_weight = MIN(2.0, relevance_weight + 0.2) WHERE id = ?",
-    [entryId]
-  );
-  await db.runAsync(
-    "UPDATE thoughts SET relevance_weight = MIN(2.0, relevance_weight + 0.2) WHERE id = ?",
+    `UPDATE ${table} SET relevance_weight = MIN(2.0, relevance_weight + 0.2) WHERE id = ?`,
     [entryId]
   );
 }
