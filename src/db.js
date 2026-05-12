@@ -114,12 +114,107 @@ async function initSchema(db) {
       data TEXT NOT NULL
     );
   `);
+  // FTS5 full-text search + semantic memory tables (separate exec batch)
+  await db.execAsync(`
+    CREATE VIRTUAL TABLE IF NOT EXISTS journal_fts USING fts5(
+      content,
+      ticker_mentions,
+      source_type,
+      source_id,
+      entry_date,
+      emotion,
+      tokenize = 'porter unicode61'
+    );
+
+    CREATE TRIGGER IF NOT EXISTS trades_fts_ai AFTER INSERT ON trades BEGIN
+      INSERT INTO journal_fts(content, ticker_mentions, source_type, source_id, entry_date, emotion)
+      VALUES(NEW.reason || ' ' || NEW.action || ' ' || NEW.stock, NEW.stock, 'trade', NEW.id, NEW.date, NEW.emotion);
+    END;
+    CREATE TRIGGER IF NOT EXISTS trades_fts_au AFTER UPDATE OF reason, stock, action, emotion ON trades BEGIN
+      DELETE FROM journal_fts WHERE source_id = OLD.id AND source_type = 'trade';
+      INSERT INTO journal_fts(content, ticker_mentions, source_type, source_id, entry_date, emotion)
+      VALUES(NEW.reason || ' ' || NEW.action || ' ' || NEW.stock, NEW.stock, 'trade', NEW.id, NEW.date, NEW.emotion);
+    END;
+    CREATE TRIGGER IF NOT EXISTS trades_fts_ad AFTER DELETE ON trades BEGIN
+      DELETE FROM journal_fts WHERE source_id = OLD.id AND source_type = 'trade';
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS thoughts_fts_ai AFTER INSERT ON thoughts BEGIN
+      INSERT INTO journal_fts(content, ticker_mentions, source_type, source_id, entry_date, emotion)
+      VALUES(NEW.content, '', 'thought', NEW.id, NEW.date, COALESCE(NEW.emotion, ''));
+    END;
+    CREATE TRIGGER IF NOT EXISTS thoughts_fts_au AFTER UPDATE OF content, emotion ON thoughts BEGIN
+      DELETE FROM journal_fts WHERE source_id = OLD.id AND source_type = 'thought';
+      INSERT INTO journal_fts(content, ticker_mentions, source_type, source_id, entry_date, emotion)
+      VALUES(NEW.content, '', 'thought', NEW.id, NEW.date, COALESCE(NEW.emotion, ''));
+    END;
+    CREATE TRIGGER IF NOT EXISTS thoughts_fts_ad AFTER DELETE ON thoughts BEGIN
+      DELETE FROM journal_fts WHERE source_id = OLD.id AND source_type = 'thought';
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS weekly_fts_ai AFTER INSERT ON weekly_notes BEGIN
+      INSERT INTO journal_fts(content, ticker_mentions, source_type, source_id, entry_date, emotion)
+      VALUES(NEW.text, '', 'weekly', NEW.week_key, NEW.week_key || '-01', '');
+    END;
+    CREATE TRIGGER IF NOT EXISTS weekly_fts_au AFTER UPDATE OF text ON weekly_notes BEGIN
+      DELETE FROM journal_fts WHERE source_id = OLD.week_key AND source_type = 'weekly';
+      INSERT INTO journal_fts(content, ticker_mentions, source_type, source_id, entry_date, emotion)
+      VALUES(NEW.text, '', 'weekly', NEW.week_key, NEW.week_key || '-01', '');
+    END;
+    CREATE TRIGGER IF NOT EXISTS weekly_fts_ad AFTER DELETE ON weekly_notes BEGIN
+      DELETE FROM journal_fts WHERE source_id = OLD.week_key AND source_type = 'weekly';
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS monthly_fts_ai AFTER INSERT ON monthly_reviews BEGIN
+      INSERT INTO journal_fts(content, ticker_mentions, source_type, source_id, entry_date, emotion)
+      VALUES(NEW.bullets, '', 'monthly', NEW.month_key, NEW.month_key || '-01', '');
+    END;
+    CREATE TRIGGER IF NOT EXISTS monthly_fts_au AFTER UPDATE OF bullets ON monthly_reviews BEGIN
+      DELETE FROM journal_fts WHERE source_id = OLD.month_key AND source_type = 'monthly';
+      INSERT INTO journal_fts(content, ticker_mentions, source_type, source_id, entry_date, emotion)
+      VALUES(NEW.bullets, '', 'monthly', NEW.month_key, NEW.month_key || '-01', '');
+    END;
+    CREATE TRIGGER IF NOT EXISTS monthly_fts_ad AFTER DELETE ON monthly_reviews BEGIN
+      DELETE FROM journal_fts WHERE source_id = OLD.month_key AND source_type = 'monthly';
+    END;
+
+    CREATE TABLE IF NOT EXISTS semantic_memory (
+      id TEXT PRIMARY KEY,
+      memory_type TEXT NOT NULL,
+      scope TEXT,
+      content TEXT NOT NULL,
+      structured_data TEXT,
+      source_entries INTEGER DEFAULT 0,
+      distilled_at INTEGER NOT NULL,
+      model_id TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_semantic_type ON semantic_memory(memory_type, scope);
+  `);
+
   // Migrations for existing databases (idempotent — fails silently if column exists).
   try { await db.runAsync("ALTER TABLE holdings ADD COLUMN buy_reason TEXT"); } catch {}
   try { await db.runAsync("ALTER TABLE holdings ADD COLUMN buy_date TEXT"); } catch {}
   try { await db.runAsync("ALTER TABLE chat_history ADD COLUMN master_id TEXT"); } catch {}
   try { await db.runAsync("ALTER TABLE trades ADD COLUMN stock_name TEXT"); } catch {}
   try { await db.runAsync("ALTER TABLE thoughts ADD COLUMN emotion TEXT"); } catch {}
+  // Memory architecture migrations
+  try { await db.runAsync("ALTER TABLE trades ADD COLUMN relevance_weight REAL NOT NULL DEFAULT 1.0"); } catch {}
+  try { await db.runAsync("ALTER TABLE thoughts ADD COLUMN relevance_weight REAL NOT NULL DEFAULT 1.0"); } catch {}
+  // Backfill monthly reviews into journal_fts for existing DBs (idempotent via DELETE+INSERT).
+  try {
+    const months = await db.getAllAsync("SELECT month_key, bullets FROM monthly_reviews");
+    if (months.length > 0) {
+      await db.withTransactionAsync(async () => {
+        for (const m of months) {
+          await db.runAsync("DELETE FROM journal_fts WHERE source_id = ? AND source_type = 'monthly'", [m.month_key]);
+          await db.runAsync(
+            "INSERT INTO journal_fts(content, ticker_mentions, source_type, source_id, entry_date, emotion) VALUES(?,?,?,?,?,?)",
+            [m.bullets, '', 'monthly', m.month_key, m.month_key + '-01', '']
+          );
+        }
+      });
+    }
+  } catch {}
 }
 
 const newId = (prefix) => `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -198,15 +293,19 @@ function rowToTrade(r) {
 }
 
 // ---------- thoughts ----------
-export async function listThoughts() {
-  const db = await getDb();
-  const rows = await db.getAllAsync("SELECT * FROM thoughts ORDER BY date DESC");
-  return rows.map(r => ({
+function rowToThought(r) {
+  return {
     id: r.id, date: r.date, content: r.content,
     emotion: r.emotion || undefined,
     rawInput: r.raw_input || undefined,
     feedback: safeJson(r.feedback, []),
-  }));
+  };
+}
+
+export async function listThoughts() {
+  const db = await getDb();
+  const rows = await db.getAllAsync("SELECT * FROM thoughts ORDER BY date DESC");
+  return rows.map(rowToThought);
 }
 
 export async function addThought(content, rawInput, emotion) {
@@ -497,6 +596,145 @@ export async function exportAll() {
     holdingReviews: holdingReviews.map(r => ({ id: r.id, holdingId: r.holding_id, date: r.date, content: r.content, createdAt: r.created_at })),
     monthlyMentorCache: mentorCache.map(r => ({ monthKey: r.month_key, masterId: r.master_id, text: r.text, createdAt: r.created_at })),
   };
+}
+
+// ──────────────────────────────────────────────────────────────
+// FTS5 backfill — call once after schema upgrade for existing data
+// ──────────────────────────────────────────────────────────────
+export async function backfillFts() {
+  const db = await getDb();
+  const check = await db.getFirstAsync("SELECT count(*) as n FROM journal_fts");
+  if ((check?.n || 0) > 0) return; // already populated
+  const [trades, thoughts, weekly] = await Promise.all([
+    db.getAllAsync("SELECT id, date, action, stock, reason, emotion FROM trades"),
+    db.getAllAsync("SELECT id, date, content, emotion FROM thoughts"),
+    db.getAllAsync("SELECT week_key, text FROM weekly_notes"),
+  ]);
+  await db.withTransactionAsync(async () => {
+    for (const t of trades) {
+      await db.runAsync(
+        "INSERT INTO journal_fts(content, ticker_mentions, source_type, source_id, entry_date, emotion) VALUES(?,?,?,?,?,?)",
+        [t.reason + " " + t.action + " " + t.stock, t.stock, "trade", t.id, t.date, t.emotion || ""]
+      );
+    }
+    for (const t of thoughts) {
+      await db.runAsync(
+        "INSERT INTO journal_fts(content, ticker_mentions, source_type, source_id, entry_date, emotion) VALUES(?,?,?,?,?,?)",
+        [t.content, "", "thought", t.id, t.date, t.emotion || ""]
+      );
+    }
+    for (const w of weekly) {
+      await db.runAsync(
+        "INSERT INTO journal_fts(content, ticker_mentions, source_type, source_id, entry_date, emotion) VALUES(?,?,?,?,?,?)",
+        [w.text || "", "", "weekly", w.week_key, w.week_key + "-01", ""]
+      );
+    }
+  });
+}
+
+// ──────────────────────────────────────────────────────────────
+// Semantic memory (Tier 3 — AI-distilled knowledge)
+// ──────────────────────────────────────────────────────────────
+
+export async function getSemanticMemory(memoryType, scope = null) {
+  const db = await getDb();
+  if (scope) {
+    return await db.getFirstAsync(
+      "SELECT * FROM semantic_memory WHERE memory_type = ? AND scope = ? ORDER BY distilled_at DESC",
+      [memoryType, scope]
+    );
+  }
+  return await db.getFirstAsync(
+    "SELECT * FROM semantic_memory WHERE memory_type = ? AND scope IS NULL ORDER BY distilled_at DESC",
+    [memoryType]
+  );
+}
+
+export async function setSemanticMemory(memoryType, scope, { content, structured, sourceEntries, modelId }) {
+  const db = await getDb();
+  const id = scope ? `${memoryType}:${scope}` : memoryType;
+  await db.runAsync(
+    `INSERT OR REPLACE INTO semantic_memory
+     (id, memory_type, scope, content, structured_data, source_entries, distilled_at, model_id)
+     VALUES (?,?,?,?,?,?,?,?)`,
+    [id, memoryType, scope || null, content, structured ? JSON.stringify(structured) : null,
+     sourceEntries || 0, Date.now(), modelId || "unknown"]
+  );
+}
+
+// Append (multiple records per type+scope, e.g. mentor_insight)
+export async function appendSemanticMemory(memoryType, scope, { content, structured, modelId }) {
+  const db = await getDb();
+  const id = `${memoryType}:${scope || "global"}:${Date.now()}`;
+  await db.runAsync(
+    `INSERT INTO semantic_memory
+     (id, memory_type, scope, content, structured_data, source_entries, distilled_at, model_id)
+     VALUES (?,?,?,?,?,?,?,?)`,
+    [id, memoryType, scope || null, content, structured ? JSON.stringify(structured) : null,
+     1, Date.now(), modelId || "unknown"]
+  );
+}
+
+export async function listSemanticMemory(memoryType) {
+  const db = await getDb();
+  return await db.getAllAsync(
+    "SELECT * FROM semantic_memory WHERE memory_type = ? ORDER BY distilled_at DESC",
+    [memoryType]
+  );
+}
+
+// Fetch recent mentor insights for a specific ticker (for STANDARD context)
+export async function getRecentInsights(scope, limit = 3) {
+  const db = await getDb();
+  return await db.getAllAsync(
+    "SELECT * FROM semantic_memory WHERE memory_type = 'mentor_insight' AND scope = ? ORDER BY distilled_at DESC LIMIT ?",
+    [scope.toUpperCase(), limit]
+  );
+}
+
+// ──────────────────────────────────────────────────────────────
+// Dream job helpers — counting, listing, and weight management
+// ──────────────────────────────────────────────────────────────
+
+export async function countEntriesSince(timestamp) {
+  const db = await getDb();
+  const [t, th] = await Promise.all([
+    db.getFirstAsync("SELECT count(*) as n FROM trades WHERE created_at > ?", [timestamp]),
+    db.getFirstAsync("SELECT count(*) as n FROM thoughts WHERE created_at > ?", [timestamp]),
+  ]);
+  return (t?.n || 0) + (th?.n || 0);
+}
+
+export async function listTradesSince(timestamp) {
+  const db = await getDb();
+  const rows = await db.getAllAsync("SELECT * FROM trades WHERE created_at > ? ORDER BY date DESC", [timestamp]);
+  return rows.map(rowToTrade);
+}
+
+export async function listThoughtsSince(timestamp) {
+  const db = await getDb();
+  const rows = await db.getAllAsync("SELECT * FROM thoughts WHERE created_at > ? ORDER BY date DESC", [timestamp]);
+  return rows.map(rowToThought);
+}
+
+// Decay relevance weight for entries older than 30 days (5% per dream cycle, floor 0.1)
+export async function applyRelevanceDecay() {
+  const db = await getDb();
+  const cutoff = Date.now() - 30 * 86400000;
+  await Promise.all([
+    db.runAsync("UPDATE trades SET relevance_weight = MAX(0.1, relevance_weight * 0.95) WHERE created_at < ?", [cutoff]),
+    db.runAsync("UPDATE thoughts SET relevance_weight = MAX(0.1, relevance_weight * 0.95) WHERE created_at < ?", [cutoff]),
+  ]);
+}
+
+// Reinforce an entry identified as significant by the dream job (+0.2, cap 2.0)
+export async function reinforceEntry(entryId) {
+  const db = await getDb();
+  const table = entryId.startsWith("trade_") ? "trades" : "thoughts";
+  await db.runAsync(
+    `UPDATE ${table} SET relevance_weight = MIN(2.0, relevance_weight + 0.2) WHERE id = ?`,
+    [entryId]
+  );
 }
 
 // Import a full backup snapshot — runs inside a transaction to avoid partial state

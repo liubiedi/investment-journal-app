@@ -5,7 +5,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets, SafeAreaView } from "react-native-safe-area-context";
 import {
-  MessageCircle, Send, RotateCcw, Loader2, AlertCircle, Maximize2, X, Users,
+  MessageCircle, Send, RotateCcw, Loader2, AlertCircle, Maximize2, X, Users, Copy,
 } from "lucide-react-native";
 import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
 import { useFocusEffect, useRoute } from "@react-navigation/native";
@@ -373,39 +373,38 @@ function MessageBubble({ role, content, masterId }) {
       await Clipboard.setStringAsync(content);
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
-    } catch {
-      // native module not linked in this build — silently ignore
-    }
+    } catch { /* silently ignore */ }
   };
 
   if (role === "user") {
     return (
-      <Pressable onLongPress={handleCopy} delayLongPress={400}
-        style={{ flexDirection: "row", justifyContent: "flex-end", marginBottom: 14 }}>
+      <View style={{ flexDirection: "row", justifyContent: "flex-end", alignItems: "flex-end", gap: 6, marginBottom: 14 }}>
+        {copied
+          ? <TMono style={{ color: colors.accent, fontSize: 9 }}>已复制 ✓</TMono>
+          : <Pressable onPress={handleCopy} hitSlop={8}><Copy size={12} color={colors.inkFaint} /></Pressable>}
         <View style={{ maxWidth: "85%", padding: 12, backgroundColor: colors.ink }}>
-          <TSerif style={{ color: colors.bg, fontSize: 14, lineHeight: 22 }}>{content}</TSerif>
-          {copied && (
-            <TMono style={{ color: colors.accent, fontSize: 9, marginTop: 4, textAlign: "right" }}>已复制 ✓</TMono>
-          )}
+          <TSerif selectable style={{ color: colors.bg, fontSize: 14, lineHeight: 22 }}>{content}</TSerif>
         </View>
-      </Pressable>
+      </View>
     );
   }
 
   const master = getMaster(masterId || "default");
   const isLongReply = content.length > 1200;
   return (
-    <Pressable onLongPress={handleCopy} delayLongPress={400} style={{ marginBottom: 18 }}>
+    <View style={{ marginBottom: 18 }}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 6 }}>
         <View style={{ width: 18, height: 18, backgroundColor: colors.ink, alignItems: "center", justifyContent: "center" }}>
           <MessageCircle size={10} color={colors.accent} />
         </View>
         <Kicker style={{ flex: 1 }}>{master.zh} · {master.name}</Kicker>
-        {copied && (
-          <TMono style={{ fontSize: 9, color: colors.accent }}>已复制 ✓</TMono>
-        )}
+        <Pressable onPress={handleCopy} hitSlop={8}>
+          {copied
+            ? <TMono style={{ fontSize: 9, color: colors.accent }}>已复制 ✓</TMono>
+            : <Copy size={12} color={colors.inkFaint} />}
+        </Pressable>
       </View>
-      <TSerif selectable={!isLongReply} style={{ fontSize: 15, lineHeight: 24 }} numberOfLines={isLongReply ? 14 : undefined}>{content}</TSerif>
+      <TSerif selectable style={{ fontSize: 15, lineHeight: 24 }} numberOfLines={isLongReply ? 14 : undefined}>{content}</TSerif>
       {isLongReply && (
         <Pressable
           onPress={() => setShowFullText(true)}
@@ -421,7 +420,7 @@ function MessageBubble({ role, content, masterId }) {
         masterName={master.name}
         onClose={() => setShowFullText(false)}
       />
-    </Pressable>
+    </View>
   );
 }
 

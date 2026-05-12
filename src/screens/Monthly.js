@@ -1,5 +1,5 @@
 // Monthly review screen: bullets (with voice) + mentor commentary by master
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import { View, ScrollView, Pressable, ActivityIndicator, KeyboardAvoidingView, Platform } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useNavigation } from "@react-navigation/native";
@@ -32,7 +32,10 @@ export default function MonthlyScreen() {
   }, [app.monthlyReviews, app.trades, current]);
 
   const monthTrades = app.trades.filter((t) => monthKey(t.date) === activeMonth);
-  const bullets = app.monthlyReviews[activeMonth] || ["", "", "", ""];
+  const bullets = useMemo(
+    () => app.monthlyReviews[activeMonth] || ["", "", "", ""],
+    [app.monthlyReviews, activeMonth]
+  );
 
   const doAskMentor = async (month, draftBullets, masterId) => {
     const nonEmpty = draftBullets.filter((b) => b.trim());
@@ -107,10 +110,22 @@ export default function MonthlyScreen() {
   );
 }
 
+const padBullets = (arr) => arr.concat(Array(Math.max(0, 4 - arr.length)).fill("")).slice(0, 5);
+
 function MonthlyEditor({ month, initial, trades, onSave, hasReview, profile, defaultMaster, onAskMentor }) {
-  const [draft, setDraft] = useState(
-    initial.concat(Array(Math.max(0, 4 - initial.length)).fill("")).slice(0, 5)
-  );
+  const [draft, setDraft] = useState(() => padBullets(initial));
+  const [saved, setSaved] = useState(false);
+  const draftTouched = useRef(false);
+  const savedTimer = useRef(null);
+
+  // Sync draft when lazy bootstrap delivers real data — only if user hasn't typed yet.
+  useEffect(() => {
+    if (!draftTouched.current && initial.some((b) => b.trim())) {
+      setDraft(padBullets(initial));
+    }
+  }, [initial]);
+
+  useEffect(() => () => { if (savedTimer.current) clearTimeout(savedTimer.current); }, []);
 
   const actionStats = useMemo(() => {
     const s = {};
@@ -151,7 +166,7 @@ function MonthlyEditor({ month, initial, trades, onSave, hasReview, profile, def
             <PaperInput
               multiline
               value={b}
-              onChangeText={(v) => { const next = [...draft]; next[i] = v; setDraft(next); }}
+              onChangeText={(v) => { draftTouched.current = true; const next = [...draft]; next[i] = v; setDraft(next); }}
               placeholder={["最成功的一笔决策？", "最想重来的一笔？", "这个月学到了什么？", "下月要改什么？", "其他观察…"][i]}
               style={{ flex: 1, minHeight: 60, fontSize: 15 }}
             />
@@ -166,8 +181,18 @@ function MonthlyEditor({ month, initial, trades, onSave, hasReview, profile, def
         )}
 
         <View style={{ flexDirection: "row", gap: 10, marginTop: 24 }}>
-          <FilledButton onPress={() => onSave(draft.filter((b) => b.trim()))} style={{ flex: 1 }}>
-            {hasReview ? "更新月评" : "归档月评"}
+          <FilledButton
+            onPress={async () => {
+              try {
+                await onSave(draft.filter((b) => b.trim()));
+              } catch { /* save errors are handled upstream */ }
+              setSaved(true);
+              if (savedTimer.current) clearTimeout(savedTimer.current);
+              savedTimer.current = setTimeout(() => setSaved(false), 1500);
+            }}
+            style={{ flex: 1 }}
+          >
+            {saved ? "已保存 ✓" : hasReview ? "更新月评" : "归档月评"}
           </FilledButton>
 
           {draft.some((b) => b.trim()) && (
