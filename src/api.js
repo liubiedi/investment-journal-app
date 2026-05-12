@@ -11,6 +11,8 @@
 import * as SecureStore from "expo-secure-store";
 import { MASTER_STYLES, MASTER_MEETING_ROLES, getMaster } from "./constants";
 import { monthLabel } from "./utils";
+import { memoryManager, ContextDepth } from "./memory/MemoryManager";
+import { getDNA } from "./memory/HotCache";
 
 const DEEPSEEK_URL = "https://api.deepseek.com/v1/chat/completions";
 
@@ -201,8 +203,14 @@ ${tradesB || "  (none)"}
 // ========== Persona builder ==========
 function buildMasterPersona(masterId) {
   const master = getMaster(masterId);
+  const hasDNA = !!getDNA();
+
   if (master.id === "default") {
-    return `You are a seasoned investment mentor who has followed this investor's journey for years. You know their philosophy, rules, trading history, and emotional patterns intimately. Speak with the warmth of a trusted advisor — direct but kind, insightful without lecturing, willing to challenge when needed.
+    const depthClause = hasDNA
+      ? "You have an intimate, distilled understanding of this investor's behavioral patterns, emotional triggers, and blind spots — built from their complete journal history. You don't give generic advice. When you see a pattern repeating, name it. When their current question echoes a past mistake, say so directly."
+      : "You have been following this investor's journey. You know their philosophy, rules, trading history, and emotional patterns.";
+
+    return `You are a seasoned investment mentor. ${depthClause}
 
 - Match the user's language (Chinese/English/mixed).
 - Ground advice in their ACTUAL track record; reference specific trades, rules, reflections by name.
@@ -213,6 +221,7 @@ function buildMasterPersona(masterId) {
 - Never start with "As your mentor". Just speak naturally.
 - Don't be sycophantic. Be the mentor they need.`;
   }
+
   return `${MASTER_STYLES[master.id]}
 
 Stay in character as ${master.name}. Speak in their voice, using their frameworks. Keep responses to 2-3 short paragraphs. Match the user's language exactly (Chinese/English/mixed). Do NOT start with "As ${master.name}..." — just speak naturally. Use the investor's actual record to make your advice specific, not generic.`;
@@ -277,11 +286,21 @@ export async function parseTradeText(text) {
 }
 
 // Generate mentor feedback for a single trade or thought.
-// `profile` should be a SLIMMED-DOWN version (recent trades only, no deep history).
-// `onChunk` is optional — if provided, streams text progressively.
+// Uses MINIMAL context (DNA + rules) — fast and cheap.
+// Post-generation: asynchronously records a mentor_insight for this ticker.
 export async function generateEntryFeedback(entry, entryType, masterId, profile, onChunk) {
-  // Aggressively trim profile context — entry feedback only needs recent signal.
-  const system = buildSystem(masterId, { ...profile, maxTrades: 5, maxWeekly: 2, maxMonthly: 1 });
+  const ticker = entryType === "trade" ? entry.stock : null;
+  const query = entryType === "trade" ? entry.reason : entry.content;
+
+  const ctx = await memoryManager.assemble({
+    ticker,
+    query,
+    depth: ContextDepth.MINIMAL,
+    feature: "feedback",
+    holdings: profile.holdings,
+    prices: profile.prices,
+  });
+  const system = buildMasterPersona(masterId) + "\n\n<investor_profile>\n" + ctx.blocks + "\n</investor_profile>";
   let desc;
   if (entryType === "trade") {
     desc = `The investor just logged this trade:
@@ -302,14 +321,42 @@ They are working through this. They may be torn, uncertain, or simply thinking o
 Give your immediate, specific reaction. Reference their history, rules, or philosophy where relevant. Be direct. 2-3 short paragraphs. Match their language.`;
 
   const opts = { system, messages: [{ role: "user", content: user }], max_tokens: 1800 };
-  if (onChunk) return await callLLMStream({ ...opts, onChunk });
-  return await callLLM(opts);
+
+  const recordResult = (text) => {
+    if (ticker && text) {
+      memoryManager.recordInsight({
+        type: "mentor_insight",
+        scope: ticker,
+        content: text.slice(0, 500),
+        structured: { entryDate: entry.date, action: entry.action, emotion: entry.emotion },
+        modelId: MODELS.smart,
+      }).catch(() => {});
+    }
+  };
+
+  if (onChunk) {
+    let full = "";
+    const result = await callLLMStream({ ...opts, onChunk: (chunk) => { full += chunk; onChunk(chunk); } });
+    recordResult(full);
+    return result;
+  }
+  const result = await callLLM(opts);
+  recordResult(result);
+  return result;
 }
 
 // Monthly commentary for a given master over a month's trades.
 export async function generateMonthlyCommentary(month, monthTrades, masterId, profile) {
-  // The month's trades are passed in the user message; the system context is trimmed.
-  const system = buildSystem(masterId, { ...profile, maxTrades: 5, maxWeekly: 2, maxMonthly: 1 });
+  const tickers = [...new Set((monthTrades || []).map(t => t.stock).filter(Boolean))].join(" ");
+  const ctx = await memoryManager.assemble({
+    ticker: null,
+    query: tickers,
+    depth: ContextDepth.STANDARD,
+    feature: "commentary",
+    holdings: profile.holdings,
+    prices: profile.prices,
+  });
+  const system = buildMasterPersona(masterId) + "\n\n<investor_profile>\n" + ctx.blocks + "\n</investor_profile>";
   const tradesList = monthTrades
     .map((t) => `- ${new Date(t.date).toISOString().slice(0, 10)} | ${t.action.toUpperCase()} | ${t.stock} | emotion: ${t.emotion} | ${t.reason}`)
     .join("\n");
@@ -326,88 +373,139 @@ Give your analysis of this month's trading activity. Look for patterns, emotiona
   });
 }
 
-// Mentor chat — system prompt + recent history only.
+// Mentor chat — system prompt + recent history + memory-assembled context.
 export async function chatMessage(history, newUserMessage, profile, masterId = "default") {
-  const system = buildSystem(masterId, { ...profile, maxTrades: 5, maxWeekly: 2, maxMonthly: 1 });
-  // Trim history to last 10 turns (5 exchanges) to keep messages small;
-  // DeepSeek auto-caches the system prefix server-side.
+  // Detect ticker mention for targeted FTS5 retrieval
+  const tickerMatch = newUserMessage.match(/\b([A-Z]{2,5})\b/);
+  const ticker = tickerMatch ? tickerMatch[1] : null;
+
+  const ctx = await memoryManager.assemble({
+    ticker,
+    query: newUserMessage,
+    depth: ContextDepth.STANDARD,
+    feature: "mentor",
+    holdings: profile.holdings,
+    prices: profile.prices,
+  });
+  const system = buildMasterPersona(masterId) + "\n\n<investor_profile>\n" + ctx.blocks + "\n</investor_profile>";
   const trimmed = history.slice(-10);
   const messages = [...trimmed, { role: "user", content: newUserMessage }];
   return await callLLM({ system, messages, max_tokens: 2200 });
 }
 
 // ============================================================
-// Strategy Report — comprehensive AI analysis of the full journal
+// Strategy Report — two-phase comprehensive analysis
 // ============================================================
 //
-// This is the most expensive call in the app (~$0.03-0.08 per run).
-// Uses a generous output budget to allow a full structured report.
-// Context is NOT cached (rare, one-off call) — pass the FULL profile.
+// Phase A (flash, ~$0.001): plans which memory areas to focus on.
+// Phase B (pro, streaming): generates the full report with DEEP context.
+// onPhase: optional callback for UI progress ("planning" | "assembling" | "generating")
+// onChunk: optional streaming callback
 
-export async function generateStrategyReport(profile) {
-  // Use the full profile: all trades, all weekly/monthly notes
-  const ctx = buildProfileContext({
-    ...profile,
-    maxTrades: 100,   // expand from default 15
-    maxWeekly: 52,    // last year of weekly notes
-    maxMonthly: 24,   // last two years of monthly reviews
-  });
-
-  const system = `You are an elite investment analyst and behavioral finance expert. You have been given a complete record of an individual investor's journal: their stated philosophy, trading rules, actual trades with reasoning and emotion, weekly observations, monthly reflections, and current holdings.
+const STRATEGY_SYSTEM = `You are an elite investment analyst and behavioral finance expert. You have been given a complete record of an individual investor's journal: their stated philosophy, trading rules, actual trades with reasoning and emotion, weekly observations, monthly reflections, current holdings, and AI-distilled behavioral insights.
 
 Your task is to write a comprehensive, honest "Investment Strategy Profile" — what this investor ACTUALLY does, not just what they say they do. The gap between their stated rules and their actual behavior is often the most important finding.
 
-Format the output as a structured Markdown document with the sections described below. Write in the SAME LANGUAGE as most of the journal entries (Chinese if they journal in Chinese, English if English, or mixed). Be specific: cite actual tickers, dates, patterns. This is not a generic report — it must be built exclusively from the evidence in this journal.
+Format the output as a structured Markdown document. Write in the SAME LANGUAGE as most of the journal entries. Be specific: cite actual tickers, dates, patterns. This is not a generic report — it must be built exclusively from the evidence in this journal.
 
-Be direct. Do not sugarcoat. If they consistently trade on emotion despite saying they won't, say so. If there are genuine strengths, name them. The goal is a document the investor can pin to their desk and actually learn from.`;
+Be direct. Do not sugarcoat. The goal is a document the investor can pin to their desk and actually learn from.`;
 
-  const user = `Here is the complete investment journal:
+function buildStrategyUserPrompt(contextBlocks, profile) {
+  return `Here is the complete investment journal with distilled behavioral insights:
 
 <investor_profile>
-${ctx}
+${contextBlocks}
 </investor_profile>
 
 Write the Investment Strategy Profile as a Markdown document with these exact sections:
 
 # Investment Strategy Profile
-*Generated: [today's date]*
+*Generated: ${new Date().toISOString().slice(0, 10)}*
 
 ## 1. Core Philosophy (Stated vs. Actual)
-Compare their stated one-sentence philosophy against what the trade log reveals. Do they walk the talk?
-
 ## 2. Actual Investment Style
-Based on trades, what style does this investor actually practice? (Value / Growth / Momentum / Trend-following / Opportunistic / Mixed?) What holding periods do they tend toward? How concentrated?
-
 ## 3. Decision-Making Patterns
-What triggers buy decisions? What triggers sells? Are these consistent? Any recurring themes in reasoning?
-
 ## 4. Emotional Profile
-What emotion tags appear most often? Do trades made under anxiety/fear perform differently (based on notes/reflections)? Does emotion predict regret (mentioned in monthly reviews)?
-
 ## 5. Rules Compliance Audit
-For each stated rule, assess: followed consistently / sometimes broken / frequently violated. For violations, cite examples from trade log.
-
 ## 6. Strengths (Evidence-Based)
-2-3 genuine strengths backed by specific trades or reflections.
-
 ## 7. Blind Spots & Recurring Mistakes
-2-3 patterns that appear in monthly reviews or trade regrets. Be specific.
-
 ## 8. Holdings Analysis
-Look at the current portfolio. Is it consistent with stated philosophy and rules? Any obvious concentration, style drift, or position that seems out of character?
-
 ## 9. Recommended Focus Areas (Next 6 Months)
-3 specific, actionable improvements. Ground them in the patterns above — not generic advice.
-
 ## 10. One-Sentence Strategy Summary
-A single sentence describing this investor's true strategy, written as though for an external observer.
 
 ---
-*This report was generated from ${profile.trades?.length || 0} trades, ${Object.keys(profile.weeklyNotes || {}).length} weekly notes, and ${Object.keys(profile.monthlyReviews || {}).length} monthly reviews.*`;
+*Generated from ${profile.trades?.length || 0} trades, ${Object.keys(profile.weeklyNotes || {}).length} weekly notes, ${Object.keys(profile.monthlyReviews || {}).length} monthly reviews.*`;
+}
 
+export async function generateStrategyReport(profile, onPhase, onChunk) {
+  // Phase A: planning — flash model identifies what to focus on
+  onPhase?.("planning");
+  const minCtx = await memoryManager.assemble({
+    ticker: null,
+    query: "",
+    depth: ContextDepth.MINIMAL,
+    feature: "strategy",
+    holdings: profile.holdings,
+    prices: profile.prices,
+  });
+
+  let plan = {};
+  try {
+    const planPrompt = `Analyze this investor profile and identify the 3 most important patterns to investigate deeply, plus keywords that will surface relevant journal entries.
+
+${minCtx.blocks}
+
+Trade count: ${profile.trades?.length || 0}
+
+Reply ONLY with JSON:
+{
+  "relevantKeywords": ["keyword1", "keyword2", "keyword3", "keyword4"],
+  "focusAreas": ["area1", "area2", "area3"]
+}`;
+    const planRaw = await callLLM({
+      system: "Reply with valid JSON only, no markdown.",
+      messages: [{ role: "user", content: planPrompt }],
+      model: MODELS.fast,
+      max_tokens: 300,
+    });
+    const clean = planRaw.replace(/```json|```/g, "").trim();
+    const s = clean.indexOf("{"), e = clean.lastIndexOf("}");
+    if (s !== -1) plan = JSON.parse(clean.slice(s, e + 1));
+  } catch { /* use empty plan — DEEP context still assembles */ }
+
+  // Phase B: assemble rich context using Phase A's guidance
+  onPhase?.("assembling");
+  const enrichedQuery = [
+    ...(plan.relevantKeywords || []),
+    ...(plan.focusAreas || []),
+  ].join(" ");
+
+  const fullCtx = await memoryManager.assemble({
+    ticker: null,
+    query: enrichedQuery,
+    depth: ContextDepth.DEEP,
+    feature: "strategy",
+    holdings: profile.holdings,
+    prices: profile.prices,
+  });
+
+  // Phase B: generate full report (pro, streaming)
+  onPhase?.("generating");
+  const userPrompt = buildStrategyUserPrompt(fullCtx.blocks, profile);
+
+  if (onChunk) {
+    return await callLLMStream({
+      system: STRATEGY_SYSTEM,
+      messages: [{ role: "user", content: userPrompt }],
+      model: MODELS.smart,
+      max_tokens: 6000,
+      onChunk,
+    });
+  }
   return await callLLM({
-    messages: [{ role: "user", content: user }],
-    system,
+    system: STRATEGY_SYSTEM,
+    messages: [{ role: "user", content: userPrompt }],
+    model: MODELS.smart,
     max_tokens: 6000,
   });
 }
@@ -474,13 +572,27 @@ VERDICT: [BULL|BEAR|NEUTRAL] · Conviction [HIGH|MED|LOW] · [your thesis in 15 
     personaText += `\n\nPrior committee views on "${topic}" — address, challenge, or build on them, staying focused on the topic:\n\n${priorBlock}`;
   }
 
-  const profileText = `<investor_profile>\n${buildProfileContext({ ...profile, maxTrades: 10, maxWeekly: 4, maxMonthly: 2 })}\n</investor_profile>`;
-  return `${personaText}\n\n${profileText}`;
+  // profileContext is now injected by the caller via async MemoryManager.assemble()
+  return personaText;
 }
 
 // Single master's panel response. priorResponses = all prior round responses visible to this master.
 export async function mentorPanelResponse(topic, masterId, profile, priorResponses = [], additionalQuestion = "") {
-  const system = buildPanelSystem(masterId, profile, priorResponses, topic, additionalQuestion);
+  // Extract ticker from topic for targeted memory retrieval
+  const tickerMatch = topic.match(/\b([A-Z]{2,5})\b/);
+  const ticker = tickerMatch ? tickerMatch[1] : null;
+
+  const ctx = await memoryManager.assemble({
+    ticker,
+    query: topic,
+    depth: ContextDepth.STANDARD,
+    feature: "roundtable",
+    holdings: profile.holdings,
+    prices: profile.prices,
+  });
+
+  const panelPersona = buildPanelSystem(masterId, profile, priorResponses, topic, additionalQuestion);
+  const system = panelPersona + "\n\n<investor_profile>\n" + ctx.blocks + "\n</investor_profile>";
 
   let userMessage = `Investment topic: "${topic}"`;
   if (additionalQuestion) {
@@ -583,7 +695,31 @@ Produce meeting minutes in this EXACT Markdown format:
     max_tokens: 2000,
   });
   if (!result) throw new Error("收到空回复，请重试");
+
+  // Record per-ticker stock thesis from the minutes (non-blocking)
+  const tickerMatch = session.topic?.match(/\b([A-Z]{2,5})\b/);
+  if (tickerMatch) {
+    memoryManager.recordInsight({
+      type: "stock_thesis",
+      scope: tickerMatch[1],
+      content: result.slice(0, 700),
+      structured: { topic: session.topic, date: today, masters: session.selectedMasters },
+      modelId: "committee-minutes",
+    }).catch(() => {});
+  }
+
   return result;
+}
+
+// Lightweight flash helper — used by DreamJob and InvestorDNA.distill()
+// to avoid circular imports (they inject this function rather than importing callLLM directly).
+export async function callFlash(userPrompt) {
+  return await callLLM({
+    system: "You are a concise analyst. Reply only as instructed.",
+    messages: [{ role: "user", content: userPrompt }],
+    model: MODELS.fast,
+    max_tokens: 600,
+  });
 }
 
 // ============================================================
