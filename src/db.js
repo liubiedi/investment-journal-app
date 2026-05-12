@@ -123,7 +123,7 @@ async function initSchema(db) {
       source_id,
       entry_date,
       emotion,
-      tokenize = 'unicode61'
+      tokenize = 'porter unicode61'
     );
 
     CREATE TRIGGER IF NOT EXISTS trades_fts_ai AFTER INSERT ON trades BEGIN
@@ -589,7 +589,7 @@ export async function backfillFts() {
     for (const w of weekly) {
       await db.runAsync(
         "INSERT INTO journal_fts(content, ticker_mentions, source_type, source_id, entry_date, emotion) VALUES(?,?,?,?,?,?)",
-        [w.text, "", "weekly", w.week_key, w.week_key + "-01", ""]
+        [w.text || "", "", "weekly", w.week_key, w.week_key + "-01", ""]
       );
     }
   });

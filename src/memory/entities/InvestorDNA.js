@@ -54,7 +54,7 @@ export class InvestorDNA {
   }
 
   // Build and return an InvestorDNA from journal data.
-  // callFlash: async (systemPrompt, userPrompt) => string  (injected to avoid circular imports)
+  // callFlash: async (userPrompt) => string  (injected to avoid circular imports)
   static async distill({ trades, weeklyNotes, monthlyReviews, philosophy, rules, callFlash }) {
     if (!trades || trades.length < 5) return null;
 

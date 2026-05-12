@@ -46,7 +46,9 @@ export class EpisodicMemoryRetriever {
     }
     if (terms.length === 0) return [];
 
-    const ftsQuery = terms.join(" OR ");
+    // Double-quote each term so FTS5 treats it as a literal phrase, not an operator.
+    // This prevents "AND", "NOT", etc. from being misinterpreted as FTS5 keywords.
+    const ftsQuery = terms.map(t => `"${t.replace(/"/g, "")}"`).join(" OR ");
 
     const typeFilter = sourceTypes.map(t => `'${t}'`).join(", ");
 

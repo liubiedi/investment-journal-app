@@ -37,8 +37,10 @@ export class DreamJob {
     const allNew = [...newTrades, ...newThoughts];
     if (allNew.length < DREAM_THRESHOLD) return null;
 
-    // Compress new entries for the flash model prompt
+    // Compress new entries for the flash model prompt — include id so the model
+    // can reference specific entries in relevanceBoosts.
     const compressed = allNew.slice(0, 30).map(e => ({
+      id: e.id,
       type: e.action ? "trade" : "thought",
       date: e.date?.slice(0, 10),
       stock: e.stock || null,
