@@ -450,6 +450,89 @@ export function FormHeader({ title, onCancel }) {
   );
 }
 
+// ========== Research: StatusBadge ==========
+const STATUS_META = {
+  buy_setup:   { label: "建仓机会", en: "Buy Setup",    bg: "#d4edda", text: "#2d5f3f" },
+  watch:       { label: "观望",     en: "Watch",        bg: "#fff3cd", text: "#856404" },
+  reduce_risk: { label: "降低风险", en: "Reduce Risk",  bg: "#fde8d0", text: "#8a4800" },
+  avoid:       { label: "回避",     en: "Avoid",        bg: "#f8d7da", text: "#a03434" },
+};
+
+export function StatusBadge({ status, style }) {
+  const meta = STATUS_META[status] || { label: status || "—", en: "", bg: "#e9e4d8", text: "#6b5a3f" };
+  return (
+    <View style={[{ backgroundColor: meta.bg, borderRadius: 4, paddingHorizontal: 8, paddingVertical: 3, alignSelf: "flex-start" }, style]}>
+      <Text style={{ fontFamily: fonts.monoMed, fontSize: 10, letterSpacing: 1, textTransform: "uppercase", color: meta.text }}>
+        {meta.label}{meta.en ? `  ${meta.en}` : ""}
+      </Text>
+    </View>
+  );
+}
+
+// ========== Research: ConfidencePill ==========
+const CONF_META = {
+  high:   { label: "High",   color: "#2d5f3f" },
+  medium: { label: "Medium", color: "#856404" },
+  low:    { label: "Low",    color: "#6b5a3f" },
+};
+
+export function ConfidencePill({ level, style }) {
+  const meta = CONF_META[level] || { label: level || "—", color: "#6b5a3f" };
+  return (
+    <View style={[{ flexDirection: "row", alignItems: "center", gap: 4 }, style]}>
+      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: meta.color }} />
+      <TMono style={{ fontSize: 10, color: meta.color }}>
+        {meta.label} confidence
+      </TMono>
+    </View>
+  );
+}
+
+// ========== Research: SourceCard ==========
+// Shows one evidence source with data-tier badge and staleness indicator.
+export function SourceCard({ source }) {
+  const isStale = source.fetchedAt && (Date.now() - new Date(source.fetchedAt).getTime() > 30 * 24 * 3600 * 1000);
+  return (
+    <View style={{ backgroundColor: "#f0ebe0", borderRadius: 6, padding: 10, marginBottom: 6 }}>
+      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+        <TMono style={{ fontSize: 10, color: colors.inkFaint }}>{source.provider || "Unknown"}</TMono>
+        <View style={{ flexDirection: "row", gap: 6 }}>
+          {isStale && (
+            <View style={{ backgroundColor: "#fde8d0", borderRadius: 3, paddingHorizontal: 5, paddingVertical: 1 }}>
+              <TMono style={{ fontSize: 9, color: "#8a4800" }}>STALE</TMono>
+            </View>
+          )}
+          <View style={{ backgroundColor: "#e9e4d8", borderRadius: 3, paddingHorizontal: 5, paddingVertical: 1 }}>
+            <TMono style={{ fontSize: 9, color: colors.inkFaint }}>{source.tier || "Manual"}</TMono>
+          </View>
+        </View>
+      </View>
+      <TSerif style={{ fontSize: 12, color: colors.inkMuted }}>{source.description || source.url || "(no description)"}</TSerif>
+      {source.fetchedAt && (
+        <TMono style={{ fontSize: 9, marginTop: 3 }}>as of {new Date(source.fetchedAt).toLocaleDateString()}</TMono>
+      )}
+    </View>
+  );
+}
+
+// ========== Research: DisclaimerBlock ==========
+// Always-visible, pinned below memo content.
+export function DisclaimerBlock({ flags }) {
+  const staleWarning = flags?.stale ? " Data may be stale or cached." : "";
+  const missingItems = (flags?.missing_data || []).join(", ");
+  const tierNote = flags?.data_tier ? ` Data: ${flags.data_tier}.` : "";
+  return (
+    <View style={{ backgroundColor: "#f0ebe0", borderRadius: 6, padding: 12, marginTop: 16, borderLeftWidth: 3, borderLeftColor: colors.gold }}>
+      <TMono style={{ fontSize: 10, letterSpacing: 0.5, color: colors.inkMuted, lineHeight: 16 }}>
+        {"DECISION SUPPORT · NOT INVESTMENT ADVICE\n"}
+        {`This memo reflects conditional analysis, not a recommendation to buy or sell.${tierNote}${staleWarning}`}
+        {missingItems ? `\nMissing data: ${missingItems}` : ""}
+        {"\nReview all assumptions before acting. Conditions may have changed."}
+      </TMono>
+    </View>
+  );
+}
+
 // ========== Master picker bottom sheet (shared across screens) ==========
 export function MasterPickerModal({ visible, onClose, onSelect, subtitle }) {
   return (

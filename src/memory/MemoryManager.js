@@ -70,6 +70,9 @@ function buildEpisodicBlock(items) {
     if (item.type === "weekly") {
       return `  [${item.week}] weekly: ${item.text?.slice(0, 80)}`;
     }
+    if (item.type === "research") {
+      return `  [${date}] research memo: ${item.ticker} ${item.status ? `(${item.status})` : ""} — ${item.thesis?.slice(0, 100)}`;
+    }
     return null;
   }).filter(Boolean).join("\n");
   return `<relevant_history>\n${lines}\n</relevant_history>`;
@@ -166,6 +169,26 @@ export class MemoryManager {
               text: insightText,
             });
           }
+        }
+      } catch { /* non-fatal */ }
+    }
+
+    // Research memos for this ticker (STANDARD + DEEP)
+    if (ticker) {
+      try {
+        const researchRows = await db.getRecentResearchMemos(ticker.toUpperCase(), 2);
+        if (researchRows.length > 0) {
+          const lines = researchRows.map(r => {
+            let sd = {};
+            try { if (r.structured_data) sd = JSON.parse(r.structured_data); } catch { /* malformed — skip structured fields */ }
+            return `  [${sd.status?.toUpperCase() || "?"}] ${r.content?.slice(0, 200)}\n  Review by: ${sd.next_review_date || "not set"}`;
+          }).join("\n");
+          sections.push({
+            key: "researchMemos",
+            priority: 4.5,
+            tokens: estimateTokens(lines),
+            text: `<research_memos>\n${lines}\n</research_memos>`,
+          });
         }
       } catch { /* non-fatal */ }
     }

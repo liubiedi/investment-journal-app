@@ -13,6 +13,7 @@ import { MASTER_STYLES, MASTER_MEETING_ROLES, getMaster } from "./constants";
 import { monthLabel } from "./utils";
 import { memoryManager, ContextDepth } from "./memory/MemoryManager";
 import { getDNA } from "./memory/HotCache";
+import { getCachedSnapshot, setCachedSnapshot } from "./db";
 
 const DEEPSEEK_URL = "https://api.deepseek.com/v1/chat/completions";
 
@@ -789,4 +790,348 @@ export async function yahooSearch(query) {
   } catch {
     return [];
   }
+}
+
+// ============================================================
+// Research module — Yahoo Finance snapshot + LLM memo generation
+// ============================================================
+
+const YF_HOSTS = ["https://query1.finance.yahoo.com", "https://query2.finance.yahoo.com"];
+const YF_HEADERS = { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" };
+
+// Fetch fundamental snapshot from Yahoo Finance quoteSummary (24h cached).
+// Returns null on failure — callers should degrade gracefully.
+export async function fetchResearchSnapshot(ticker) {
+  const cached = await getCachedSnapshot(ticker);
+  if (cached) return { ...cached, stale: true };
+
+  const modules = [
+    "assetProfile", "summaryDetail", "defaultKeyStatistics",
+    "financialData", "earningsTrend", "calendarEvents", "secFilings",
+  ].join(",");
+
+  let lastErr;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const host = YF_HOSTS[attempt % 2];
+    const url = `${host}/v10/finance/quoteSummary/${encodeURIComponent(ticker.toUpperCase())}?modules=${modules}`;
+    try {
+      const res = await fetch(url, { headers: YF_HEADERS });
+      if (res.status === 429) {
+        await new Promise(r => setTimeout(r, Math.pow(2, attempt) * 2000));
+        continue;
+      }
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = await res.json();
+      const result = json?.quoteSummary?.result?.[0];
+      if (!result) throw new Error("empty result");
+
+      const snap = _parseQuoteSummary(result, ticker);
+      await setCachedSnapshot(ticker, snap);
+      return { ...snap, stale: false };
+    } catch (e) {
+      lastErr = e;
+      if (attempt < 3) await new Promise(r => setTimeout(r, Math.pow(2, attempt) * 2000));
+    }
+  }
+  console.warn("fetchResearchSnapshot failed for", ticker, lastErr?.message);
+  return null;
+}
+
+function _parseQuoteSummary(r, ticker) {
+  const profile = r.assetProfile || {};
+  const detail = r.summaryDetail || {};
+  const stats = r.defaultKeyStatistics || {};
+  const fin = r.financialData || {};
+  const trend = r.earningsTrend?.trend || [];
+  const cal = r.calendarEvents || {};
+  const filings = r.secFilings?.filings || [];
+
+  const v = (obj) => (typeof obj?.raw === "number" ? obj.raw : obj?.raw ?? null);
+
+  const currentQTrend = trend.find(t => t.period === "0q") || {};
+  const nextYearTrend = trend.find(t => t.period === "+1y") || {};
+
+  const latestFiling = filings[0] || {};
+
+  return {
+    ticker: ticker.toUpperCase(),
+    businessSummary: profile.longBusinessSummary || null,
+    sector: profile.sector || null,
+    industry: profile.industry || null,
+    employees: profile.fullTimeEmployees || null,
+    website: profile.website || null,
+    marketCap: v(detail.marketCap),
+    fiftyTwoWeekHigh: v(detail.fiftyTwoWeekHigh),
+    fiftyTwoWeekLow: v(detail.fiftyTwoWeekLow),
+    beta: v(detail.beta),
+    dividendYield: v(detail.dividendYield),
+    trailingPE: v(stats.trailingPE),
+    forwardPE: v(stats.forwardPE),
+    pegRatio: v(stats.pegRatio),
+    priceToBook: v(stats.priceToBook),
+    enterpriseValue: v(stats.enterpriseValue),
+    profitMargins: v(stats.profitMargins),
+    roe: v(stats.returnOnEquity),
+    roa: v(stats.returnOnAssets),
+    freeCashflow: v(fin.freeCashflow),
+    totalCash: v(fin.totalCash),
+    totalDebt: v(fin.totalDebt),
+    debtToEquity: v(fin.debtToEquity),
+    currentRatio: v(fin.currentRatio),
+    revenueGrowth: v(fin.revenueGrowth),
+    earningsGrowth: v(fin.earningsGrowth),
+    epsEstimateNextQ: v(currentQTrend.earningsEstimate?.avg),
+    revenueEstimateNextYear: v(nextYearTrend.revenueEstimate?.avg),
+    nextEarningsDate: cal.earnings?.earningsDate?.[0]?.fmt || null,
+    latestFilingDate: latestFiling.date || null,
+    latestFilingType: latestFiling.type || null,
+    latestFilingUrl: latestFiling.edgarUrl || null,
+    fetchedAt: new Date().toISOString(),
+  };
+}
+
+function _fmtNumber(n, decimals = 2) {
+  if (n == null) return "N/A";
+  if (Math.abs(n) >= 1e9) return (n / 1e9).toFixed(1) + "B";
+  if (Math.abs(n) >= 1e6) return (n / 1e6).toFixed(1) + "M";
+  return n.toFixed(decimals);
+}
+
+function _buildSnapshotBlock(snap) {
+  if (!snap) return "<snapshot>unavailable — user-entered data only</snapshot>";
+  const pct = (n) => n != null ? (n * 100).toFixed(1) + "%" : "N/A";
+  return `<snapshot>
+  ticker: ${snap.ticker}
+  sector: ${snap.sector || "N/A"} | industry: ${snap.industry || "N/A"}
+  employees: ${snap.employees ? snap.employees.toLocaleString() : "N/A"}
+  business_summary: ${(snap.businessSummary || "").slice(0, 500)}
+  market_cap: ${_fmtNumber(snap.marketCap)}
+  52w_range: ${_fmtNumber(snap.fiftyTwoWeekLow, 2)} – ${_fmtNumber(snap.fiftyTwoWeekHigh, 2)}
+  beta: ${snap.beta?.toFixed(2) ?? "N/A"}
+  dividend_yield: ${pct(snap.dividendYield)}
+  trailing_pe: ${snap.trailingPE?.toFixed(1) ?? "N/A"}
+  forward_pe: ${snap.forwardPE?.toFixed(1) ?? "N/A"}
+  peg_ratio: ${snap.pegRatio?.toFixed(2) ?? "N/A"}
+  price_to_book: ${snap.priceToBook?.toFixed(2) ?? "N/A"}
+  profit_margins: ${pct(snap.profitMargins)}
+  roe: ${pct(snap.roe)} | roa: ${pct(snap.roa)}
+  free_cash_flow: ${_fmtNumber(snap.freeCashflow)}
+  debt_to_equity: ${snap.debtToEquity?.toFixed(1) ?? "N/A"}
+  current_ratio: ${snap.currentRatio?.toFixed(2) ?? "N/A"}
+  revenue_growth_yoy: ${pct(snap.revenueGrowth)} | earnings_growth_yoy: ${pct(snap.earningsGrowth)}
+  eps_estimate_next_q: ${snap.epsEstimateNextQ?.toFixed(2) ?? "N/A"}
+  next_earnings_date: ${snap.nextEarningsDate || "N/A"}
+  latest_filing: ${snap.latestFilingType || "N/A"} on ${snap.latestFilingDate || "N/A"}
+  data_freshness: ${snap.stale ? "cached" : "fresh"} as of ${snap.fetchedAt}
+</snapshot>`;
+}
+
+// Generate a structured research memo via DeepSeek Pro.
+// Returns parsed memo object or throws.
+export async function generateResearchMemo({ ticker, currentPrice, snapshot, userThesis, manualNotes, holdingContext, profile, rules }) {
+  const snapshotBlock = _buildSnapshotBlock(snapshot);
+  const rulesBlock = (rules || []).length > 0
+    ? (rules).map((r, i) => `  ${i + 1}. ${r}`).join("\n")
+    : "  (none)";
+
+  const holdingBlock = holdingContext
+    ? `<holding>
+  shares: ${holdingContext.shares} @ ${holdingContext.costBasis} ${holdingContext.currency || ""}
+  current_value: ${currentPrice ? (holdingContext.shares * currentPrice).toFixed(0) : "N/A"}
+  buy_reason: ${holdingContext.buyReason || "(not recorded)"}
+  buy_date: ${holdingContext.buyDate || "N/A"}
+</holding>`
+    : "<holding>not currently held</holding>";
+
+  const profileCtx = await memoryManager.assemble({
+    ticker,
+    query: userThesis || ticker,
+    depth: ContextDepth.STANDARD,
+    feature: "research",
+    holdings: profile?.holdings,
+    prices: profile?.prices,
+  });
+
+  const system = `You are a rigorous buy-side equity analyst preparing a decision memo for a private investor. Your role is to synthesize available information into a structured, conditional assessment — NOT to give a trade signal.
+
+Rules for this memo:
+- NEVER use imperative phrases like "Buy now", "Sell now", "You should buy". Use conditional language: "worth considering if", "watch for", "setup improves when".
+- Status labels are conditional setups, not commands. "Buy setup" means conditions exist that COULD support entry, not that the investor must act.
+- Confidence reflects evidence quality (how well-sourced, how internally consistent), NOT the probability of a profitable outcome.
+- All valuation figures must be presented as ranges (bull/base/bear), never as a single target price.
+- Every factual claim must reference its data source (Yahoo Finance snapshot, user input, or AI inference).
+- If data is missing or uncertain, say so explicitly rather than fabricating.
+- Where numbers come from the Yahoo Finance snapshot, note "Source: Yahoo Finance (${snapshot?.stale ? "cached" : "live"}, ${snapshot?.fetchedAt?.slice(0, 10) || "N/A"})".
+- Apply the investor's rules explicitly in the rules_conflict_check section.
+
+Output strictly valid JSON matching the schema below. No markdown, no explanation outside the JSON.`;
+
+  const user = `Generate a research memo for:
+
+<ticker>${ticker.toUpperCase()}</ticker>
+<current_price>${currentPrice ?? "N/A"}</current_price>
+
+${snapshotBlock}
+
+<user_thesis>${userThesis || "(not provided)"}</user_thesis>
+<manual_notes>${manualNotes || "(none)"}</manual_notes>
+
+${holdingBlock}
+
+<investor_rules>
+${rulesBlock}
+</investor_rules>
+
+<investor_context>
+${profileCtx.blocks}
+</investor_context>
+
+Return JSON with this exact schema:
+{
+  "status": "buy_setup" | "watch" | "reduce_risk" | "avoid",
+  "confidence": "high" | "medium" | "low",
+  "confidence_basis": "one sentence explaining what drives the confidence level",
+  "max_risk_summary": "brief string",
+  "thesis_summary": "2-3 sentences, conditional language only",
+  "business_snapshot": {
+    "summary": "",
+    "revenue_drivers": "",
+    "competitive_edge": "",
+    "market_debates": ""
+  },
+  "deep_research_checklist": [
+    { "item": "", "finding": "", "evidence_quality": "primary_filing|vendor_api|ai_inference|user_entered", "source": "" }
+  ],
+  "valuation": {
+    "current_price": 0,
+    "multiples": { "trailing_pe": null, "forward_pe": null, "ev_ebitda": null, "price_to_book": null, "fcf_yield": null },
+    "peer_set": [],
+    "scenarios": {
+      "bull": { "fair_value": 0, "assumptions": "" },
+      "base": { "fair_value": 0, "assumptions": "" },
+      "bear": { "fair_value": 0, "assumptions": "" }
+    },
+    "fair_value_band": { "low": 0, "high": 0 },
+    "assumptions": [],
+    "data_source": "",
+    "stale": false
+  },
+  "position_sizing": {
+    "current_pct": 0,
+    "max_pct": 0,
+    "first_tranche_pct": 0,
+    "add_condition": "",
+    "trim_condition": "",
+    "invalidation_condition": ""
+  },
+  "trading_strategy": {
+    "watch_items": [],
+    "buy_trigger": "",
+    "sell_trim_trigger": "",
+    "review_date": "YYYY-MM-DD",
+    "batch_plan": ""
+  },
+  "rules_conflict_check": [
+    { "rule_text": "", "result": "pass" | "fail" | "n/a", "notes": "" }
+  ],
+  "disclaimer_flags": {
+    "data_tier": "Yahoo Finance + user input",
+    "stale": false,
+    "missing_data": []
+  }
+}`;
+
+  const raw = await callLLM({
+    system,
+    messages: [{ role: "user", content: user }],
+    model: MODELS.smart,
+    max_tokens: 3000,
+  });
+
+  const clean = raw
+    .replace(/```json\s*/gi, "").replace(/```/g, "")
+    .replace(/"/g, '"').replace(/"/g, '"')
+    .trim();
+  const s = clean.indexOf("{"), e = clean.lastIndexOf("}");
+  if (s === -1) throw new Error("Research memo: no JSON in response");
+  return JSON.parse(clean.slice(s, e + 1));
+}
+
+// Evaluate a memo's conclusions against the investor's rules (cheap flash model).
+// Returns array matching rules_conflict_check schema.
+export async function checkResearchRules(memoSummary, rules) {
+  if (!rules || rules.length === 0) return [];
+
+  const prompt = `You are evaluating whether a stock research memo complies with an investor's personal investment rules.
+
+Memo summary:
+- Status: ${memoSummary.status}
+- Confidence: ${memoSummary.confidence}
+- Max risk: ${memoSummary.max_risk_summary}
+- Thesis: ${memoSummary.thesis_summary}
+- Position sizing: current ${memoSummary.position_sizing?.current_pct ?? 0}%, proposed max ${memoSummary.position_sizing?.max_pct ?? 0}%
+- Invalidation: ${memoSummary.position_sizing?.invalidation_condition}
+
+Investor rules:
+${rules.map((r, i) => `${i + 1}. ${r}`).join("\n")}
+
+For each rule, output one JSON object with:
+- rule_text: exact rule text
+- result: "pass" | "fail" | "n/a" (use n/a when the rule is not applicable to this memo)
+- notes: one sentence explaining the evaluation
+
+Return a JSON array only. No markdown, no explanation.`;
+
+  const raw = await callLLM({
+    messages: [{ role: "user", content: prompt }],
+    model: MODELS.fast,
+    max_tokens: 800,
+  });
+
+  const clean = raw
+    .replace(/```json\s*/gi, "").replace(/```/g, "")
+    .replace(/"/g, '"').replace(/"/g, '"')
+    .trim();
+  const s = clean.indexOf("["), e = clean.lastIndexOf("]");
+  if (s === -1) return [];
+  try {
+    return JSON.parse(clean.slice(s, e + 1));
+  } catch {
+    return [];
+  }
+}
+
+// Build the sources array for a research version (shared by Research.js and ResearchMemo.js).
+export function buildResearchSources(memoData, snapshot) {
+  const sources = [];
+  if (snapshot) {
+    sources.push({
+      provider: "Yahoo Finance",
+      tier: snapshot.stale ? "Yahoo Finance (cached)" : "Yahoo Finance (live)",
+      description: `Fundamentals snapshot for ${snapshot.ticker}`,
+      fetchedAt: snapshot.fetchedAt,
+    });
+    if (snapshot.latestFilingUrl) {
+      sources.push({
+        provider: "SEC EDGAR",
+        tier: "SEC Filing",
+        description: `${snapshot.latestFilingType || "Filing"} — ${snapshot.latestFilingDate || ""}`,
+        url: snapshot.latestFilingUrl,
+        fetchedAt: snapshot.fetchedAt,
+      });
+    }
+  }
+  sources.push({
+    provider: "User",
+    tier: "User Input",
+    description: "Thesis and manual notes entered by investor",
+    fetchedAt: new Date().toISOString(),
+  });
+  sources.push({
+    provider: "DeepSeek v4 Pro",
+    tier: "AI Inference",
+    description: "Analysis and synthesis generated by AI",
+    fetchedAt: new Date().toISOString(),
+  });
+  return sources;
 }

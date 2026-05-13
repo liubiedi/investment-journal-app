@@ -113,6 +113,59 @@ async function initSchema(db) {
       created_at INTEGER NOT NULL,
       data TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS research_memos (
+      id TEXT PRIMARY KEY,
+      ticker TEXT NOT NULL,
+      exchange TEXT,
+      company_name TEXT,
+      current_version_id TEXT,
+      status TEXT,
+      confidence TEXT,
+      created_at TEXT,
+      last_reviewed_at TEXT,
+      next_review_date TEXT,
+      holding_id TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS research_versions (
+      id TEXT PRIMARY KEY,
+      memo_id TEXT NOT NULL,
+      version_num INTEGER NOT NULL,
+      thesis TEXT,
+      business_snapshot TEXT,
+      valuation TEXT,
+      position_sizing TEXT,
+      trading_strategy TEXT,
+      disclaimer_flags TEXT,
+      sources TEXT,
+      model_id TEXT,
+      generated_at TEXT,
+      created_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS research_rule_checks (
+      id TEXT PRIMARY KEY,
+      version_id TEXT NOT NULL,
+      rule_text TEXT,
+      result TEXT,
+      notes TEXT,
+      override_reason TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS research_links (
+      id TEXT PRIMARY KEY,
+      memo_id TEXT NOT NULL,
+      entity_type TEXT NOT NULL,
+      entity_id TEXT NOT NULL,
+      linked_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS research_snapshot_cache (
+      ticker TEXT PRIMARY KEY,
+      data TEXT NOT NULL,
+      fetched_at INTEGER NOT NULL
+    );
   `);
   // FTS5 full-text search + semantic memory tables (separate exec batch)
   await db.execAsync(`
@@ -178,6 +231,33 @@ async function initSchema(db) {
       DELETE FROM journal_fts WHERE source_id = OLD.month_key AND source_type = 'monthly';
     END;
 
+    CREATE TRIGGER IF NOT EXISTS research_fts_ai AFTER INSERT ON research_versions BEGIN
+      INSERT INTO journal_fts(content, ticker_mentions, source_type, source_id, entry_date, emotion)
+      VALUES(
+        COALESCE(NEW.thesis, '') || ' ' || COALESCE(json_extract(NEW.business_snapshot, '$.summary'), ''),
+        (SELECT UPPER(ticker) FROM research_memos WHERE id = NEW.memo_id),
+        'research',
+        NEW.id,
+        NEW.created_at,
+        ''
+      );
+    END;
+    CREATE TRIGGER IF NOT EXISTS research_fts_au AFTER UPDATE OF thesis, business_snapshot ON research_versions BEGIN
+      DELETE FROM journal_fts WHERE source_id = OLD.id AND source_type = 'research';
+      INSERT INTO journal_fts(content, ticker_mentions, source_type, source_id, entry_date, emotion)
+      VALUES(
+        COALESCE(NEW.thesis, '') || ' ' || COALESCE(json_extract(NEW.business_snapshot, '$.summary'), ''),
+        (SELECT UPPER(ticker) FROM research_memos WHERE id = NEW.memo_id),
+        'research',
+        NEW.id,
+        NEW.created_at,
+        ''
+      );
+    END;
+    CREATE TRIGGER IF NOT EXISTS research_fts_ad AFTER DELETE ON research_versions BEGIN
+      DELETE FROM journal_fts WHERE source_id = OLD.id AND source_type = 'research';
+    END;
+
     CREATE TABLE IF NOT EXISTS semantic_memory (
       id TEXT PRIMARY KEY,
       memory_type TEXT NOT NULL,
@@ -226,7 +306,7 @@ async function initSchema(db) {
   } catch {}
 }
 
-const newId = (prefix) => `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+export const newId = (prefix) => `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
 // ---------- kv (philosophy, rules, default master, etc.) ----------
 export async function kvGet(key, fallback = null) {
@@ -761,6 +841,208 @@ export async function reinforceEntry(entryId) {
     `UPDATE ${table} SET relevance_weight = MIN(2.0, relevance_weight + 0.2) WHERE id = ?`,
     [entryId]
   );
+}
+
+// ──────────────────────────────────────────────────────────────
+// Research memos
+// ──────────────────────────────────────────────────────────────
+
+export async function listResearchMemos() {
+  const db = await getDb();
+  return await db.getAllAsync("SELECT * FROM research_memos ORDER BY created_at DESC");
+}
+
+export async function getResearchMemo(memoId) {
+  const db = await getDb();
+  return await db.getFirstAsync("SELECT * FROM research_memos WHERE id = ?", [memoId]);
+}
+
+export async function getResearchMemoByTicker(ticker) {
+  const db = await getDb();
+  return await db.getFirstAsync(
+    "SELECT * FROM research_memos WHERE UPPER(ticker) = UPPER(?) ORDER BY created_at DESC",
+    [ticker]
+  );
+}
+
+export async function upsertResearchMemo(memo) {
+  const db = await getDb();
+  await db.runAsync(
+    `INSERT OR REPLACE INTO research_memos
+     (id, ticker, exchange, company_name, current_version_id, status, confidence,
+      created_at, last_reviewed_at, next_review_date, holding_id)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+    [
+      memo.id, memo.ticker, memo.exchange || null, memo.companyName || null,
+      memo.currentVersionId || null, memo.status || null, memo.confidence || null,
+      memo.createdAt, memo.lastReviewedAt || null, memo.nextReviewDate || null,
+      memo.holdingId || null,
+    ]
+  );
+}
+
+export async function deleteResearchMemo(memoId) {
+  const db = await getDb();
+  await db.withTransactionAsync(async () => {
+    const versions = await db.getAllAsync(
+      "SELECT id FROM research_versions WHERE memo_id = ?", [memoId]
+    );
+    for (const v of versions) {
+      await db.runAsync("DELETE FROM research_rule_checks WHERE version_id = ?", [v.id]);
+    }
+    await db.runAsync("DELETE FROM research_versions WHERE memo_id = ?", [memoId]);
+    await db.runAsync("DELETE FROM research_links WHERE memo_id = ?", [memoId]);
+    await db.runAsync("DELETE FROM research_memos WHERE id = ?", [memoId]);
+  });
+}
+
+// ── versions ──
+
+export async function listResearchVersions(memoId) {
+  const db = await getDb();
+  return await db.getAllAsync(
+    "SELECT * FROM research_versions WHERE memo_id = ? ORDER BY version_num DESC",
+    [memoId]
+  );
+}
+
+export async function getResearchVersion(versionId) {
+  const db = await getDb();
+  const row = await db.getFirstAsync("SELECT * FROM research_versions WHERE id = ?", [versionId]);
+  if (!row) return null;
+  return rowToResearchVersion(row);
+}
+
+export async function insertResearchVersion(v) {
+  const db = await getDb();
+  await db.runAsync(
+    `INSERT INTO research_versions
+     (id, memo_id, version_num, thesis, business_snapshot, valuation,
+      position_sizing, trading_strategy, disclaimer_flags, sources, model_id, generated_at, created_at)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    [
+      v.id, v.memoId, v.versionNum, v.thesis || null,
+      v.businessSnapshot ? JSON.stringify(v.businessSnapshot) : null,
+      v.valuation ? JSON.stringify(v.valuation) : null,
+      v.positionSizing ? JSON.stringify(v.positionSizing) : null,
+      v.tradingStrategy ? JSON.stringify(v.tradingStrategy) : null,
+      v.disclaimerFlags ? JSON.stringify(v.disclaimerFlags) : null,
+      v.sources ? JSON.stringify(v.sources) : null,
+      v.modelId || null, v.generatedAt || null, v.createdAt,
+    ]
+  );
+}
+
+function rowToResearchVersion(r) {
+  return {
+    id: r.id, memoId: r.memo_id, versionNum: r.version_num,
+    thesis: r.thesis || '',
+    businessSnapshot: safeJson(r.business_snapshot, {}),
+    valuation: safeJson(r.valuation, {}),
+    positionSizing: safeJson(r.position_sizing, {}),
+    tradingStrategy: safeJson(r.trading_strategy, {}),
+    disclaimerFlags: safeJson(r.disclaimer_flags, {}),
+    sources: safeJson(r.sources, []),
+    modelId: r.model_id, generatedAt: r.generated_at, createdAt: r.created_at,
+  };
+}
+
+// ── rule checks ──
+
+export async function insertResearchRuleChecks(checks) {
+  const db = await getDb();
+  await db.withTransactionAsync(async () => {
+    for (const c of checks) {
+      await db.runAsync(
+        `INSERT INTO research_rule_checks (id, version_id, rule_text, result, notes, override_reason)
+         VALUES (?,?,?,?,?,?)`,
+        [c.id, c.versionId, c.ruleText, c.result, c.notes || null, c.overrideReason || null]
+      );
+    }
+  });
+}
+
+export async function listResearchRuleChecks(versionId) {
+  const db = await getDb();
+  return await db.getAllAsync(
+    "SELECT * FROM research_rule_checks WHERE version_id = ?", [versionId]
+  );
+}
+
+export async function updateRuleCheckOverride(checkId, overrideReason) {
+  const db = await getDb();
+  await db.runAsync(
+    "UPDATE research_rule_checks SET override_reason = ? WHERE id = ?",
+    [overrideReason, checkId]
+  );
+}
+
+// ── links ──
+
+export async function insertResearchLink(memoId, entityType, entityId) {
+  const db = await getDb();
+  const id = newId("rlink");
+  await db.runAsync(
+    "INSERT OR IGNORE INTO research_links (id, memo_id, entity_type, entity_id, linked_at) VALUES (?,?,?,?,?)",
+    [id, memoId, entityType, entityId, new Date().toISOString()]
+  );
+}
+
+export async function listResearchLinks(memoId) {
+  const db = await getDb();
+  return await db.getAllAsync("SELECT * FROM research_links WHERE memo_id = ?", [memoId]);
+}
+
+// ── Yahoo Finance snapshot cache ──
+
+const SNAPSHOT_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+export async function getCachedSnapshot(ticker) {
+  const db = await getDb();
+  const row = await db.getFirstAsync(
+    "SELECT data, fetched_at FROM research_snapshot_cache WHERE UPPER(ticker) = UPPER(?)",
+    [ticker]
+  );
+  if (!row) return null;
+  if (Date.now() - row.fetched_at > SNAPSHOT_TTL_MS) return null; // expired
+  return safeJson(row.data, null);
+}
+
+export async function setCachedSnapshot(ticker, data) {
+  const db = await getDb();
+  await db.runAsync(
+    "INSERT OR REPLACE INTO research_snapshot_cache (ticker, data, fetched_at) VALUES (UPPER(?),?,?)",
+    [ticker, JSON.stringify(data), Date.now()]
+  );
+}
+
+// ── semantic memory helpers for research ──
+
+export async function getRecentResearchMemos(ticker, limit = 2) {
+  const db = await getDb();
+  return await db.getAllAsync(
+    "SELECT * FROM semantic_memory WHERE memory_type = 'research_memo' AND scope = UPPER(?) ORDER BY distilled_at DESC LIMIT ?",
+    [ticker, limit]
+  );
+}
+
+// ── save memo + version + rule checks atomically ──
+
+export async function saveResearchMemoWithVersion(memo, version, ruleChecks) {
+  const db = await getDb();
+  await db.withTransactionAsync(async () => {
+    await upsertResearchMemo(memo);
+    await insertResearchVersion(version);
+    if (ruleChecks && ruleChecks.length > 0) {
+      for (const c of ruleChecks) {
+        await db.runAsync(
+          `INSERT INTO research_rule_checks (id, version_id, rule_text, result, notes, override_reason)
+           VALUES (?,?,?,?,?,?)`,
+          [c.id, c.versionId, c.ruleText, c.result, c.notes || null, c.overrideReason || null]
+        );
+      }
+    }
+  });
 }
 
 // Import a full backup snapshot — runs inside a transaction to avoid partial state

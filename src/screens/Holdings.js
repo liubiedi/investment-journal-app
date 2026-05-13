@@ -4,7 +4,7 @@ import { View, ScrollView, Pressable, ActivityIndicator, Platform, KeyboardAvoid
 import { useSafeAreaInsets, SafeAreaView } from "react-native-safe-area-context";
 import { useNavigation } from "@react-navigation/native";
 import {
-  Plus, RefreshCw, Loader2, Wallet, Trash2, ChevronLeft, Calendar, MessageCircle, Pencil,
+  Plus, RefreshCw, Loader2, Wallet, Trash2, ChevronLeft, Calendar, MessageCircle, Pencil, Search,
 } from "lucide-react-native";
 import DateTimePicker from "@react-native-community/datetimepicker";
 
@@ -16,7 +16,7 @@ import * as db from "../db";
 import {
   TSerif, TSerifBold, TSerifItalic, TMono, Kicker,
   PaperInput, StockSearchInput, FilledButton, OutlineButton, Masthead, FormHeader, Field,
-  MasterPickerModal,
+  MasterPickerModal, StatusBadge,
 } from "../components";
 
 export default function HoldingsScreen() {
@@ -268,7 +268,9 @@ export default function HoldingsScreen() {
                   weightPct={holdingWeights[h.id] ?? 0}
                   weightIsForex={hasForex}
                   onEdit={() => setEditingId(h.id)}
-                  onAskMentor={() => startAskMentor(h, app.prices?.data?.[h.symbol])} />
+                  onAskMentor={() => startAskMentor(h, app.prices?.data?.[h.symbol])}
+                  researchStatus={(app.researchMemos || []).find(m => m.ticker?.toUpperCase() === h.symbol?.toUpperCase())?.status || null}
+                  onResearch={() => nav.navigate("research", { prefillTicker: h.symbol, prefillHoldingId: h.id })} />
               )
             )}
           </View>
@@ -301,7 +303,7 @@ function fmtBuyDate(iso) {
   return `${y}.${m}.${d}`;
 }
 
-function HoldingRow({ holding, price, weightPct, weightIsForex, onEdit, onAskMentor }) {
+function HoldingRow({ holding, price, weightPct, weightIsForex, onEdit, onAskMentor, researchStatus, onResearch }) {
   const cost = holding.shares * holding.costBasis;
   const hasLive = !!price;
   const market = hasLive ? holding.shares * price.price : cost;
@@ -374,11 +376,20 @@ function HoldingRow({ holding, price, weightPct, weightIsForex, onEdit, onAskMen
           {price.asOf}{price.resolvedTicker && price.resolvedTicker !== holding.symbol ? ` · ${price.resolvedTicker}` : ""}
         </TMono>
       )}
-      <Pressable onPress={() => onAskMentor?.()}
-        style={{ marginTop: 8, flexDirection: "row", alignItems: "center", gap: 5, alignSelf: "flex-start" }}>
-        <MessageCircle size={11} color={colors.accent} strokeWidth={1.5} />
-        <TMono style={{ fontSize: 10, color: colors.accent }}>带入问道 ↗</TMono>
-      </Pressable>
+      <View style={{ marginTop: 8, flexDirection: "row", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+        <Pressable onPress={() => onAskMentor?.()}
+          style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
+          <MessageCircle size={11} color={colors.accent} strokeWidth={1.5} />
+          <TMono style={{ fontSize: 10, color: colors.accent }}>带入问道 ↗</TMono>
+        </Pressable>
+        <Pressable onPress={() => onResearch?.()}
+          style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
+          <Search size={11} color={colors.inkFaint} strokeWidth={1.5} />
+          <TMono style={{ fontSize: 10, color: colors.inkFaint }}>
+            {researchStatus ? `研究 (${researchStatus})` : "更新研究 ↗"}
+          </TMono>
+        </Pressable>
+      </View>
     </Pressable>
   );
 }

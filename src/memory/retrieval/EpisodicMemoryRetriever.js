@@ -158,6 +158,30 @@ export class EpisodicMemoryRetriever {
             date: row.entry_date,
           };
         }
+        case "research": {
+          const rv = await db.getFirstAsync(
+            "SELECT id, memo_id, version_num, thesis, created_at FROM research_versions WHERE id = ?",
+            [row.source_id]
+          );
+          if (!rv) return null;
+          const rm = await db.getFirstAsync(
+            "SELECT ticker, company_name, status, confidence FROM research_memos WHERE id = ?",
+            [rv.memo_id]
+          );
+          return {
+            type: "research",
+            bm25Score: row.bm25_score,
+            relevanceWeight: 1.2,
+            id: rv.id,
+            memoId: rv.memo_id,
+            ticker: rm?.ticker,
+            companyName: rm?.company_name,
+            status: rm?.status,
+            versionNum: rv.version_num,
+            thesis: rv.thesis,
+            date: rv.created_at,
+          };
+        }
         default:
           return null;
       }
