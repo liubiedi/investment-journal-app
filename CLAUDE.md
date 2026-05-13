@@ -54,10 +54,12 @@ Before running `git merge` or `git push` after a merge:
 
 ---
 
-## Worktree setup — node_modules junction
+## Worktree setup — node_modules junction + entry point
 
-Git worktrees do not get their own `node_modules`. Without it, Metro throws:
-> ConfigError: Cannot resolve entry file … `node_modules/expo/AppEntry.js`
+Git worktrees do not get their own `node_modules`. Two steps are needed to run
+Expo from a worktree.
+
+### Step 1 — node_modules junction
 
 **After creating any new worktree**, run this once in PowerShell to create a
 directory junction (no files copied, no admin rights needed):
@@ -68,8 +70,17 @@ New-Item -ItemType Junction `
   -Target "D:\My Documents\AI VibeCoding\Persona investment journal app\investment-journal-app\node_modules"
 ```
 
-Replace `<worktree-name>` with the actual worktree folder name. The junction is
-transparent to Metro and Expo — they see a normal `node_modules` folder.
+Replace `<worktree-name>` with the actual worktree folder name.
+
+### Step 2 — local entry point
+
+The junction makes `node_modules` physically live in the main repo. That means
+`expo/AppEntry.js`'s built-in `../../App` import resolves to the **main repo's**
+`App.js`, not the worktree's — Metro then errors with "Unable to resolve App".
+
+Fix: the worktree must have its own `index.js` entry point and `"main": "index.js"`
+in `package.json`. Both files already exist on this branch (`claude/friendly-wu-473261`).
+When creating a future worktree, copy them from here.
 
 ---
 
