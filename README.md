@@ -10,6 +10,7 @@ Personal investment journal — Android app built with Expo / React Native.
 - 🤔 Thoughts / dilemmas (non-trade journaling)
 - 📊 Current holdings with live prices (Yahoo Finance)
 - 🎓 AI mentor chat, or consult investment masters (Peter Lynch, Buffett, Munger, Dalio, Marks, Graham)
+- 🔬 **Research module** — versioned, source-backed decision memos with AI-generated conditional status (Buy Setup / Watch / Reduce Risk / Avoid), bull/base/bear valuation, rules conflict check, and Yahoo Finance fundamental data enrichment
 - 📓 **Export to Obsidian-compatible Markdown vault** — save anywhere (Google Drive, email, etc.)
 - 🔒 All data stored locally in SQLite — never leaves your device unless you explicitly export
 
@@ -80,7 +81,8 @@ The app is deliberately frugal with DeepSeek tokens:
 
 - **Yahoo Finance for prices** — 0 tokens, 200ms.
 - **deepseek-chat** for structured trade parsing — ~$0.0002 per trade.
-- **deepseek-v4-pro** for mentor feedback, master views, monthly commentary.
+- **deepseek-v4-pro** for mentor feedback, master views, monthly commentary, and research memo generation.
+- **deepseek-v4-flash** for rules conflict checking in research memos.
 - **Server-side prefix caching** — DeepSeek auto-caches request prefixes; rapid back-and-forth in chat reuses the cached system prompt at a discount.
 - **No auto-feedback** — mentor comments only on explicit request. Each "求教" button tap costs roughly a fraction of a cent.
 - **Context trimming** — trade feedback only passes last 10 trades (not all history) to save ingress tokens.
@@ -110,12 +112,16 @@ investment-journal-app/
 │   ├── api.js                      # DeepSeek + Yahoo Finance
 │   ├── voice.js                    # speech-to-text hook
 │   ├── components.js               # shared UI components
+│   ├── memory/                     # four-tier context system (HotCache, MemoryManager, DNA, FTS5 retrieval)
 │   └── screens/
 │       ├── Home.js
 │       ├── Weekly.js
 │       ├── Monthly.js
-│       ├── Log.js                  # trades + thoughts
-│       ├── Holdings.js
+│       ├── Log.js                  # trades + thoughts; "研究这个想法" on watch entries
+│       ├── Holdings.js             # "更新研究" CTA + status dot per holding row
+│       ├── Research.js             # 研究 tab — review queue + new-memo composer
+│       ├── ResearchMemo.js         # memo detail with versioning, rules check, attach-to-trade
+│       ├── Roundtable.js
 │       ├── Mentor.js
 │       └── Settings.js
 └── assets/

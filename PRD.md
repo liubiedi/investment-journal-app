@@ -2,8 +2,8 @@
 
 ## 投资日志 · The Investor's Ledger
 
-**Version:** 1.4
-**Date:** 2026-05-10
+**Version:** 1.5
+**Date:** 2026-05-13
 **Format:** Android mobile application
 **Target:** AI coding agents (single-source-of-truth for autonomous implementation)
 
@@ -21,6 +21,7 @@ A personal, offline-first investment journaling Android app that combines struct
 5. **Local-only data** — SQLite on device, never cloud-synced. User owns their data.
 6. **Token-frugal AI** — feedback is on-demand (never auto-triggered), prompt caching reduces cost ~90% for chat.
 7. **华山论道 roundtable** — launch a multi-master AI investment committee discussion on any topic or holding; masters debate in structured rounds with meeting minutes auto-generated at the end.
+8. **Research module (个股研究)** — versioned, source-backed decision memos for stocks being watched or held. AI generates conditional status (Buy Setup / Watch / Reduce Risk / Avoid) with bull/base/bear valuation, position sizing, rules conflict check, and full data provenance. Never imperative language. Every regeneration is a new immutable version. Integrated into the four-tier memory system so mentors always know the current research conclusion when a stock is discussed.
 
 ---
 
@@ -192,6 +193,73 @@ CREATE TABLE prices_meta (
   id INTEGER PRIMARY KEY CHECK (id=1),
   last_updated INTEGER
 );
+
+-- Research module (V2)
+
+-- Core memo (one row per ticker; current_version_id points to latest version)
+CREATE TABLE research_memos (
+  id TEXT PRIMARY KEY,
+  ticker TEXT NOT NULL,
+  exchange TEXT,
+  company_name TEXT,
+  current_version_id TEXT,
+  status TEXT,           -- 'buy_setup'|'watch'|'reduce_risk'|'avoid'
+  confidence TEXT,       -- 'high'|'medium'|'low'
+  created_at TEXT,
+  last_reviewed_at TEXT,
+  next_review_date TEXT,
+  holding_id TEXT        -- nullable FK → holdings.id
+);
+
+-- Immutable version snapshots (every save/regenerate = new row; never updated in place)
+CREATE TABLE research_versions (
+  id TEXT PRIMARY KEY,
+  memo_id TEXT NOT NULL,
+  version_num INTEGER NOT NULL,
+  thesis TEXT,
+  business_snapshot TEXT,   -- JSON: {summary, revenue_drivers, competitive_edge, market_debates}
+  valuation TEXT,           -- JSON: {multiples, scenarios, fair_value_band, assumptions, ...}
+  position_sizing TEXT,     -- JSON: {current_pct, max_pct, first_tranche_pct, add/trim/invalidation conditions}
+  trading_strategy TEXT,    -- JSON: {watch_items, buy_trigger, sell_trim_trigger, review_date, batch_plan}
+  disclaimer_flags TEXT,    -- JSON: {data_tier, stale, missing_data, snapshot_fetched_at}
+  sources TEXT,             -- JSON array of source cards
+  model_id TEXT,
+  generated_at TEXT,
+  created_at TEXT
+);
+
+-- Rule evaluations per version
+CREATE TABLE research_rule_checks (
+  id TEXT PRIMARY KEY,
+  version_id TEXT NOT NULL,
+  rule_text TEXT,
+  result TEXT,          -- 'pass'|'fail'|'n/a'
+  notes TEXT,
+  override_reason TEXT  -- required when overriding a 'fail'
+);
+
+-- Cross-reference links to other app entities (trades, thoughts, holdings)
+CREATE TABLE research_links (
+  id TEXT PRIMARY KEY,
+  memo_id TEXT NOT NULL,
+  entity_type TEXT NOT NULL,   -- 'holding'|'trade'|'thought'
+  entity_id TEXT NOT NULL,
+  linked_at TEXT
+);
+
+-- Yahoo Finance quoteSummary 24h cache
+CREATE TABLE research_snapshot_cache (
+  ticker TEXT PRIMARY KEY,
+  data TEXT NOT NULL,          -- full JSON snapshot
+  fetched_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL     -- fetched_at + 24h
+);
+
+-- FTS5 triggers: research_versions → journal_fts (auto-indexing for episodic retrieval)
+-- CREATE TRIGGER research_fts_ai AFTER INSERT ON research_versions ...
+-- CREATE TRIGGER research_fts_au AFTER UPDATE ON research_versions ...
+-- CREATE TRIGGER research_fts_ad AFTER DELETE ON research_versions ...
+-- (source_type = 'research'; EpisodicMemoryRetriever._hydrate() handles this type)
 ```
 
 **Default KV values on first launch:**
@@ -371,6 +439,72 @@ Sub-tab switcher: two full-width buttons at the top; active tab has ink backgrou
 
 **Data:** sessions persisted to `roundtable_sessions` table; full round data (responses + verdicts + minutes) stored as JSON in `data` column.
 
+### 5.9 Research (tab: 研究, routes: `research` + `researchMemo`)
+
+Two screens: Research Home (queue) and Research Memo detail. `researchMemo` is a hidden tab (`tabBarButton: () => null`), navigated via `nav.navigate("researchMemo", { memoId })`.
+
+#### Research Home (`src/screens/Research.js`)
+
+```
+Masthead kicker="个股研究" title="Research Queue"  [新建 +]
+
+Section "需要复盘 Review Due"  ← next_review_date ≤ today
+  ResearchMemoCard × N          ← red left border, clock icon
+
+Section "进行中 Active"
+  ResearchMemoCard × N
+
+EmptyState if no memos
+```
+
+**New Memo composer (bottom-sheet Modal):**
+1. `StockSearchInput` — ticker autocomplete (Yahoo Finance search)
+2. `PaperInput` — Thesis (2-4 sentences, why interesting, what must be true)
+3. `PaperInput` — Manual Notes (unverified user facts)
+4. `PaperInput` — Review Horizon in months (default: 3)
+5. [生成研究备忘录 Generate Memo] → `fetchResearchSnapshot()` + `generateResearchMemo()` → save → navigate to memo
+
+**Auto-open:** when navigated with `route.params.prefillTicker` (from Holdings "更新研究" or Log "研究这个想法"), composer opens pre-filled.
+
+#### Research Memo detail (`src/screens/ResearchMemo.js`)
+
+**Header:** Masthead kicker=ticker, title=company_name; `StatusBadge` · `ConfidencePill` · version chip ("v3 · 2026-05-13")
+
+**Collapsible sections:**
+
+| Section | Default | Content |
+|---------|---------|---------|
+| Current Conclusion | expanded | status, confidence, max risk, thesis summary |
+| Business Snapshot | expanded | summary, revenue drivers, competitive edge, market debates |
+| Deep Research Checklist | collapsed | items with evidence-quality tags |
+| Valuation Check | expanded | multiples (P/E, P/B, PEG, EV/EBITDA), scenarios (bull/base/bear), fair-value band, assumptions |
+| Position Sizing | expanded | current % / max % / first tranche, add/trim/invalidation conditions |
+| 3–6 Month Strategy | collapsed | watch items, buy/sell triggers, review date, batch plan |
+| Rules Conflict Check | expanded | pass/fail/n/a per rule; override note required for fails |
+| Sources | collapsed | `SourceCard` per source with data-tier badge + timestamp |
+
+**`DisclaimerBlock`** always visible at bottom: "decision support, not investment advice."
+
+**Action bar:** [Update / Regenerate] · [Clone for peer] · [Attach to Trade]
+- Attach to Trade writes `memo_execution` entry to `semantic_memory` recording alignment/override signal for InvestorDNA.
+
+**Version history:** tap version chip → sheet with list; tap any → diff view (status / thesis / valuation side-by-side).
+
+**Integration points:**
+- Holdings row: shows existing-memo status dot; "更新研究 ↗" opens composer pre-filled with ticker + holding context.
+- Log watch/hold entries: "研究这个想法 ↗" link opens composer pre-filled with trade ticker.
+
+#### Memory system integration
+
+| Layer | Mechanism | Effect |
+|-------|-----------|--------|
+| Tier 2 (FTS5) | `research_fts_ai/au/ad` triggers on `research_versions` | Research memos retrievable by `EpisodicMemoryRetriever` |
+| Tier 3 (semantic) | `recordInsight(type:"research_memo")` after generation | Conclusion stored; surfaces in STANDARD/DEEP context |
+| MemoryManager | `researchMemos` block at priority 4.5 in `assemble()` | Mentor sees current research status when discussing a ticker |
+| InvestorDNA | `recordInsight(type:"memo_execution")` on trade attach | Feeds research-discipline signal into behavioural profile |
+
+---
+
 ### 5.8 Settings (hidden screen, route: `settings`)
 
 Accessible via the ⚙ gear icon in the 心法 (Home) masthead. Not shown in the tab bar.
@@ -464,6 +598,8 @@ When building `<investor_profile>`:
 - **Streaming implementation note:** React Native's `fetch` does not expose `response.body` as a `ReadableStream` — `res.body.getReader()` is unavailable. `callLLMStream` detects this and falls back to `res.text()`, parsing all SSE `data:` lines at once. `onChunk` is still called (in a single batch at the end) so the streaming code path remains consistent. Progressive display is not available on React Native; the spinner shows until the full response is ready.
 
 ### 8.2 Yahoo Finance
+
+**Live prices (`fetchLivePrices`):**
 - Endpoint: `https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval=1d&range=2d`
 - Headers: `User-Agent: Mozilla/5.0 (compatible; InvestmentJournal/1.0)` (required to avoid 401).
 - Parse response:
@@ -473,18 +609,27 @@ When building `<investor_profile>`:
   - `changePercent = (price - prevClose) / prevClose * 100`
   - `asOf = new Date(result.meta.regularMarketTime * 1000).toLocaleString()`
 - Parallel fetch with `Promise.allSettled` — failures omitted from output, don't crash.
+
+**Research snapshot (`fetchResearchSnapshot`):**
+- Endpoint: `https://query1.finance.yahoo.com/v10/finance/quoteSummary/{symbol}?modules=assetProfile,summaryDetail,defaultKeyStatistics,financialData,earningsTrend,calendarEvents,secFilings`
+- No API key required. Rotate between `query1` / `query2` subdomains on failure.
+- Retry up to 4× with exponential backoff (2s/4s/8s/16s) on 429 or network error.
+- Result cached 24h in `research_snapshot_cache` SQLite table. Stale cache sets `disclaimer_flags.stale = true`.
+- Fields extracted: `businessSummary`, `sector`, `industry`, `marketCap`, `52w range`, `beta`, `trailingPE`, `forwardPE`, `pegRatio`, `priceToBook`, `evToEbitda`, `profitMargins`, `roe`, `roa`, `freeCashflow`, `debtToEquity`, `currentRatio`, `revenueGrowth`, `earningsGrowth`, `epsEstimateNextQ`, `nextEarningsDate`, `latestFilingDate`, `latestFilingUrl`.
+- Passed as structured XML block `<snapshot>` into `generateResearchMemo()` so AI focuses on analysis, not recall.
+
 **Symbol search (autocomplete):**
 - Endpoint: `https://query1.finance.yahoo.com/v1/finance/search?q=<query>&quotesCount=5`
 - Returns `data.quotes[]` with `{ symbol, longname, shortname, exchange, quoteType }`.
 - Used in `StockSearchInput` component — debounced 400ms, min 2 chars, clears on unmount.
-- Available in both HoldingForm (Holdings tab) and TradeForm (Log tab).
+- Available in HoldingForm (Holdings), TradeForm (Log), and ResearchComposer (Research).
 
-- Ticker conventions user must follow:
-  - US stocks: `AAPL`, `TSLA`
-  - HK stocks: `0700.HK`
-  - A-shares: `600519.SS` (Shanghai) / `000001.SZ` (Shenzhen)
-  - Crypto: `BTC-USD`, `ETH-USD`
-  - ETFs: `SPY`, `QQQ`
+**Ticker conventions:**
+- US stocks: `AAPL`, `TSLA`
+- HK stocks: `0700.HK`
+- A-shares: `600519.SS` (Shanghai) / `000001.SZ` (Shenzhen)
+- Crypto: `BTC-USD`, `ETH-USD`
+- ETFs: `SPY`, `QQQ`
 
 ### 8.3 Voice Input (IME-based, zero integration)
 
@@ -598,19 +743,30 @@ investment-journal-app/
 ├── src/
 │   ├── theme.js                    # colors, fonts, spacing
 │   ├── constants.js                # ACTIONS, EMOTIONS, MASTERS, MASTER_STYLES, DEFAULT_RULES
-│   ├── utils.js                    # fmtDate, monthKey, weekKey, weekRange, fmtCurrency, ago
-│   ├── db.js                       # SQLite schema + typed CRUD helpers
-│   ├── api.js                      # DeepSeek + Yahoo Finance
+│   ├── utils.js                    # fmtDate, monthKey, weekKey, weekRange, fmtCurrency, ago, todayIso, addMonths
+│   ├── db.js                       # SQLite schema + typed CRUD helpers (9 tables + research tables)
+│   ├── api.js                      # DeepSeek + Yahoo Finance (incl. fetchResearchSnapshot, generateResearchMemo)
 │   ├── voice.js                    # useSpeech hook — wraps @react-native-voice/voice
 │   ├── context.js                  # AppCtx React context + useApp hook (avoids circular imports)
-│   ├── components.js               # shared UI primitives
+│   ├── components.js               # shared UI primitives (incl. StatusBadge, ConfidencePill, SourceCard, DisclaimerBlock)
+│   ├── memory/
+│   │   ├── HotCache.js             # In-memory philosophy/rules/DNA cache
+│   │   ├── MemoryManager.js        # assemble() / recordInsight() / triggerDNA() — four-tier context builder
+│   │   ├── background/
+│   │   │   └── DreamJob.js         # Background DNA distillation job
+│   │   ├── entities/
+│   │   │   └── InvestorDNA.js      # InvestorDNA entity: distill(), toPromptBlock(), isExpired()
+│   │   └── retrieval/
+│   │       └── EpisodicMemoryRetriever.js  # FTS5 BM25 retrieval with _hydrate() for all source types
 │   └── screens/
 │       ├── Home.js                 # 心法 tab — philosophy, rules, mentor default, stats
 │       ├── Review.js               # 复盘 tab — sub-tab container for Weekly + Monthly
 │       ├── Weekly.js               # 周记 sub-tab (inside Review); 导师 button → mentor chat
 │       ├── Monthly.js              # 月评 sub-tab (inside Review); 导师 button → mentor chat
-│       ├── Log.js                  # 记录 tab — trades + thoughts (sub-tabs)
-│       ├── Holdings.js             # 持仓 tab
+│       ├── Log.js                  # 记录 tab — trades + thoughts (sub-tabs); "研究这个想法" on watch entries
+│       ├── Holdings.js             # 持仓 tab; "更新研究" CTA + status dot per holding row
+│       ├── Research.js             # 研究 tab — research queue + new-memo composer modal
+│       ├── ResearchMemo.js         # hidden screen — memo detail with versioning, rules check, attach-to-trade
 │       ├── Roundtable.js           # 华山论道 — hidden screen, multi-master roundtable
 │       ├── Mentor.js               # 问道 tab
 │       └── Settings.js             # hidden screen — accessible via gear icon in Home
@@ -646,6 +802,24 @@ detectLang(text: string): "Chinese" | "English"
 
 // Yahoo Finance (no key, no throws from missing key)
 fetchLivePrices(symbols: string[]): Promise<{[symbol]: {price, currency, changePercent, resolvedTicker, asOf}}>
+
+// Research: Yahoo Finance quoteSummary (7 modules, 24h SQLite cache, exponential-backoff retry)
+fetchResearchSnapshot(ticker: string): Promise<ResearchSnapshot | null>
+
+// Research: AI memo generation (deepseek-v4-pro)
+generateResearchMemo({ticker, currentPrice, snapshot, userThesis, manualNotes, holdingContext, profile, rules}): Promise<ResearchMemoData>
+// ResearchMemoData: {status, confidence, max_risk_summary, thesis_summary, business_snapshot, deep_research_checklist,
+//                    valuation, position_sizing, trading_strategy, disclaimer_flags}
+// status: "buy_setup"|"watch"|"reduce_risk"|"avoid"
+// confidence: "high"|"medium"|"low"
+// Strictly no imperative language ("Buy now" / "Sell now" forbidden in system prompt)
+
+// Research: rules conflict check (deepseek-v4-flash)
+checkResearchRules(memoSummary: object, rules: string[]): Promise<{rule_text, result, notes}[]>
+// result: "pass"|"fail"|"n/a"
+
+// Research: shared source builder
+buildResearchSources(memoData: object, snapshot: ResearchSnapshot | null): SourceRecord[]
 
 // Internal helper
 buildProfileContext({philosophy, rules, weeklyNotes, monthlyReviews, trades, holdings, prices, maxTrades, maxWeekly, maxMonthly}): string
@@ -698,6 +872,25 @@ deleteHoldingReview(id): Promise<void>
 listRoundtableSessions(): Promise<RoundtableSession[]>
 addRoundtableSession(topic, masters, data): Promise<RoundtableSession>
 deleteRoundtableSession(id): Promise<void>
+
+// Research
+listResearchMemos(): Promise<ResearchMemo[]>
+getResearchMemo(id: string): Promise<ResearchMemo | null>
+getResearchMemoByTicker(ticker: string): Promise<ResearchMemo | null>
+saveResearchMemoWithVersion(memo, version, ruleChecks): Promise<void>   // transaction: upsert + insert
+deleteResearchMemo(id: string): Promise<void>                           // cascades to versions, rule_checks, links
+listResearchVersions(memoId: string): Promise<ResearchVersion[]>
+getResearchVersion(id: string): Promise<ResearchVersion | null>
+insertResearchRuleChecks(checks: ResearchRuleCheck[]): Promise<void>
+listResearchRuleChecks(versionId: string): Promise<ResearchRuleCheck[]>
+updateRuleCheckOverride(id: string, overrideReason: string): Promise<void>
+insertResearchLink(memoId, entityType, entityId): Promise<void>
+listResearchLinks(memoId: string): Promise<ResearchLink[]>
+getCachedSnapshot(ticker: string): Promise<ResearchSnapshot | null>     // null if stale > 24h
+setCachedSnapshot(ticker: string, data: object): Promise<void>
+getRecentResearchMemos(ticker: string, limit: number): Promise<SemanticRow[]>  // used by MemoryManager
+
+newId(prefix: string): string                                           // exported — e.g. newId("rmemo") → "rmemo_8f3a..."
 
 exportAll(): Promise<FullExportObject>              // Covers all tables including roundtable_sessions, holding_reviews, monthly_mentor_cache
 importAll(data): Promise<void>

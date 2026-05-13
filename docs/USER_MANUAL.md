@@ -101,6 +101,60 @@ The **带入问道 ↗** link on any holding opens the Mentor tab with a pre-com
 
 ---
 
+## Part 4.5 · Research — Decision Memos Before You Trade
+
+Navigate to the **Research** tab (研究).
+
+The Research module exists for a specific problem: the gap between "I think this is interesting" and "I am ready to act." Most investment mistakes are made in that gap — when the idea is exciting but the thesis is still vague, when the checklist hasn't been run, when no one has pressure-tested the invalidation condition. A decision memo forces that work before any capital moves.
+
+### Creating a Research Memo
+
+Tap **新建** (New) in the top right, or tap **研究这个想法** on any Log entry to pre-fill the ticker.
+
+The composer asks for:
+- **Ticker** — search by symbol or company name
+- **Thesis** — 2-4 sentences: why is this interesting, and what would have to be true for it to be a good investment?
+- **Manual Notes** — any facts, numbers, or context not in public data (earnings call quote, recent news, insider detail)
+- **Review Horizon** — how many months before scheduled re-evaluation (default: 3)
+
+Tap **生成研究备忘录**. The app fetches Yahoo Finance fundamentals (P/E, P/B, PEG, free cash flow, 52-week range, analyst estimates, next earnings date) and generates a structured memo via AI.
+
+### The Memo — What It Shows
+
+The memo never says "Buy now" or "Sell now." It gives you a **conditional status**:
+
+| Status | Meaning |
+|--------|---------|
+| Buy Setup 建仓机会 | Conditions are favourable; position sizing defines how much and when |
+| Watch 观望 | Thesis valid but entry not triggered; define the trigger |
+| Reduce Risk 降低风险 | Something has changed; trim or hedge before re-evaluating |
+| Avoid 回避 | Thesis does not hold under current conditions |
+
+Alongside this, the memo contains:
+- **Business Snapshot** — what the company does, what drives revenue, competitive position, the market's key debates about it
+- **Deep Research Checklist** — each item flagged with evidence quality (filing / fundamental / estimate / user-entered)
+- **Valuation** — current multiples vs. peers, bull/base/bear scenarios, implied fair-value band, key assumptions
+- **Position Sizing** — maximum position %, first tranche, conditions to add or trim, invalidation condition
+- **3–6 Month Strategy** — specific watch items, buy trigger, sell/trim trigger, review date
+- **Rules Conflict Check** — each of your personal rules evaluated pass / fail / n/a; a fail requires an override note before proceeding
+- **Sources** — every data source tagged with tier (Yahoo Finance / Manual) and timestamp; stale data flagged
+
+The **DisclaimerBlock** is always visible: "This memo is decision support, not investment advice."
+
+### Versions
+
+Every time you regenerate a memo (e.g., after an earnings report or a thesis change), the app creates a new immutable version. Tap the version chip in the header to see version history and compare status / thesis / valuation across versions. No version is ever overwritten.
+
+### Holdings Integration
+
+If a holding has a research memo, a small status dot appears on the holding row. Tap **更新研究 ↗** to open the composer pre-filled with the ticker and your current position context (shares, cost basis, buy reason).
+
+### Mentor Integration
+
+When you ask any mentor about a stock that has a research memo, the mentor receives the current conclusion and its invalidation condition as context — without you needing to paste it in. The mentor knows what you already concluded and can challenge it, validate it, or update it.
+
+---
+
 ## Part 5 · The Review Loop — Reflection as Craft
 
 Navigate to **Review** (复盘). The tab contains two sub-screens:
@@ -321,6 +375,60 @@ AI 自动提取操作、股票、理由和情绪，填入表单，检查后保�
 持仓行上的**带入问道 ↗** 链接，会将该持仓的完整信息——股数、成本、当前价格、盈亏、买入日期、原始理由——预填为一条消息，直接打开问道标签。导师不需要你再次描述背景，他已经看到了。
 
 实时价格通过 Yahoo Finance 获取。点击**刷新**更新；进入问道页时自动同步。持仓按币种汇总成本、市值和浮盈亏，显示在页面顶部。
+
+---
+
+## 第四点五章 · 个股研究 — 行动之前的决策备忘录
+
+点击底部**研究**标签（研究）。
+
+研究模块为了解决一个具体问题：从"这个想法有意思"到"我已准备好行动"之间的空白。许多投资错误正是在这个空白里发生的——逻辑还模糊，清单还没跑完，没有人逼问过失效条件。决策备忘录的作用，就是在任何资金移动之前，把这些工作强制完成。
+
+### 新建研究备忘录
+
+点击右上角**新建**，或点击记录页任意条目的**研究这个想法 ↗**（自动带入股票代码）。
+
+填写器需要：
+- **股票代码** — 按代码或公司名称搜索
+- **投资逻辑** — 2-4 句话：为什么有趣？什么条件为真时这才是好的投资？
+- **补充信息** — 任何公开数据里没有的事实：财报电话会引言、最新新闻、内部细节
+- **复盘周期** — 多少个月后安排重新评估（默认：3 个月）
+
+点击**生成研究备忘录**。应用自动获取 Yahoo Finance 基本面数据（市盈率、市净率、PEG、自由现金流、52 周区间、分析师预测、下次财报日期），通过 AI 生成结构化备忘录。
+
+### 备忘录的内容
+
+备忘录从不说"现在买入"或"现在卖出"，它给出的是**条件性判断**：
+
+| 状态 | 含义 |
+|------|------|
+| 建仓机会 Buy Setup | 条件有利；仓位管理定义何时买、买多少 |
+| 观望 Watch | 逻辑成立但入场条件未触发；明确触发器 |
+| 降低风险 Reduce Risk | 某些情况已改变；在重新评估前减仓或对冲 |
+| 回避 Avoid | 当前条件下逻辑不成立 |
+
+备忘录同时包含：
+- **商业快照** — 公司做什么，收入驱动因素，竞争优势，市场对它的核心争议
+- **深度研究清单** — 每项标注证据质量（财报 / 基本面数据 / 分析师预测 / 用户输入）
+- **估值核查** — 当前倍数与同行对比、牛/基准/熊三种情景、隐含合理价值区间、关键假设
+- **仓位管理** — 最大仓位比例、首批建仓、加仓/减仓条件、失效条件
+- **3-6 个月策略** — 具体观察项、买入触发条件、卖出/减仓触发条件、复盘日期
+- **规则冲突检查** — 你的每条个人规则逐一核查（通过/不通过/不适用）；"不通过"需要填写覆盖理由方可继续
+- **数据来源** — 每个数据源标注层级（Yahoo Finance / 用户输入）和时间戳；过期数据自动标注
+
+**免责声明**始终可见于备忘录底部：此备忘录为决策支持，不构成投资建议。
+
+### 版本管理
+
+每次重新生成（如财报后或逻辑有变化），应用创建一个新的不可变版本。点击标题处的版本标签，查看历史版本并对比各版本的状态、投资逻辑和估值。旧版本永不被覆盖。
+
+### 与持仓的联动
+
+拥有研究备忘录的持仓行上会显示小状态点。点击**更新研究 ↗**，以当前持仓上下文（股数、成本、买入理由）预填入表单，生成新版本。
+
+### 与问道的联动
+
+当你向任意导师询问已有研究备忘录的股票时，导师自动收到当前结论及其失效条件作为上下文，无需你重新粘贴。导师知道你已得出什么结论，可以质疑、验证或更新它。
 
 ---
 
