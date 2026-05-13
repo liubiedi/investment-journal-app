@@ -200,6 +200,15 @@ async function initSchema(db) {
   // Memory architecture migrations
   try { await db.runAsync("ALTER TABLE trades ADD COLUMN relevance_weight REAL NOT NULL DEFAULT 1.0"); } catch {}
   try { await db.runAsync("ALTER TABLE thoughts ADD COLUMN relevance_weight REAL NOT NULL DEFAULT 1.0"); } catch {}
+  // Trade execution fields
+  try { await db.runAsync("ALTER TABLE trades ADD COLUMN quantity REAL"); } catch {}
+  try { await db.runAsync("ALTER TABLE trades ADD COLUMN entry_price REAL"); } catch {}
+  try { await db.runAsync("ALTER TABLE trades ADD COLUMN currency TEXT"); } catch {}
+  try { await db.runAsync("ALTER TABLE trades ADD COLUMN option_type TEXT"); } catch {}
+  try { await db.runAsync("ALTER TABLE trades ADD COLUMN strike_price REAL"); } catch {}
+  try { await db.runAsync("ALTER TABLE trades ADD COLUMN expiry TEXT"); } catch {}
+  try { await db.runAsync("ALTER TABLE trades ADD COLUMN premium REAL"); } catch {}
+  try { await db.runAsync("ALTER TABLE trades ADD COLUMN executed INTEGER NOT NULL DEFAULT 0"); } catch {}
   // Backfill monthly reviews into journal_fts for existing DBs (idempotent via DELETE+INSERT).
   try {
     const months = await db.getAllAsync("SELECT month_key, bullets FROM monthly_reviews");
@@ -247,22 +256,31 @@ export async function addTrade(t) {
   const id = newId("trade");
   const now = Date.now();
   await db.runAsync(
-    `INSERT INTO trades (id, date, action, stock, reason, emotion, rules_checked, raw_input, feedback, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO trades (id, date, action, stock, reason, emotion, rules_checked, raw_input, feedback, created_at,
+       quantity, entry_price, currency, option_type, strike_price, expiry, premium, executed)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       id, t.date, t.action, t.stock, t.reason, t.emotion,
       JSON.stringify(t.rulesChecked || []),
       t.rawInput || null,
       JSON.stringify([]),
       now,
+      t.quantity ?? null,
+      t.entryPrice ?? null,
+      t.currency ?? null,
+      t.optionType ?? null,
+      t.strike ?? null,
+      t.expiry ?? null,
+      t.premium ?? null,
+      0,
     ]
   );
-  return { ...t, id, feedback: [] };
+  return { ...t, id, feedback: [], executed: 0 };
 }
 
 export async function updateTrade(id, fields) {
   const db = await getDb();
-  const allowed = ["reason", "emotion", "stock", "action", "date"];
+  const allowed = ["reason", "emotion", "stock", "action", "date", "executed"];
   const keys = Object.keys(fields).filter((k) => allowed.includes(k));
   if (keys.length === 0) return;
   await db.runAsync(
@@ -289,6 +307,14 @@ function rowToTrade(r) {
     rulesChecked: safeJson(r.rules_checked, []),
     rawInput: r.raw_input || undefined,
     feedback: safeJson(r.feedback, []),
+    quantity: r.quantity ?? undefined,
+    entryPrice: r.entry_price ?? undefined,
+    currency: r.currency ?? undefined,
+    optionType: r.option_type ?? undefined,
+    strike: r.strike_price ?? undefined,
+    expiry: r.expiry ?? undefined,
+    premium: r.premium ?? undefined,
+    executed: r.executed ?? 0,
   };
 }
 
