@@ -306,7 +306,7 @@ async function initSchema(db) {
   } catch {}
 }
 
-const newId = (prefix) => `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+export const newId = (prefix) => `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
 // ---------- kv (philosophy, rules, default master, etc.) ----------
 export async function kvGet(key, fallback = null) {

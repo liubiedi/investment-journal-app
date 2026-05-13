@@ -59,3 +59,11 @@ export const ago = (ts) => {
   if (hrs < 24) return `${hrs} 小时前`;
   return `${Math.floor(hrs / 24)} 天前`;
 };
+
+export const todayIso = () => new Date().toISOString().slice(0, 10);
+
+export const addMonths = (isoDate, months) => {
+  const d = new Date(isoDate);
+  d.setMonth(d.getMonth() + months);
+  return d.toISOString().slice(0, 10);
+};

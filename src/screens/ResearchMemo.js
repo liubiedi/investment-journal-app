@@ -15,25 +15,15 @@ import {
   StatusBadge, ConfidencePill, SourceCard, DisclaimerBlock,
 } from "../components";
 import {
-  fetchResearchSnapshot, generateResearchMemo, checkResearchRules,
+  fetchResearchSnapshot, generateResearchMemo, checkResearchRules, buildResearchSources,
 } from "../api";
 import {
   getResearchVersion, listResearchVersions, listResearchRuleChecks,
   updateRuleCheckOverride, insertResearchVersion, insertResearchRuleChecks,
 } from "../db";
 import { memoryManager } from "../memory/MemoryManager";
-
-const newId = (prefix) => `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-
-function todayIso() {
-  return new Date().toISOString().slice(0, 10);
-}
-
-function addMonths(isoDate, months) {
-  const d = new Date(isoDate);
-  d.setMonth(d.getMonth() + months);
-  return d.toISOString().slice(0, 10);
-}
+import { newId } from "../db";
+import { todayIso, addMonths } from "../utils";
 
 export default function ResearchMemoScreen() {
   const nav = useNavigation();
@@ -53,10 +43,16 @@ export default function ResearchMemoScreen() {
 
   useEffect(() => {
     if (!memo?.current_version_id) return;
-    getResearchVersion(memo.current_version_id).then(v => {
+    let active = true;
+    Promise.all([
+      getResearchVersion(memo.current_version_id),
+      listResearchRuleChecks(memo.current_version_id),
+    ]).then(([v, checks]) => {
+      if (!active) return;
       if (v) setVersion(v);
+      setRuleChecks(checks);
     });
-    listResearchRuleChecks(memo.current_version_id).then(setRuleChecks);
+    return () => { active = false; };
   }, [memo?.current_version_id]);
 
   const loadHistory = useCallback(() => {
@@ -126,7 +122,7 @@ export default function ResearchMemoScreen() {
         positionSizing: memoData.position_sizing,
         tradingStrategy: memoData.trading_strategy,
         disclaimerFlags: { ...memoData.disclaimer_flags, snapshot_fetched_at: snapshot?.fetchedAt },
-        sources: _buildSources(memoData, snapshot),
+        sources: buildResearchSources(memoData, snapshot),
         modelId: "deepseek-v4-pro",
         generatedAt: new Date().toISOString(),
         createdAt: today,
@@ -635,38 +631,3 @@ function AttachTradeSheet({ visible, onClose, trades, ticker, onAttach }) {
   );
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-function _buildSources(memoData, snapshot) {
-  const sources = [];
-  if (snapshot) {
-    sources.push({
-      provider: "Yahoo Finance",
-      tier: snapshot.stale ? "Yahoo Finance (cached)" : "Yahoo Finance (live)",
-      description: `Fundamentals snapshot for ${snapshot.ticker}`,
-      fetchedAt: snapshot.fetchedAt,
-    });
-    if (snapshot.latestFilingUrl) {
-      sources.push({
-        provider: "SEC EDGAR",
-        tier: "SEC Filing",
-        description: `${snapshot.latestFilingType || "Filing"} — ${snapshot.latestFilingDate || ""}`,
-        url: snapshot.latestFilingUrl,
-        fetchedAt: snapshot.fetchedAt,
-      });
-    }
-  }
-  sources.push({
-    provider: "User",
-    tier: "User Input",
-    description: "Thesis and manual notes",
-    fetchedAt: new Date().toISOString(),
-  });
-  sources.push({
-    provider: "DeepSeek v4 Pro",
-    tier: "AI Inference",
-    description: "Analysis synthesized by AI",
-    fetchedAt: new Date().toISOString(),
-  });
-  return sources;
-}

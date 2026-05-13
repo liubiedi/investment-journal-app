@@ -351,10 +351,11 @@ function AppContent() {
   // ---- research memos ----
   const saveResearchMemo = useCallback(async (memo, version, ruleChecks) => {
     await db.saveResearchMemoWithVersion(memo, version, ruleChecks);
-    setResearchMemos((prev) => {
-      const without = prev.filter((m) => m.id !== memo.id);
-      return [memo, ...without];
-    });
+    // Reload from DB so state is always the canonical snake_case DB row
+    const saved = await db.getResearchMemo(memo.id);
+    if (saved) {
+      setResearchMemos((prev) => [saved, ...prev.filter((m) => m.id !== memo.id)]);
+    }
   }, []);
   const deleteResearchMemo = useCallback(async (id) => {
     await db.deleteResearchMemo(id);

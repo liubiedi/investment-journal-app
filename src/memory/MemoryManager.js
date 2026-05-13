@@ -179,7 +179,8 @@ export class MemoryManager {
         const researchRows = await db.getRecentResearchMemos(ticker.toUpperCase(), 2);
         if (researchRows.length > 0) {
           const lines = researchRows.map(r => {
-            const sd = r.structured_data ? JSON.parse(r.structured_data) : {};
+            let sd = {};
+            try { if (r.structured_data) sd = JSON.parse(r.structured_data); } catch { /* malformed — skip structured fields */ }
             return `  [${sd.status?.toUpperCase() || "?"}] ${r.content?.slice(0, 200)}\n  Review by: ${sd.next_review_date || "not set"}`;
           }).join("\n");
           sections.push({
