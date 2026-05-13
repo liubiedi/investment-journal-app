@@ -24,7 +24,7 @@ import * as db from "../db";
 import {
   TSerif, TSerifBold, TSerifItalic, TMono, Kicker,
   PaperInput, StockSearchInput, FilledButton, MasterChips, FeedbackBlock,
-  Masthead, FormHeader, Field, HR,
+  Masthead, FormHeader, Field, HR, ResearchChip,
 } from "../components";
 
 // Name -> icon lookup (RN can't import by name string dynamically)
@@ -105,6 +105,7 @@ function EmotionPicker({ value, onChange }) {
 
 export default function LogScreen() {
   const app = useApp();
+  const nav = useNavigation();
   const insets = useSafeAreaInsets();
   const [subTab, setSubTab] = useState("trades");
   const [adding, setAdding] = useState(false);
@@ -397,14 +398,10 @@ function TradeRow({ trade, onDelete, onUpdate, onExecute, onRequestFeedback, def
             <TMono style={{ color: colors.inkFaint, fontSize: 10 }}>点击展开以求教导师</TMono>
           </View>
         )}
-        {(trade.action === "watch" || trade.action === "hold") && !expanded && (
-          <Pressable
-            onPress={() => onResearch?.()}
-            style={{ marginTop: 4, marginLeft: 80, flexDirection: "row", alignItems: "center", gap: 5, alignSelf: "flex-start" }}
-          >
-            <Search size={10} color={colors.inkFaint} strokeWidth={1.5} />
-            <TMono style={{ fontSize: 10, color: colors.inkFaint }}>研究这个想法 ↗</TMono>
-          </Pressable>
+        {!expanded && (
+          <View style={{ marginTop: 6, marginLeft: 80, alignSelf: "flex-start" }}>
+            <ResearchChip onPress={() => onResearch?.()} />
+          </View>
         )}
       </Pressable>
 

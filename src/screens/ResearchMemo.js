@@ -16,6 +16,7 @@ import {
 } from "../components";
 import {
   fetchResearchSnapshot, generateResearchMemo, checkResearchRules, buildResearchSources,
+  assembleResearchContext,
 } from "../api";
 import {
   getResearchVersion, listResearchVersions, listResearchRuleChecks,
@@ -85,7 +86,10 @@ export default function ResearchMemoScreen() {
         ? holdings.find(h => h.id === memo.holding_id)
         : holdings.find(h => h.symbol.toUpperCase() === sym);
 
-      const snapshot = await fetchResearchSnapshot(sym).catch(() => null);
+      const [snapshot, preAssembledCtx] = await Promise.all([
+        fetchResearchSnapshot(sym).catch(() => null),
+        assembleResearchContext({ ticker: sym, thesis: version?.thesis, profile }),
+      ]);
       const memoData = await generateResearchMemo({
         ticker: sym,
         currentPrice,
@@ -95,6 +99,7 @@ export default function ResearchMemoScreen() {
         holdingContext: holdingCtx,
         profile,
         rules,
+        preAssembledCtx,
       });
       const ruleCheckResults = await checkResearchRules(memoData, rules).catch(() => []);
 

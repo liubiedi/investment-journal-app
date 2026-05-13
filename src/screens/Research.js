@@ -5,18 +5,19 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useNavigation, useRoute } from "@react-navigation/native";
-import { Plus, ChevronRight, Clock } from "lucide-react-native";
+import { ChevronRight, Clock } from "lucide-react-native";
 
 import { useApp } from "../context";
 import { colors, fonts, spacing } from "../theme";
 import {
   TSerif, TSerifBold, TSerifItalic, TMono, Kicker,
-  Masthead, Section, FilledButton, OutlineButton, HR,
+  Masthead, Section, FilledButton, HR,
   StockSearchInput, PaperInput,
   StatusBadge, ConfidencePill,
 } from "../components";
 import {
   fetchResearchSnapshot, generateResearchMemo, checkResearchRules, buildResearchSources,
+  assembleResearchContext, preWarmYFCrumb,
 } from "../api";
 import { memoryManager } from "../memory/MemoryManager";
 import { newId } from "../db";
@@ -59,25 +60,10 @@ export default function ResearchScreen() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
       <ScrollView contentContainerStyle={{ padding: spacing.lg, paddingBottom: 80 }}>
-        <Masthead
-          kicker="个股研究"
-          title="Research Queue"
-          right={
-            <Pressable
-              onPress={() => openComposer()}
-              style={({ pressed }) => ({
-                flexDirection: "row", alignItems: "center", gap: 4,
-                opacity: pressed ? 0.6 : 1,
-              })}
-            >
-              <Plus size={14} color={colors.ink} />
-              <TMono style={{ fontSize: 11 }}>新建</TMono>
-            </Pressable>
-          }
-        />
+        <Masthead kicker="个股研究" title="Research Queue" />
 
         {researchMemos.length === 0 ? (
-          <EmptyState onNew={() => openComposer()} />
+          <EmptyState />
         ) : (
           <>
             {overdue.length > 0 && (
@@ -165,13 +151,15 @@ function ResearchMemoCard({ memo, overdue, onPress }) {
 
 // ── Empty state ───────────────────────────────────────────────────────────────
 
-function EmptyState({ onNew }) {
+function EmptyState() {
   return (
-    <View style={{ alignItems: "center", paddingVertical: 48, gap: 16 }}>
+    <View style={{ alignItems: "center", paddingVertical: 48, gap: 10 }}>
       <TSerifItalic style={{ fontSize: 15, textAlign: "center", maxWidth: 280, lineHeight: 22 }}>
-        No research memos yet.{"\n"}Create one for a stock you're watching or holding.
+        暂无研究备忘录。
       </TSerifItalic>
-      <OutlineButton onPress={onNew} label="新建研究备忘录" />
+      <TSerifItalic style={{ fontSize: 13, textAlign: "center", maxWidth: 280, lineHeight: 20, color: colors.inkMuted }}>
+        在「持仓」或「记录」中点击「深度研究」开始。
+      </TSerifItalic>
     </View>
   );
 }
@@ -183,19 +171,20 @@ function MemoComposer({ visible, onClose, onCreated, prefillTicker, prefillHoldi
   const [companyName, setCompanyName] = useState("");
   const [thesis, setThesis] = useState("");
   const [manualNotes, setManualNotes] = useState("");
-  const [horizon, setHorizon] = useState("3");
+  const [showNotes, setShowNotes] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState(null);
 
-  // Reset when modal opens
+  // Reset when modal opens; pre-warm the YF crumb so it's ready before Generate is pressed.
   React.useEffect(() => {
     if (visible) {
       setTicker(prefillTicker || "");
       setCompanyName("");
       setThesis("");
       setManualNotes("");
-      setHorizon("3");
+      setShowNotes(false);
       setError(null);
+      preWarmYFCrumb();
     }
   }, [visible, prefillTicker]);
 
@@ -211,8 +200,11 @@ function MemoComposer({ visible, onClose, onCreated, prefillTicker, prefillHoldi
         ? holdings.find(h => h.id === prefillHoldingId)
         : holdings.find(h => h.symbol.toUpperCase() === sym);
 
-      // Fetch Yahoo Finance snapshot (cached 24h)
-      const snapshot = await fetchResearchSnapshot(sym).catch(() => null);
+      // Fetch YF snapshot and assemble investor memory in parallel — they're independent.
+      const [snapshot, preAssembledCtx] = await Promise.all([
+        fetchResearchSnapshot(sym).catch(() => null),
+        assembleResearchContext({ ticker: sym, thesis, profile }),
+      ]);
 
       // Generate memo via DeepSeek Pro
       const memoData = await generateResearchMemo({
@@ -224,6 +216,7 @@ function MemoComposer({ visible, onClose, onCreated, prefillTicker, prefillHoldi
         holdingContext: holdingCtx,
         profile,
         rules,
+        preAssembledCtx,
       });
 
       // Run rules check (flash model)
@@ -233,10 +226,9 @@ function MemoComposer({ visible, onClose, onCreated, prefillTicker, prefillHoldi
       const memoId = newId("rmemo");
       const versionId = newId("rv");
       const today = todayIso();
-      const horizonMonths = parseInt(horizon, 10) || 3;
 
       const reviewDate = memoData.trading_strategy?.review_date
-        || addMonths(today, horizonMonths);
+        || addMonths(today, 3);
 
       const memo = {
         id: memoId,
@@ -304,7 +296,7 @@ function MemoComposer({ visible, onClose, onCreated, prefillTicker, prefillHoldi
     } finally {
       setGenerating(false);
     }
-  }, [ticker, thesis, manualNotes, horizon, apiKeyPresent, prices, holdings, prefillHoldingId, profile, rules, saveResearchMemo, companyName, onCreated]);
+  }, [ticker, thesis, manualNotes, apiKeyPresent, prices, holdings, prefillHoldingId, profile, rules, saveResearchMemo, companyName, onCreated]);
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
@@ -324,48 +316,50 @@ function MemoComposer({ visible, onClose, onCreated, prefillTicker, prefillHoldi
           </View>
 
           <View style={{ marginBottom: 16 }}>
-            <TMono style={{ fontSize: 10, letterSpacing: 1, textTransform: "uppercase", marginBottom: 6 }}>
-              Stock / Ticker
+            <TMono style={{ fontSize: 10, letterSpacing: 1, color: colors.inkFaint, marginBottom: 6 }}>
+              标的代码 · TICKER
             </TMono>
             <StockSearchInput
               value={ticker}
               onChangeText={setTicker}
-              onSelect={(result) => {
-                setTicker(result.symbol);
-                setCompanyName(result.name || "");
+              onSelect={(sym, name) => {
+                setTicker(sym);
+                setCompanyName(name || "");
               }}
-              placeholder="Search ticker or company name"
+              placeholder="搜索代码或公司名称 · AAPL / 腾讯 / 0700.HK"
             />
           </View>
 
           <PaperInput
-            label="Thesis  投资逻辑"
-            hint="2-4 sentences. Why is this interesting? What would need to be true?"
+            label="投资逻辑  Thesis"
+            hint="为什么关注？需要什么条件才值得买？"
             value={thesis}
             onChangeText={setThesis}
             multiline
-            numberOfLines={4}
-            style={{ marginBottom: 16 }}
-          />
-
-          <PaperInput
-            label="Manual Notes  补充信息"
-            hint="Any facts, numbers, or context not in public data"
-            value={manualNotes}
-            onChangeText={setManualNotes}
-            multiline
             numberOfLines={3}
-            style={{ marginBottom: 16 }}
+            style={{ marginBottom: 12 }}
           />
 
-          <PaperInput
-            label="Review Horizon (months)  复盘周期"
-            hint="How many months before scheduled review? Default: 3"
-            value={horizon}
-            onChangeText={setHorizon}
-            keyboardType="numeric"
-            style={{ marginBottom: 20 }}
-          />
+          <Pressable
+            onPress={() => setShowNotes(p => !p)}
+            style={{ flexDirection: "row", alignItems: "center", gap: 4, marginBottom: showNotes ? 10 : 20 }}
+          >
+            <TMono style={{ fontSize: 11, color: colors.inkMuted }}>
+              {showNotes ? "− 隐藏补充信息" : "+ 添加补充信息"}
+            </TMono>
+          </Pressable>
+
+          {showNotes && (
+            <PaperInput
+              label="补充信息  Manual Notes"
+              hint="公开数据之外的数字、背景或判断"
+              value={manualNotes}
+              onChangeText={setManualNotes}
+              multiline
+              numberOfLines={3}
+              style={{ marginBottom: 20 }}
+            />
+          )}
 
           {error ? (
             <View style={{ backgroundColor: "#f8d7da", borderRadius: 6, padding: 10, marginBottom: 12 }}>
@@ -376,11 +370,11 @@ function MemoComposer({ visible, onClose, onCreated, prefillTicker, prefillHoldi
           {generating ? (
             <View style={{ alignItems: "center", paddingVertical: 20, gap: 10 }}>
               <ActivityIndicator color={colors.inkFaint} />
-              <TSerifItalic style={{ fontSize: 13 }}>Fetching data and generating memo…</TSerifItalic>
+              <TSerifItalic style={{ fontSize: 13 }}>正在获取数据并生成研究备忘录…</TSerifItalic>
             </View>
           ) : (
             <FilledButton
-              label="生成研究备忘录  Generate Memo"
+              label="生成研究备忘录"
               onPress={handleGenerate}
             />
           )}

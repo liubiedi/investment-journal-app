@@ -7,7 +7,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import {
-  Pin, Edit2, Plus, X, Check, Loader2, Quote, Trash2, ChevronLeft, MessageCircle, Maximize2,
+  Pin, Edit2, Plus, X, Check, Loader2, Quote, Trash2, ChevronLeft, MessageCircle, Maximize2, Search,
 } from "lucide-react-native";
 import { colors, fonts, spacing } from "./theme";
 import { MASTERS, getMaster } from "./constants";
@@ -75,7 +75,8 @@ export function Field({ label, children, right, hint }) {
 }
 
 // ========== Primary filled button ==========
-export function FilledButton({ onPress, disabled, children, loading, style }) {
+export function FilledButton({ onPress, disabled, children, label, loading, style }) {
+  const content = label ?? children;
   return (
     <Pressable
       onPress={onPress}
@@ -91,9 +92,9 @@ export function FilledButton({ onPress, disabled, children, loading, style }) {
       }, style]}
     >
       {loading && <ActivityIndicator color={colors.bg} size="small" />}
-      {typeof children === "string"
-        ? <TSerifBold style={{ color: colors.bg, fontSize: 15 }}>{children}</TSerifBold>
-        : children}
+      {typeof content === "string"
+        ? <TSerifBold style={{ color: colors.bg, fontSize: 15 }}>{content}</TSerifBold>
+        : content}
     </Pressable>
   );
 }
@@ -123,9 +124,9 @@ export function OutlineButton({ onPress, disabled, children, style }) {
 
 // ========== Paper text input (single line or multi) ==========
 export const PaperInput = React.forwardRef(function PaperInput(
-  { multiline, style, ...rest }, ref
+  { multiline, style, label, hint, ...rest }, ref
 ) {
-  return (
+  const input = (
     <TextInput
       ref={ref}
       multiline={multiline}
@@ -140,9 +141,21 @@ export const PaperInput = React.forwardRef(function PaperInput(
         borderColor: colors.divider,
         textAlignVertical: multiline ? "top" : "center",
         backgroundColor: "transparent",
-      }, style]}
+      }, !label && !hint ? style : null]}
       {...rest}
     />
+  );
+  if (!label && !hint) return input;
+  return (
+    <View style={style}>
+      {label && <Kicker style={{ marginBottom: 6 }}>{label}</Kicker>}
+      {input}
+      {hint && (
+        <Text style={{ fontFamily: fonts.serif, fontStyle: "italic", fontSize: 11, color: colors.inkFaint, marginTop: 4 }}>
+          {hint}
+        </Text>
+      )}
+    </View>
   );
 });
 
@@ -213,6 +226,24 @@ export function StockSearchInput({ value, onChangeText, onSelect, placeholder, s
         </View>
       )}
     </View>
+  );
+}
+
+// ========== Deep-research entry chip (Log + Holdings) ==========
+export function ResearchChip({ onPress }) {
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => ({
+        flexDirection: "row", alignItems: "center", gap: 4,
+        paddingHorizontal: 8, paddingVertical: 3,
+        borderWidth: 1, borderColor: colors.divider, borderRadius: 4,
+        opacity: pressed ? 0.6 : 1,
+      })}
+    >
+      <Search size={9} color={colors.inkMuted} strokeWidth={1.5} />
+      <TMono style={{ fontSize: 10, color: colors.inkMuted }}>深度研究</TMono>
+    </Pressable>
   );
 }
 
