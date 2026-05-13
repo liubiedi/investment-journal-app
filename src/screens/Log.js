@@ -192,6 +192,7 @@ export default function LogScreen() {
               )}
               {app.trades.map((t) => (
                 <TradeRow key={t.id} trade={t}
+                  onResearch={() => nav.navigate("research", { prefillTicker: t.stock })}
                   onDelete={() => app.deleteTradeById(t.id)}
                   onUpdate={(fields) => app.updateTradeById(t.id, fields)}
                   onExecute={async (trade) => {
@@ -311,7 +312,7 @@ function EmptyState({ icon, text, hint }) {
 }
 
 // ============================================================
-function TradeRow({ trade, onDelete, onUpdate, onExecute, onRequestFeedback, defaultMaster }) {
+function TradeRow({ trade, onDelete, onUpdate, onExecute, onRequestFeedback, defaultMaster, onResearch }) {
   const nav = useNavigation();
   const [expanded, setExpanded] = useState(false);
   const [confirm, setConfirm] = useState(false);
@@ -395,6 +396,15 @@ function TradeRow({ trade, onDelete, onUpdate, onExecute, onRequestFeedback, def
           <View style={{ marginTop: 6, marginLeft: 80 }}>
             <TMono style={{ color: colors.inkFaint, fontSize: 10 }}>点击展开以求教导师</TMono>
           </View>
+        )}
+        {(trade.action === "watch" || trade.action === "hold") && !expanded && (
+          <Pressable
+            onPress={() => onResearch?.()}
+            style={{ marginTop: 4, marginLeft: 80, flexDirection: "row", alignItems: "center", gap: 5, alignSelf: "flex-start" }}
+          >
+            <Search size={10} color={colors.inkFaint} strokeWidth={1.5} />
+            <TMono style={{ fontSize: 10, color: colors.inkFaint }}>研究这个想法 ↗</TMono>
+          </Pressable>
         )}
       </Pressable>
 

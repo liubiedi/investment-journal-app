@@ -18,7 +18,7 @@ import {
   JetBrainsMono_500Medium,
 } from "@expo-google-fonts/jetbrains-mono";
 import {
-  Anchor, FileText, Briefcase, RotateCcw, MessageCircle,
+  Anchor, FileText, Briefcase, RotateCcw, MessageCircle, Search,
 } from "lucide-react-native";
 
 import { AppCtx, useApp } from "./src/context";
@@ -36,6 +36,8 @@ import HoldingsScreen from "./src/screens/Holdings";
 import ReviewScreen from "./src/screens/Review";
 import MentorScreen from "./src/screens/Mentor";
 import SettingsScreen from "./src/screens/Settings";
+import ResearchScreen from "./src/screens/Research";
+import ResearchMemoScreen from "./src/screens/ResearchMemo";
 
 // Prevent splash from auto-hiding — must be called as early as possible.
 // Wrapped in try/catch because in some edge cases (e.g. module loaded before
@@ -181,6 +183,7 @@ function AppContent() {
   const [monthlyReviews, setMonthlyReviews] = useState({});
   const [prices, setPrices] = useState({ data: {}, lastUpdated: null });
   const [apiKeyPresent, setApiKeyPresent] = useState(false);
+  const [researchMemos, setResearchMemos] = useState([]);
 
   // Bootstrap — split into fast path (renders Home) + lazy path (loads everything else).
   useEffect(() => {
@@ -214,16 +217,18 @@ function AppContent() {
 
       // ── Lazy path: load remaining data after UI is visible ────────────────
       try {
-        const [tr, th, hd, wn, mr, pc] = await Promise.all([
+        const [tr, th, hd, wn, mr, pc, rm] = await Promise.all([
           db.listTrades(),
           db.listThoughts(),
           db.listHoldings(),
           db.listWeeklyNotes(),
           db.listMonthlyReviews(),
           db.getPricesCache(),
+          db.listResearchMemos(),
         ]);
         setTrades(tr); setThoughts(th); setHoldings(hd);
         setWeeklyNotes(wn); setMonthlyReviews(mr); setPrices(pc);
+        setResearchMemos(rm);
 
         // Backfill FTS5 for pre-existing entries (no-op if already done)
         db.backfillFts().catch(() => {});
@@ -343,6 +348,22 @@ function AppContent() {
     setHoldings((prev) => prev.filter((h) => h.id !== id));
   }, []);
 
+  // ---- research memos ----
+  const saveResearchMemo = useCallback(async (memo, version, ruleChecks) => {
+    await db.saveResearchMemoWithVersion(memo, version, ruleChecks);
+    setResearchMemos((prev) => {
+      const without = prev.filter((m) => m.id !== memo.id);
+      return [memo, ...without];
+    });
+  }, []);
+  const deleteResearchMemo = useCallback(async (id) => {
+    await db.deleteResearchMemo(id);
+    setResearchMemos((prev) => prev.filter((m) => m.id !== id));
+  }, []);
+  const linkResearchMemo = useCallback(async (memoId, entityType, entityId) => {
+    await db.insertResearchLink(memoId, entityType, entityId);
+  }, []);
+
   // ---- prices ----
   const savePricesData = useCallback(async (map) => {
     await db.savePrices(map);
@@ -379,6 +400,7 @@ function AppContent() {
     philosophy, rules, defaultMaster,
     trades, thoughts, holdings,
     weeklyNotes, monthlyReviews, prices,
+    researchMemos,
     apiKeyPresent, setApiKeyPresent,
     profile,
     // handlers
@@ -388,6 +410,7 @@ function AppContent() {
     addThought, deleteThoughtById, updateThoughtById, updateThoughtFeedback,
     addHolding, updateHoldingById, deleteHoldingById,
     savePricesData,
+    saveResearchMemo, deleteResearchMemo, linkResearchMemo,
     reloadAll,
   };
 
@@ -467,9 +490,20 @@ function AppInner({ ctx }) {
             {() => <ReviewScreen />}
           </Tab.Screen>
           <Tab.Screen
+            name="research" options={{ tabBarLabel: "研究", tabBarIcon: ({ color }) => <Search size={17} color={color} /> }}
+          >
+            {() => <ResearchScreen />}
+          </Tab.Screen>
+          <Tab.Screen
             name="mentor" options={{ tabBarLabel: "问道", tabBarIcon: ({ color }) => <MessageCircle size={17} color={color} /> }}
           >
             {() => <MentorScreen />}
+          </Tab.Screen>
+          <Tab.Screen
+            name="researchMemo"
+            options={{ tabBarButton: () => null }}
+          >
+            {() => <ResearchMemoScreen />}
           </Tab.Screen>
           <Tab.Screen
             name="settings"
