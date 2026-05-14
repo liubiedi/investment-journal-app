@@ -2,8 +2,8 @@
 
 ## 投资日志 · The Investor's Ledger
 
-**Version:** 1.5
-**Date:** 2026-05-13
+**Version:** 1.6
+**Date:** 2026-05-14
 **Format:** Android mobile application
 **Target:** AI coding agents (single-source-of-truth for autonomous implementation)
 
@@ -446,7 +446,7 @@ Two screens: Research Home (queue) and Research Memo detail. `researchMemo` is a
 #### Research Home (`src/screens/Research.js`)
 
 ```
-Masthead kicker="个股研究" title="Research Queue"  [新建 +]
+Masthead kicker="个股研究" title="Research Queue"
 
 Section "需要复盘 Review Due"  ← next_review_date ≤ today
   ResearchMemoCard × N          ← red left border, clock icon
@@ -454,17 +454,19 @@ Section "需要复盘 Review Due"  ← next_review_date ≤ today
 Section "进行中 Active"
   ResearchMemoCard × N
 
-EmptyState if no memos
+EmptyState if no memos  ← hint: "在「持仓」或「记录」中点击「深度研究」开始"
 ```
 
-**New Memo composer (bottom-sheet Modal):**
-1. `StockSearchInput` — ticker autocomplete (Yahoo Finance search)
-2. `PaperInput` — Thesis (2-4 sentences, why interesting, what must be true)
-3. `PaperInput` — Manual Notes (unverified user facts)
-4. `PaperInput` — Review Horizon in months (default: 3)
-5. [生成研究备忘录 Generate Memo] → `fetchResearchSnapshot()` + `generateResearchMemo()` → save → navigate to memo
+**No standalone 新建 button.** Research is always initiated from a stock context (Holdings or Log).
 
-**Auto-open:** when navigated with `route.params.prefillTicker` (from Holdings "更新研究" or Log "研究这个想法"), composer opens pre-filled.
+**New Memo composer (bottom-sheet Modal):**
+1. `StockSearchInput` — ticker autocomplete (Yahoo Finance search); `onSelect(sym, name)` fills ticker + company name
+2. `PaperInput` — 投资逻辑 Thesis (optional; 2–3 lines)
+3. Toggle "+ 添加补充信息" → expands `PaperInput` for Manual Notes (public-data gaps; hidden by default)
+4. [生成研究备忘录] → parallel `fetchResearchSnapshot()` + `assembleResearchContext()` → `generateResearchMemo()` → `checkResearchRules()` → save → navigate to memo
+5. Review Horizon removed — AI provides `trading_strategy.review_date`; fallback hardcoded to 3 months.
+
+**Auto-open:** when navigated with `route.params.prefillTicker` (from Holdings or Log `深度研究` chip), composer opens pre-filled and YF crumb is pre-warmed.
 
 #### Research Memo detail (`src/screens/ResearchMemo.js`)
 
@@ -490,9 +492,11 @@ EmptyState if no memos
 
 **Version history:** tap version chip → sheet with list; tap any → diff view (status / thesis / valuation side-by-side).
 
+**LLM output language:** all narrative text fields (`thesis_summary`, `business_snapshot.*`, `trading_strategy.*`, etc.) are Simplified Chinese. JSON keys and enum values stay English.
+
 **Integration points:**
-- Holdings row: shows existing-memo status dot; "更新研究 ↗" opens composer pre-filled with ticker + holding context.
-- Log watch/hold entries: "研究这个想法 ↗" link opens composer pre-filled with trade ticker.
+- Holdings row: `ResearchChip` ("深度研究") on every holding → navigates to Research with `prefillTicker` + `prefillHoldingId`.
+- Log rows: `ResearchChip` ("深度研究") on every trade (not just watch/hold) → navigates to Research with `prefillTicker`.
 
 #### Memory system integration
 
@@ -601,7 +605,7 @@ When building `<investor_profile>`:
 
 **Live prices (`fetchLivePrices`):**
 - Endpoint: `https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval=1d&range=2d`
-- Headers: `User-Agent: Mozilla/5.0 (compatible; InvestmentJournal/1.0)` (required to avoid 401).
+- Headers: shared `YF_HEADERS` constant (`User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36`).
 - Parse response:
   - `price = result.meta.regularMarketPrice`
   - `currency = result.meta.currency`
@@ -611,9 +615,10 @@ When building `<investor_profile>`:
 - Parallel fetch with `Promise.allSettled` — failures omitted from output, don't crash.
 
 **Research snapshot (`fetchResearchSnapshot`):**
-- Endpoint: `https://query1.finance.yahoo.com/v10/finance/quoteSummary/{symbol}?modules=assetProfile,summaryDetail,defaultKeyStatistics,financialData,earningsTrend,calendarEvents,secFilings`
-- No API key required. Rotate between `query1` / `query2` subdomains on failure.
-- Retry up to 4× with exponential backoff (2s/4s/8s/16s) on 429 or network error.
+- Endpoint: `https://query{1|2}.finance.yahoo.com/v10/finance/quoteSummary/{symbol}?modules=...&crumb=<crumb>`
+- **Crumb auth required** for non-US tickers (e.g. `0700.HK`). Flow: touch `https://fc.yahoo.com` to set consent cookie → GET `/v1/test/getcrumb` → append `&crumb=` to all `quoteSummary` calls. Crumb cached process-lifetime; 401 invalidates and retries with fresh crumb. `preWarmYFCrumb()` called when composer opens.
+- All YF requests share `YF_HEADERS = { User-Agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" }`.
+- Rotate between `query1` / `query2` subdomains on failure. Retry up to 4× with exponential backoff; 401 uses 1s base, 429 uses 2s base.
 - Result cached 24h in `research_snapshot_cache` SQLite table. Stale cache sets `disclaimer_flags.stale = true`.
 - Fields extracted: `businessSummary`, `sector`, `industry`, `marketCap`, `52w range`, `beta`, `trailingPE`, `forwardPE`, `pegRatio`, `priceToBook`, `evToEbitda`, `profitMargins`, `roe`, `roa`, `freeCashflow`, `debtToEquity`, `currentRatio`, `revenueGrowth`, `earningsGrowth`, `epsEstimateNextQ`, `nextEarningsDate`, `latestFilingDate`, `latestFilingUrl`.
 - Passed as structured XML block `<snapshot>` into `generateResearchMemo()` so AI focuses on analysis, not recall.

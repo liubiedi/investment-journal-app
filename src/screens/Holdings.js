@@ -4,7 +4,7 @@ import { View, ScrollView, Pressable, ActivityIndicator, Platform, KeyboardAvoid
 import { useSafeAreaInsets, SafeAreaView } from "react-native-safe-area-context";
 import { useNavigation } from "@react-navigation/native";
 import {
-  Plus, RefreshCw, Loader2, Wallet, Trash2, ChevronLeft, Calendar, MessageCircle, Pencil, Search,
+  Plus, RefreshCw, Loader2, Wallet, Trash2, ChevronLeft, Calendar, MessageCircle, Pencil,
 } from "lucide-react-native";
 import DateTimePicker from "@react-native-community/datetimepicker";
 
@@ -16,7 +16,7 @@ import * as db from "../db";
 import {
   TSerif, TSerifBold, TSerifItalic, TMono, Kicker,
   PaperInput, StockSearchInput, FilledButton, OutlineButton, Masthead, FormHeader, Field,
-  MasterPickerModal, StatusBadge,
+  MasterPickerModal, StatusBadge, ResearchChip,
 } from "../components";
 
 export default function HoldingsScreen() {
@@ -382,13 +382,7 @@ function HoldingRow({ holding, price, weightPct, weightIsForex, onEdit, onAskMen
           <MessageCircle size={11} color={colors.accent} strokeWidth={1.5} />
           <TMono style={{ fontSize: 10, color: colors.accent }}>带入问道 ↗</TMono>
         </Pressable>
-        <Pressable onPress={() => onResearch?.()}
-          style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
-          <Search size={11} color={colors.inkFaint} strokeWidth={1.5} />
-          <TMono style={{ fontSize: 10, color: colors.inkFaint }}>
-            {researchStatus ? `研究 (${researchStatus})` : "更新研究 ↗"}
-          </TMono>
-        </Pressable>
+        <ResearchChip onPress={() => onResearch?.()} />
       </View>
     </Pressable>
   );

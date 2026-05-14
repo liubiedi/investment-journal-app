@@ -65,10 +65,13 @@ async function callLLM({ system, messages, model = MODELS.smart, max_tokens = 10
 
   if (!res.ok) {
     const txt = await res.text();
-    throw new Error(`DeepSeek ${res.status}: ${txt.slice(0, 200)}`);
+    throw new Error(`DeepSeek ${res.status}: ${txt.slice(0, 300)}`);
   }
   const data = await res.json();
-  return data.choices?.[0]?.message?.content || "";
+  const choice = data.choices?.[0];
+  if (!choice) throw new Error(`DeepSeek: empty choices. Response: ${JSON.stringify(data).slice(0, 300)}`);
+  if (choice.finish_reason === "length") throw new Error(`DeepSeek: output truncated (max_tokens=${max_tokens} too low)`);
+  return choice.message?.content || "";
 }
 
 // Streaming variant — calls onChunk(text) for each delta, returns full text.
@@ -728,13 +731,11 @@ export async function callFlash(userPrompt) {
 // ============================================================
 
 const YF_BASE = "https://query1.finance.yahoo.com";
+const YF_HEADERS = { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" };
 
 async function fetchYahooOne(symbol) {
   const url = `${YF_BASE}/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=2d`;
-  const res = await fetch(url, {
-    // Yahoo occasionally returns 401 without a UA; set one to be safe.
-    headers: { "User-Agent": "Mozilla/5.0 (compatible; InvestmentJournal/1.0)" },
-  });
+  const res = await fetch(url, { headers: YF_HEADERS });
   if (!res.ok) throw new Error(`Yahoo ${res.status} for ${symbol}`);
   const data = await res.json();
   const result = data?.chart?.result?.[0];
@@ -797,7 +798,36 @@ export async function yahooSearch(query) {
 // ============================================================
 
 const YF_HOSTS = ["https://query1.finance.yahoo.com", "https://query2.finance.yahoo.com"];
-const YF_HEADERS = { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" };
+
+// Yahoo Finance crumb auth — required by quoteSummary for non-US tickers (e.g. 0700.HK).
+// Touch fc.yahoo.com first so the native HTTP stack picks up the consent cookie, then
+// retrieve the crumb. Both are scoped to the process lifetime; a 401 mid-session
+// invalidates the cached crumb so the next call re-fetches.
+let _yfCrumb = null;
+let _yfCrumbPromise = null;
+
+// Call this early (e.g. when the composer opens) to overlap crumb acquisition with user input.
+export function preWarmYFCrumb() { getYFCrumb().catch(() => {}); }
+
+async function getYFCrumb() {
+  if (_yfCrumb) return _yfCrumb;
+  if (_yfCrumbPromise) return _yfCrumbPromise;
+  _yfCrumbPromise = (async () => {
+    try {
+      await fetch("https://fc.yahoo.com", { headers: YF_HEADERS }).catch(() => {});
+      const res = await fetch("https://query2.finance.yahoo.com/v1/test/getcrumb", {
+        headers: YF_HEADERS,
+      });
+      if (!res.ok) throw new Error(`YF crumb ${res.status}`);
+      const crumb = (await res.text()).trim();
+      _yfCrumb = crumb;
+      return crumb;
+    } finally {
+      _yfCrumbPromise = null;
+    }
+  })();
+  return _yfCrumbPromise;
+}
 
 // Fetch fundamental snapshot from Yahoo Finance quoteSummary (24h cached).
 // Returns null on failure — callers should degrade gracefully.
@@ -813,9 +843,18 @@ export async function fetchResearchSnapshot(ticker) {
   let lastErr;
   for (let attempt = 0; attempt < 4; attempt++) {
     const host = YF_HOSTS[attempt % 2];
-    const url = `${host}/v10/finance/quoteSummary/${encodeURIComponent(ticker.toUpperCase())}?modules=${modules}`;
     try {
+      const crumb = await getYFCrumb().catch(() => null);
+      const crumbParam = crumb ? `&crumb=${encodeURIComponent(crumb)}` : "";
+      const url = `${host}/v10/finance/quoteSummary/${encodeURIComponent(ticker.toUpperCase())}?modules=${modules}${crumbParam}`;
       const res = await fetch(url, { headers: YF_HEADERS });
+      if (res.status === 401) {
+        // Crumb expired — invalidate and retry with a fresh one
+        _yfCrumb = null;
+        _yfCrumbPromise = null;
+        await new Promise(r => setTimeout(r, Math.pow(2, attempt) * 1000));
+        continue;
+      }
       if (res.status === 429) {
         await new Promise(r => setTimeout(r, Math.pow(2, attempt) * 2000));
         continue;
@@ -835,6 +874,18 @@ export async function fetchResearchSnapshot(ticker) {
   }
   console.warn("fetchResearchSnapshot failed for", ticker, lastErr?.message);
   return null;
+}
+
+// Exported so callers can run this in parallel with fetchResearchSnapshot.
+export async function assembleResearchContext({ ticker, thesis, profile }) {
+  return memoryManager.assemble({
+    ticker,
+    query: thesis || ticker,
+    depth: ContextDepth.STANDARD,
+    feature: "research",
+    holdings: profile?.holdings,
+    prices: profile?.prices,
+  });
 }
 
 function _parseQuoteSummary(r, ticker) {
@@ -928,11 +979,10 @@ function _buildSnapshotBlock(snap) {
 
 // Generate a structured research memo via DeepSeek Pro.
 // Returns parsed memo object or throws.
-export async function generateResearchMemo({ ticker, currentPrice, snapshot, userThesis, manualNotes, holdingContext, profile, rules }) {
+// preAssembledCtx: pass the result of assembleResearchContext() to skip the internal
+// await and allow callers to run assembly in parallel with fetchResearchSnapshot.
+export async function generateResearchMemo({ ticker, currentPrice, snapshot, userThesis, manualNotes, holdingContext, profile, rules, preAssembledCtx = null }) {
   const snapshotBlock = _buildSnapshotBlock(snapshot);
-  const rulesBlock = (rules || []).length > 0
-    ? (rules).map((r, i) => `  ${i + 1}. ${r}`).join("\n")
-    : "  (none)";
 
   const holdingBlock = holdingContext
     ? `<holding>
@@ -943,7 +993,7 @@ export async function generateResearchMemo({ ticker, currentPrice, snapshot, use
 </holding>`
     : "<holding>not currently held</holding>";
 
-  const profileCtx = await memoryManager.assemble({
+  const profileCtx = preAssembledCtx ?? await memoryManager.assemble({
     ticker,
     query: userThesis || ticker,
     depth: ContextDepth.STANDARD,
@@ -954,7 +1004,10 @@ export async function generateResearchMemo({ ticker, currentPrice, snapshot, use
 
   const system = `You are a rigorous buy-side equity analyst preparing a decision memo for a private investor. Your role is to synthesize available information into a structured, conditional assessment — NOT to give a trade signal.
 
+All text fields in the JSON output must be written in Simplified Chinese (简体中文). JSON keys and enum values (status, confidence, finish_reason, evidence_quality, etc.) stay in English exactly as specified in the schema.
+
 Rules for this memo:
+- NEVER use imperative phrases like "立即买入", "立即卖出". Use conditional language: "若……则值得关注", "当……时信号改善".
 - NEVER use imperative phrases like "Buy now", "Sell now", "You should buy". Use conditional language: "worth considering if", "watch for", "setup improves when".
 - Status labels are conditional setups, not commands. "Buy setup" means conditions exist that COULD support entry, not that the investor must act.
 - Confidence reflects evidence quality (how well-sourced, how internally consistent), NOT the probability of a profitable outcome.
@@ -962,7 +1015,9 @@ Rules for this memo:
 - Every factual claim must reference its data source (Yahoo Finance snapshot, user input, or AI inference).
 - If data is missing or uncertain, say so explicitly rather than fabricating.
 - Where numbers come from the Yahoo Finance snapshot, note "Source: Yahoo Finance (${snapshot?.stale ? "cached" : "live"}, ${snapshot?.fetchedAt?.slice(0, 10) || "N/A"})".
-- Apply the investor's rules explicitly in the rules_conflict_check section.
+- Every string field: max 2 sentences, max 120 characters. Be terse.
+- deep_research_checklist: max 4 items. peer_set: max 3 tickers. watch_items: max 3 items. assumptions: max 3 items.
+- Do not repeat information already stated in another field.
 
 Output strictly valid JSON matching the schema below. No markdown, no explanation outside the JSON.`;
 
@@ -977,10 +1032,6 @@ ${snapshotBlock}
 <manual_notes>${manualNotes || "(none)"}</manual_notes>
 
 ${holdingBlock}
-
-<investor_rules>
-${rulesBlock}
-</investor_rules>
 
 <investor_context>
 ${profileCtx.blocks}
@@ -1031,9 +1082,6 @@ Return JSON with this exact schema:
     "review_date": "YYYY-MM-DD",
     "batch_plan": ""
   },
-  "rules_conflict_check": [
-    { "rule_text": "", "result": "pass" | "fail" | "n/a", "notes": "" }
-  ],
   "disclaimer_flags": {
     "data_tier": "Yahoo Finance + user input",
     "stale": false,
@@ -1045,7 +1093,7 @@ Return JSON with this exact schema:
     system,
     messages: [{ role: "user", content: user }],
     model: MODELS.smart,
-    max_tokens: 3000,
+    max_tokens: 8000,
   });
 
   const clean = raw
@@ -1053,7 +1101,7 @@ Return JSON with this exact schema:
     .replace(/"/g, '"').replace(/"/g, '"')
     .trim();
   const s = clean.indexOf("{"), e = clean.lastIndexOf("}");
-  if (s === -1) throw new Error("Research memo: no JSON in response");
+  if (s === -1) throw new Error(`Research memo: no JSON in response. Got: "${raw.slice(0, 200)}"`);
   return JSON.parse(clean.slice(s, e + 1));
 }
 
