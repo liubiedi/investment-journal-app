@@ -371,7 +371,7 @@ function TradeRow({ trade, onDelete, onUpdate, onExecute, onRequestFeedback, def
             <TSerifBold style={{ fontSize: 15 }}>{trade.stock}</TSerifBold>
             {trade.entryPrice != null && (
               <TMono style={{ fontSize: 11, color: colors.inkMuted }}>
-                {trade.currency && trade.currency !== "USD" ? `${trade.currency} ` : "$"}{trade.entryPrice}
+                {trade.currency ? `${trade.currency} ` : "USD "}{trade.entryPrice}
               </TMono>
             )}
           </View>
