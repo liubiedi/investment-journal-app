@@ -367,7 +367,14 @@ function TradeRow({ trade, onDelete, onUpdate, onExecute, onRequestFeedback, def
               {action.label.toUpperCase()}
             </TMono>
           </View>
-          <TSerifBold style={{ flex: 1, fontSize: 15 }}>{trade.stock}</TSerifBold>
+          <View style={{ flex: 1, flexDirection: "row", alignItems: "baseline", gap: 6 }}>
+            <TSerifBold style={{ fontSize: 15 }}>{trade.stock}</TSerifBold>
+            {trade.entryPrice != null && (
+              <TMono style={{ fontSize: 11, color: colors.inkMuted }}>
+                {trade.currency ? `${trade.currency} ` : "USD "}{trade.entryPrice}
+              </TMono>
+            )}
+          </View>
           <Text style={{ fontSize: 15, opacity: 0.8 }}>{emotion.emoji ?? "🙂"}</Text>
         </View>
         <TSerif style={{ marginTop: 8, marginLeft: 80, fontSize: 14, lineHeight: 22, color: colors.inkSoft }}>
