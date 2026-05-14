@@ -330,7 +330,7 @@ Sub-tab switcher: two full-width buttons at the top; active tab has ink backgrou
 
 **Trades sub-tab:**
 - "新建交易" button reveals TradeForm.
-- List of trades: date (mono) | action icon+label | stock name (serif bold) | emotion icon (muted).
+- List of trades: date (mono) | action icon+label | stock ticker (serif bold) + entry price inline (mono muted, e.g. "USD 150" or "HKD 25.5" — shown only when entryPrice is set; all currencies displayed as 3-letter code prefix) | emotion icon (muted).
 - Tap row to expand → shows full reason, emotion label, rules checked, original input (if AI-parsed), **FeedbackBlock**, and EDIT / DELETE controls.
 - **Inline edit mode**: tapping EDIT reveals an editable `reason` field (multiline) + emotion chip picker. SAVE persists changes via `db.updateTrade(id, {reason, emotion})`; CANCEL restores original. Editing replaces the FeedbackBlock in the expanded view (they do not overlap). Delete remains available only when not editing.
 - **FeedbackBlock** behavior:
