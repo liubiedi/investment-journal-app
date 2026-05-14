@@ -63,7 +63,7 @@ Navigate to the **Log** tab and tap **新建交易** (New Trade). The form can b
 | Field | Why It Matters |
 |-------|----------------|
 | **ACTION** | Buy / Sell / Hold / Watch — the decision type |
-| **STOCK** | Searchable by ticker or name |
+| **STOCK** | Searchable by ticker or name; entry price (e.g. `USD 150`) is shown inline next to the ticker in the log list when set |
 | **DATE** | Defaults to today; future dates can trigger a calendar reminder |
 | **REASON** | The thesis, written *before* you act. This is the most important field in the app. |
 | **EMOTION** | Calm / Confident / Neutral / Anxious / Fearful. Emotional state at the moment of decision. |
