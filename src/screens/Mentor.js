@@ -192,8 +192,17 @@ export default function MentorScreen() {
   return (
     <KeyboardAvoidingView
       style={{ flex: 1 }}
+      // iOS needs `padding` + `keyboardVerticalOffset=tabBarHeight` so the
+      // input bar sits flush above the keyboard (iOS has no OS-level resize).
+      // Android handles the keyboard via windowSoftInputMode=adjustResize
+      // (Expo default) which shrinks the RN window — the flex layout then
+      // naturally keeps the input row above the keyboard. A non-zero
+      // `keyboardVerticalOffset` on Android with `behavior="height"` would
+      // reserve that many pixels of bottom padding even when the keyboard
+      // is hidden, leaving a dead zone between the input and the tab bar.
+      // Matches the pattern used elsewhere in this app (Log, Home, Holdings…).
       behavior={Platform.OS === "ios" ? "padding" : "height"}
-      keyboardVerticalOffset={tabBarHeight}
+      keyboardVerticalOffset={Platform.OS === "ios" ? tabBarHeight : 0}
     >
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }} edges={["top"]}>
       {/* Header */}

@@ -1,9 +1,9 @@
 // components.js — shared UI primitives matching the editorial aesthetic.
 
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import {
   View, Text, Pressable, TextInput, ScrollView, ActivityIndicator,
-  StyleSheet, Modal,
+  StyleSheet, Modal, Animated,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import {
@@ -481,12 +481,50 @@ export function FormHeader({ title, onCancel }) {
   );
 }
 
+// ========== Research: SkeletonBlock ==========
+// Pulsing placeholder shown while a memo section is being generated.
+// Visual: 2-3 dim bars + a tiny "generating…" hint with an optional progress dot.
+export function SkeletonBlock({ lines = 3, hint, animated = true }) {
+  const opacity = useRef(new Animated.Value(0.5)).current;
+  useEffect(() => {
+    if (!animated) return;
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(opacity, { toValue: 1, duration: 800, useNativeDriver: true }),
+        Animated.timing(opacity, { toValue: 0.5, duration: 800, useNativeDriver: true }),
+      ])
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [animated, opacity]);
+  const widths = ["95%", "82%", "70%", "60%"];
+  return (
+    <View style={{ paddingVertical: 8 }}>
+      {Array.from({ length: lines }).map((_, i) => (
+        <Animated.View
+          key={i}
+          style={{
+            height: 10, backgroundColor: "#e9e4d8", borderRadius: 4,
+            marginBottom: 8, width: widths[i % widths.length], opacity,
+          }}
+        />
+      ))}
+      {hint ? (
+        <TMono style={{ fontSize: 9, color: colors.inkFaint, marginTop: 4, letterSpacing: 0.5 }}>
+          {hint}
+        </TMono>
+      ) : null}
+    </View>
+  );
+}
+
 // ========== Research: StatusBadge ==========
 const STATUS_META = {
   buy_setup:   { label: "建仓机会", en: "Buy Setup",    bg: "#d4edda", text: "#2d5f3f" },
   watch:       { label: "观望",     en: "Watch",        bg: "#fff3cd", text: "#856404" },
   reduce_risk: { label: "降低风险", en: "Reduce Risk",  bg: "#fde8d0", text: "#8a4800" },
   avoid:       { label: "回避",     en: "Avoid",        bg: "#f8d7da", text: "#a03434" },
+  generating:  { label: "生成中",   en: "Generating",   bg: "#e9e4d8", text: "#6b5a3f" },
 };
 
 export function StatusBadge({ status, style }) {

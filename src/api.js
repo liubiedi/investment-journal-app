@@ -267,18 +267,7 @@ export async function parseTradeText(text) {
     max_tokens: 512,
   });
 
-  // Strip markdown fences and normalize quotes (Chinese curly quotes -> straight)
-  const clean = raw
-    .replace(/```json\s*/gi, "")
-    .replace(/```/g, "")
-    .replace(/"/g, '"')
-    .replace(/"/g, '"')
-    .trim();
-
-  const s = clean.indexOf("{"), e = clean.lastIndexOf("}");
-  if (s === -1) throw new Error("No JSON in response");
-
-  const parsed = JSON.parse(clean.slice(s, e + 1));
+  const parsed = parseLooseJson(raw, { label: "parseTradeText" });
   const VALID_ACTIONS = ["buy", "sell", "hold", "watch", "buy_option", "sell_option"];
   const VALID_EMOTIONS = ["calm", "confident", "neutral", "anxious", "fearful", "excited", "greedy", "optimistic", "hesitant", "regretful"];
   return {
@@ -472,9 +461,7 @@ Reply ONLY with JSON:
       model: MODELS.fast,
       max_tokens: 300,
     });
-    const clean = planRaw.replace(/```json|```/g, "").trim();
-    const s = clean.indexOf("{"), e = clean.lastIndexOf("}");
-    if (s !== -1) plan = JSON.parse(clean.slice(s, e + 1));
+    plan = parseLooseJson(planRaw, { label: "strategy planning", fallback: {} });
   } catch { /* use empty plan — DEEP context still assembles */ }
 
   // Phase B: assemble rich context using Phase A's guidance
@@ -941,8 +928,10 @@ function _parseQuoteSummary(r, ticker) {
   };
 }
 
-function _fmtNumber(n, decimals = 2) {
-  if (n == null) return "N/A";
+// Format a number with B/M suffix for compact display.
+// Exported because the research pipeline also uses this in mentor memo summaries.
+export function fmtNumber(n, decimals = 2, missing = "N/A") {
+  if (n == null) return missing;
   if (Math.abs(n) >= 1e9) return (n / 1e9).toFixed(1) + "B";
   if (Math.abs(n) >= 1e6) return (n / 1e6).toFixed(1) + "M";
   return n.toFixed(decimals);
@@ -956,8 +945,8 @@ function _buildSnapshotBlock(snap) {
   sector: ${snap.sector || "N/A"} | industry: ${snap.industry || "N/A"}
   employees: ${snap.employees ? snap.employees.toLocaleString() : "N/A"}
   business_summary: ${(snap.businessSummary || "").slice(0, 500)}
-  market_cap: ${_fmtNumber(snap.marketCap)}
-  52w_range: ${_fmtNumber(snap.fiftyTwoWeekLow, 2)} – ${_fmtNumber(snap.fiftyTwoWeekHigh, 2)}
+  market_cap: ${fmtNumber(snap.marketCap)}
+  52w_range: ${fmtNumber(snap.fiftyTwoWeekLow, 2)} – ${fmtNumber(snap.fiftyTwoWeekHigh, 2)}
   beta: ${snap.beta?.toFixed(2) ?? "N/A"}
   dividend_yield: ${pct(snap.dividendYield)}
   trailing_pe: ${snap.trailingPE?.toFixed(1) ?? "N/A"}
@@ -966,7 +955,7 @@ function _buildSnapshotBlock(snap) {
   price_to_book: ${snap.priceToBook?.toFixed(2) ?? "N/A"}
   profit_margins: ${pct(snap.profitMargins)}
   roe: ${pct(snap.roe)} | roa: ${pct(snap.roa)}
-  free_cash_flow: ${_fmtNumber(snap.freeCashflow)}
+  free_cash_flow: ${fmtNumber(snap.freeCashflow)}
   debt_to_equity: ${snap.debtToEquity?.toFixed(1) ?? "N/A"}
   current_ratio: ${snap.currentRatio?.toFixed(2) ?? "N/A"}
   revenue_growth_yoy: ${pct(snap.revenueGrowth)} | earnings_growth_yoy: ${pct(snap.earningsGrowth)}
@@ -977,13 +966,31 @@ function _buildSnapshotBlock(snap) {
 </snapshot>`;
 }
 
-// Generate a structured research memo via DeepSeek Pro.
-// Returns parsed memo object or throws.
-// preAssembledCtx: pass the result of assembleResearchContext() to skip the internal
-// await and allow callers to run assembly in parallel with fetchResearchSnapshot.
-export async function generateResearchMemo({ ticker, currentPrice, snapshot, userThesis, manualNotes, holdingContext, profile, rules, preAssembledCtx = null }) {
-  const snapshotBlock = _buildSnapshotBlock(snapshot);
+// LLM responses sometimes contain markdown fences or Chinese curly quotes —
+// strip them, then carve out the outermost {...} or [...] and parse.
+// shape: "object" (default) or "array". `fallback`: returned on parse failure
+// instead of throwing; pass undefined to throw with the given label.
+export function parseLooseJson(raw, { label = "JSON", shape = "object", fallback } = {}) {
+  const clean = raw
+    .replace(/```json\s*/gi, "").replace(/```/g, "")
+    .replace(/"/g, '"').replace(/"/g, '"')
+    .trim();
+  const [open, close] = shape === "array" ? ["[", "]"] : ["{", "}"];
+  const s = clean.indexOf(open), e = clean.lastIndexOf(close);
+  if (s === -1 || e === -1) {
+    if (fallback !== undefined) return fallback;
+    throw new Error(`${label}: no JSON in response. Got: "${raw.slice(0, 200)}"`);
+  }
+  try {
+    return JSON.parse(clean.slice(s, e + 1));
+  } catch (err) {
+    if (fallback !== undefined) return fallback;
+    throw new Error(`${label}: malformed JSON. ${err.message}`);
+  }
+}
 
+function _buildResearchContextBlocks({ ticker, snapshot, userThesis, manualNotes, holdingContext, currentPrice, profileCtxBlocks }) {
+  const snapshotBlock = _buildSnapshotBlock(snapshot);
   const holdingBlock = holdingContext
     ? `<holding>
   shares: ${holdingContext.shares} @ ${holdingContext.costBasis} ${holdingContext.currency || ""}
@@ -993,37 +1000,7 @@ export async function generateResearchMemo({ ticker, currentPrice, snapshot, use
 </holding>`
     : "<holding>not currently held</holding>";
 
-  const profileCtx = preAssembledCtx ?? await memoryManager.assemble({
-    ticker,
-    query: userThesis || ticker,
-    depth: ContextDepth.STANDARD,
-    feature: "research",
-    holdings: profile?.holdings,
-    prices: profile?.prices,
-  });
-
-  const system = `You are a rigorous buy-side equity analyst preparing a decision memo for a private investor. Your role is to synthesize available information into a structured, conditional assessment — NOT to give a trade signal.
-
-All text fields in the JSON output must be written in Simplified Chinese (简体中文). JSON keys and enum values (status, confidence, finish_reason, evidence_quality, etc.) stay in English exactly as specified in the schema.
-
-Rules for this memo:
-- NEVER use imperative phrases like "立即买入", "立即卖出". Use conditional language: "若……则值得关注", "当……时信号改善".
-- NEVER use imperative phrases like "Buy now", "Sell now", "You should buy". Use conditional language: "worth considering if", "watch for", "setup improves when".
-- Status labels are conditional setups, not commands. "Buy setup" means conditions exist that COULD support entry, not that the investor must act.
-- Confidence reflects evidence quality (how well-sourced, how internally consistent), NOT the probability of a profitable outcome.
-- All valuation figures must be presented as ranges (bull/base/bear), never as a single target price.
-- Every factual claim must reference its data source (Yahoo Finance snapshot, user input, or AI inference).
-- If data is missing or uncertain, say so explicitly rather than fabricating.
-- Where numbers come from the Yahoo Finance snapshot, note "Source: Yahoo Finance (${snapshot?.stale ? "cached" : "live"}, ${snapshot?.fetchedAt?.slice(0, 10) || "N/A"})".
-- Every string field: max 2 sentences, max 120 characters. Be terse.
-- deep_research_checklist: max 4 items. peer_set: max 3 tickers. watch_items: max 3 items. assumptions: max 3 items.
-- Do not repeat information already stated in another field.
-
-Output strictly valid JSON matching the schema below. No markdown, no explanation outside the JSON.`;
-
-  const user = `Generate a research memo for:
-
-<ticker>${ticker.toUpperCase()}</ticker>
+  return `<ticker>${ticker.toUpperCase()}</ticker>
 <current_price>${currentPrice ?? "N/A"}</current_price>
 
 ${snapshotBlock}
@@ -1034,25 +1011,114 @@ ${snapshotBlock}
 ${holdingBlock}
 
 <investor_context>
-${profileCtx.blocks}
-</investor_context>
+${profileCtxBlocks}
+</investor_context>`;
+}
 
-Return JSON with this exact schema:
+// ── HEADLINE call (deepseek-v4-flash, ~5-8s) ─────────────────────────────────
+// Returns the small, decision-critical subset of the memo:
+// status, confidence, confidence_basis, thesis_summary, max_risk_summary, business_snapshot.
+// Streamed so UI can show "model is working" feedback.
+const HEADLINE_SYSTEM = `You are a buy-side equity analyst writing the HEADLINE section of a research memo for a private investor. You handle the verdict + business summary only — the deep valuation work runs in a separate model.
+
+All text fields in the JSON output must be written in Simplified Chinese (简体中文). JSON keys and enum values (status, confidence, evidence_quality, etc.) stay in English exactly as specified.
+
+Rules:
+- Use conditional language: "若……则值得关注", "当……时信号改善". Never "立即买入" / "Buy now".
+- Status labels are conditional setups, not commands.
+- Confidence reflects evidence quality, not probability of profit.
+- Every factual claim should be traceable to the Yahoo Finance snapshot or user input.
+- Every string field: max 2 sentences, max 120 characters. Be terse.
+- Do not repeat information across fields.
+
+Output strictly valid JSON matching the schema. No markdown.`;
+
+export async function generateResearchHeadline({
+  ticker, currentPrice, snapshot, userThesis, manualNotes,
+  holdingContext, profile, preAssembledCtx = null, onChunk,
+}) {
+  const profileCtx = preAssembledCtx ?? await memoryManager.assemble({
+    ticker, query: userThesis || ticker, depth: ContextDepth.STANDARD,
+    feature: "research", holdings: profile?.holdings, prices: profile?.prices,
+  });
+
+  const ctxBlocks = _buildResearchContextBlocks({
+    ticker, snapshot, userThesis, manualNotes, holdingContext, currentPrice,
+    profileCtxBlocks: profileCtx.blocks,
+  });
+
+  const user = `Generate the HEADLINE section of a research memo for:
+
+${ctxBlocks}
+
+Return JSON with this exact schema (no other keys):
 {
   "status": "buy_setup" | "watch" | "reduce_risk" | "avoid",
   "confidence": "high" | "medium" | "low",
   "confidence_basis": "one sentence explaining what drives the confidence level",
-  "max_risk_summary": "brief string",
+  "max_risk_summary": "brief string, what could go wrong",
   "thesis_summary": "2-3 sentences, conditional language only",
   "business_snapshot": {
-    "summary": "",
-    "revenue_drivers": "",
-    "competitive_edge": "",
-    "market_debates": ""
-  },
-  "deep_research_checklist": [
-    { "item": "", "finding": "", "evidence_quality": "primary_filing|vendor_api|ai_inference|user_entered", "source": "" }
-  ],
+    "summary": "what the company does, 1-2 sentences",
+    "revenue_drivers": "what drives top-line growth",
+    "competitive_edge": "the moat or differentiator",
+    "market_debates": "the bull/bear debate the market is having"
+  }
+}`;
+
+  const raw = await callLLMStream({
+    system: HEADLINE_SYSTEM,
+    messages: [{ role: "user", content: user }],
+    model: MODELS.fast,
+    max_tokens: 1500,
+    onChunk,
+  });
+  return parseLooseJson(raw, { label: "Research headline" });
+}
+
+// ── DEEP call (deepseek-v4-pro, ~25-40s, streamed) ───────────────────────────
+// Returns the analytically heavy sections: valuation scenarios, position sizing,
+// trading strategy, deep research checklist. Runs in parallel with the headline.
+const DEEP_SYSTEM = `You are a rigorous buy-side equity analyst writing the DEEP ANALYSIS sections of a research memo for a private investor: valuation scenarios, position sizing, trading strategy, and the deep research checklist.
+
+All text fields in the JSON output must be written in Simplified Chinese (简体中文). JSON keys and enum values stay in English exactly as specified.
+
+Rules:
+- Use conditional language. Never imperative phrases.
+- All valuation figures must be presented as ranges (bull/base/bear), never a single target price.
+- Every factual claim must reference its data source (Yahoo Finance snapshot, user input, or AI inference).
+- If data is missing, say so explicitly rather than fabricating.
+- Every string field: max 2 sentences, max 120 characters. Be terse.
+- deep_research_checklist: max 4 items. peer_set: max 3 tickers. watch_items: max 3 items. assumptions: max 3 items.
+- Do not repeat information across fields.
+
+Output strictly valid JSON matching the schema. No markdown.`;
+
+export async function generateResearchDeepAnalysis({
+  ticker, currentPrice, snapshot, userThesis, manualNotes,
+  holdingContext, profile, preAssembledCtx = null, onChunk,
+}) {
+  const profileCtx = preAssembledCtx ?? await memoryManager.assemble({
+    ticker, query: userThesis || ticker, depth: ContextDepth.STANDARD,
+    feature: "research", holdings: profile?.holdings, prices: profile?.prices,
+  });
+
+  const ctxBlocks = _buildResearchContextBlocks({
+    ticker, snapshot, userThesis, manualNotes, holdingContext, currentPrice,
+    profileCtxBlocks: profileCtx.blocks,
+  });
+
+  const dataFreshness = snapshot?.stale ? "cached" : "live";
+  const fetchedAt = snapshot?.fetchedAt?.slice(0, 10) || "N/A";
+
+  const user = `Generate the DEEP ANALYSIS sections of a research memo for:
+
+${ctxBlocks}
+
+Where numbers come from the Yahoo Finance snapshot, note "Source: Yahoo Finance (${dataFreshness}, ${fetchedAt})".
+
+Return JSON with this exact schema (no other keys):
+{
   "valuation": {
     "current_price": 0,
     "multiples": { "trailing_pe": null, "forward_pe": null, "ev_ebitda": null, "price_to_book": null, "fcf_yield": null },
@@ -1065,7 +1131,7 @@ Return JSON with this exact schema:
     "fair_value_band": { "low": 0, "high": 0 },
     "assumptions": [],
     "data_source": "",
-    "stale": false
+    "stale": ${snapshot?.stale ? "true" : "false"}
   },
   "position_sizing": {
     "current_pct": 0,
@@ -1082,27 +1148,24 @@ Return JSON with this exact schema:
     "review_date": "YYYY-MM-DD",
     "batch_plan": ""
   },
+  "deep_research_checklist": [
+    { "item": "", "finding": "", "evidence_quality": "primary_filing|vendor_api|ai_inference|user_entered", "source": "" }
+  ],
   "disclaimer_flags": {
     "data_tier": "Yahoo Finance + user input",
-    "stale": false,
+    "stale": ${snapshot?.stale ? "true" : "false"},
     "missing_data": []
   }
 }`;
 
-  const raw = await callLLM({
-    system,
+  const raw = await callLLMStream({
+    system: DEEP_SYSTEM,
     messages: [{ role: "user", content: user }],
     model: MODELS.smart,
-    max_tokens: 8000,
+    max_tokens: 4500,
+    onChunk,
   });
-
-  const clean = raw
-    .replace(/```json\s*/gi, "").replace(/```/g, "")
-    .replace(/"/g, '"').replace(/"/g, '"')
-    .trim();
-  const s = clean.indexOf("{"), e = clean.lastIndexOf("}");
-  if (s === -1) throw new Error(`Research memo: no JSON in response. Got: "${raw.slice(0, 200)}"`);
-  return JSON.parse(clean.slice(s, e + 1));
+  return parseLooseJson(raw, { label: "Research deep analysis" });
 }
 
 // Evaluate a memo's conclusions against the investor's rules (cheap flash model).
@@ -1136,17 +1199,7 @@ Return a JSON array only. No markdown, no explanation.`;
     max_tokens: 800,
   });
 
-  const clean = raw
-    .replace(/```json\s*/gi, "").replace(/```/g, "")
-    .replace(/"/g, '"').replace(/"/g, '"')
-    .trim();
-  const s = clean.indexOf("["), e = clean.lastIndexOf("]");
-  if (s === -1) return [];
-  try {
-    return JSON.parse(clean.slice(s, e + 1));
-  } catch {
-    return [];
-  }
+  return parseLooseJson(raw, { label: "checkResearchRules", shape: "array", fallback: [] });
 }
 
 // Build the sources array for a research version (shared by Research.js and ResearchMemo.js).

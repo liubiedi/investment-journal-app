@@ -1,11 +1,12 @@
 // ResearchMemo — full memo viewer with versioning, rules check, and attach-to-trade.
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import {
   View, ScrollView, Pressable, Text, Modal, ActivityIndicator, Alert,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useNavigation, useRoute } from "@react-navigation/native";
-import { ChevronDown, ChevronUp, ChevronLeft, History, Trash2, Link } from "lucide-react-native";
+import { ChevronDown, ChevronUp, ChevronLeft, History, Trash2, Link, RotateCw } from "lucide-react-native";
+import { activateKeepAwakeAsync, deactivateKeepAwake } from "expo-keep-awake";
 
 import { useApp } from "../context";
 import { colors, fonts, spacing } from "../theme";
@@ -13,48 +14,163 @@ import {
   TSerif, TSerifBold, TSerifItalic, TMono, Kicker, HR,
   FilledButton, OutlineButton,
   StatusBadge, ConfidencePill, SourceCard, DisclaimerBlock,
+  SkeletonBlock,
 } from "../components";
 import {
-  fetchResearchSnapshot, generateResearchMemo, checkResearchRules, buildResearchSources,
-  assembleResearchContext,
-} from "../api";
-import {
   getResearchVersion, listResearchVersions, listResearchRuleChecks,
-  updateRuleCheckOverride, insertResearchVersion, insertResearchRuleChecks,
+  newId,
 } from "../db";
+import {
+  startResearchGeneration, buildPlaceholder,
+  subscribeResearchProgress, getResearchJobStatus,
+  StagePhase, StageName,
+} from "../research/pipeline";
+
+const isStageBusy = (p) => p === StagePhase.RUNNING || p === StagePhase.PENDING;
 import { memoryManager } from "../memory/MemoryManager";
-import { newId } from "../db";
-import { todayIso, addMonths } from "../utils";
+import { todayIso } from "../utils";
 
 export default function ResearchMemoScreen() {
   const nav = useNavigation();
   const route = useRoute();
   const { memoId } = route.params || {};
 
-  const { researchMemos, holdings, prices, rules, profile, saveResearchMemo, deleteResearchMemo, linkResearchMemo, trades, apiKeyPresent } = useApp();
+  const { researchMemos, holdings, prices, rules, profile, saveResearchMemo, refreshResearchMemoById, deleteResearchMemo, linkResearchMemo, trades, apiKeyPresent } = useApp();
 
   const memo = researchMemos.find(m => m.id === memoId);
   const [version, setVersion] = useState(null);
   const [ruleChecks, setRuleChecks] = useState([]);
   const [historyVisible, setHistoryVisible] = useState(false);
   const [allVersions, setAllVersions] = useState([]);
-  const [regenerating, setRegenerating] = useState(false);
   const [regenError, setRegenError] = useState(null);
   const [attachVisible, setAttachVisible] = useState(false);
 
-  useEffect(() => {
+  // Stage state drives skeleton vs. real-content rendering. Initialized from
+  // the active job (mounted mid-generation) or from memo status. An orphaned
+  // memo (status="generating" but no active job) starts in STALLED — the
+  // retry banner handles it instead of showing forever-spinners.
+  const [stages, setStages] = useState(() => {
+    const job = getResearchJobStatus(memoId);
+    if (job) return { ...job.stages };
+    if (memo?.status && memo.status !== "generating") {
+      return { headline: StagePhase.DONE, deep: StagePhase.DONE, rules: StagePhase.DONE };
+    }
+    return { headline: StagePhase.STALLED, deep: StagePhase.STALLED, rules: StagePhase.STALLED };
+  });
+
+  // Indicator is for user-visible content only. memo.status flips out of
+  // "generating" as soon as the headline lands (HEADLINE.DONE persist), so it
+  // is the authoritative signal that the memo has at least its conclusion.
+  // Rules check is a background sanity check — never block the UI on it
+  // (a slow or missed rules event would otherwise leave "Updating memo…" up
+  // forever even though all visible content is on screen).
+  const isGenerating = useMemo(
+    () => memo?.status === "generating" || isStageBusy(stages.headline) || isStageBusy(stages.deep),
+    [memo?.status, stages.headline, stages.deep]
+  );
+
+  const isOrphan = useMemo(
+    () => memo?.status === "generating" && stages.headline === StagePhase.STALLED && !getResearchJobStatus(memoId),
+    [memo?.status, stages.headline, memoId]
+  );
+
+  // Per-stage refresh dispatch: only refetch the slices a stage actually
+  // touched, instead of refetching everything on every "done" event.
+  const reloadVersion = useCallback(async () => {
     if (!memo?.current_version_id) return;
-    let active = true;
-    Promise.all([
-      getResearchVersion(memo.current_version_id),
-      listResearchRuleChecks(memo.current_version_id),
-    ]).then(([v, checks]) => {
-      if (!active) return;
-      if (v) setVersion(v);
-      setRuleChecks(checks);
-    });
-    return () => { active = false; };
+    const v = await getResearchVersion(memo.current_version_id);
+    if (v) setVersion(v);
   }, [memo?.current_version_id]);
+
+  const reloadRuleChecks = useCallback(async () => {
+    if (!memo?.current_version_id) return;
+    const checks = await listResearchRuleChecks(memo.current_version_id);
+    setRuleChecks(checks);
+  }, [memo?.current_version_id]);
+
+  const reloadAll = useCallback(async () => {
+    await Promise.all([reloadVersion(), reloadRuleChecks()]);
+  }, [reloadVersion, reloadRuleChecks]);
+
+  useEffect(() => {
+    let active = true;
+    reloadAll().then(() => { if (!active) return; });
+    return () => { active = false; };
+  }, [reloadAll]);
+
+  // iOS suspends the JS thread when the screen sleeps, stalling in-flight
+  // LLM calls. Hold a wake lock while a stage is actually running.
+  useEffect(() => {
+    if (!isGenerating) return;
+    const tag = `research-memo-${memoId}`;
+    activateKeepAwakeAsync(tag).catch(() => { /* non-fatal */ });
+    return () => { deactivateKeepAwake(tag); };
+  }, [isGenerating, memoId]);
+
+  const handleRetryOrphan = useCallback(async () => {
+    if (!memo || !apiKeyPresent) return;
+    setRegenError(null);
+    const sym = memo.ticker.toUpperCase();
+    const currentPrice = prices?.data?.[sym]?.price ?? null;
+    const holdingCtx = memo.holding_id
+      ? holdings.find(h => h.id === memo.holding_id)
+      : holdings.find(h => h.symbol.toUpperCase() === sym);
+
+    // Re-run on the existing version row — pipeline UPDATEs overwrite any
+    // partial fields left behind by the previous attempt.
+    setStages({ headline: StagePhase.RUNNING, deep: StagePhase.RUNNING, rules: StagePhase.PENDING });
+    startResearchGeneration({
+      memoId: memo.id,
+      versionId: memo.current_version_id,
+      ticker: sym,
+      currentPrice,
+      userThesis: version?.thesis || "",
+      manualNotes: "",
+      holdingContext: holdingCtx,
+      profile,
+      rules,
+    }).catch((e) => setRegenError(e?.message || "Retry failed."));
+  }, [memo, apiKeyPresent, prices, holdings, version, profile, rules]);
+
+  // Subscribe to pipeline progress events. Chunk events fire many times per
+  // second during streaming — ignore them; only transitions matter.
+  useEffect(() => {
+    if (!memoId) return;
+    const unsub = subscribeResearchProgress(memoId, (event) => {
+      if (event.phase === StagePhase.CHUNK) return;
+      setStages((prev) => prev[event.stage] === event.phase
+        ? prev
+        : { ...prev, [event.stage]: event.phase });
+      if (event.phase !== StagePhase.DONE) return;
+      // Dispatch refetch by stage — avoids the N+1 reload-everything pattern.
+      if (event.stage === StageName.HEADLINE) {
+        reloadVersion();
+        refreshResearchMemoById?.(memoId);
+      } else if (event.stage === StageName.DEEP) {
+        reloadVersion();
+        refreshResearchMemoById?.(memoId); // nextReviewDate may have changed
+      } else if (event.stage === StageName.RULES) {
+        reloadRuleChecks();
+      } else if (event.stage === StageName.FINALIZE) {
+        reloadVersion(); // sources + disclaimerFlags landed
+        refreshResearchMemoById?.(memoId); // status may have flipped to "watch" fallback
+        // Belt & suspenders: pipeline awaits Promise.allSettled before
+        // emitting FINALIZE.DONE, so any stage still marked RUNNING/PENDING
+        // here is a stale state from a missed event. Force-settle so the
+        // UI never gets stuck on "Updating memo…".
+        setStages((prev) => {
+          const settle = (p) => isStageBusy(p) ? StagePhase.DONE : p;
+          return {
+            ...prev,
+            headline: settle(prev.headline),
+            deep:     settle(prev.deep),
+            rules:    settle(prev.rules),
+          };
+        });
+      }
+    });
+    return unsub;
+  }, [memoId, reloadVersion, reloadRuleChecks, refreshResearchMemoById]);
 
   const loadHistory = useCallback(() => {
     if (!memoId) return;
@@ -77,8 +193,9 @@ export default function ResearchMemoScreen() {
 
   const handleRegenerate = useCallback(async () => {
     if (!memo || !apiKeyPresent) return;
+    if (isGenerating) return; // already running
     setRegenError(null);
-    setRegenerating(true);
+
     try {
       const sym = memo.ticker.toUpperCase();
       const currentPrice = prices?.data?.[sym]?.price ?? null;
@@ -86,80 +203,44 @@ export default function ResearchMemoScreen() {
         ? holdings.find(h => h.id === memo.holding_id)
         : holdings.find(h => h.symbol.toUpperCase() === sym);
 
-      const [snapshot, preAssembledCtx] = await Promise.all([
-        fetchResearchSnapshot(sym).catch(() => null),
-        assembleResearchContext({ ticker: sym, thesis: version?.thesis, profile }),
-      ]);
-      const memoData = await generateResearchMemo({
+      const newVersionId = newId("rv");
+      const versionNum = (allVersions.length || (version?.versionNum || 1)) + 1;
+      const { memo: phMemo, version: phVersion } = buildPlaceholder({
+        memoId: memo.id,
+        versionId: newVersionId,
+        ticker: sym,
+        companyName: memo.company_name,
+        holdingId: memo.holding_id,
+        versionNum,
+      });
+      // Preserve the original createdAt; only lastReviewedAt rolls forward.
+      const placeholderMemo = {
+        ...phMemo,
+        createdAt: memo.created_at || phMemo.createdAt,
+        nextReviewDate: memo.next_review_date,
+      };
+      await saveResearchMemo(placeholderMemo, phVersion, []);
+
+      // Skeletons render as soon as stages flip to RUNNING — no need to clear
+      // version state separately (section bodies prefer stages over content).
+      setRuleChecks([]);
+      setStages({ headline: StagePhase.RUNNING, deep: StagePhase.RUNNING, rules: StagePhase.PENDING });
+
+      startResearchGeneration({
+        memoId: memo.id,
+        versionId: newVersionId,
         ticker: sym,
         currentPrice,
-        snapshot,
         userThesis: version?.thesis || "",
         manualNotes: "",
         holdingContext: holdingCtx,
         profile,
         rules,
-        preAssembledCtx,
-      });
-      const ruleCheckResults = await checkResearchRules(memoData, rules).catch(() => []);
-
-      const versionId = newId("rv");
-      const today = todayIso();
-      const reviewDate = memoData.trading_strategy?.review_date || addMonths(today, 3);
-
-      const updatedMemo = {
-        ...memo,
-        currentVersionId: versionId,
-        status: memoData.status,
-        confidence: memoData.confidence,
-        companyName: memo.company_name,
-        lastReviewedAt: today,
-        nextReviewDate: reviewDate,
-      };
-
-      const newVersion = {
-        id: versionId,
-        memoId: memo.id,
-        versionNum: (allVersions.length || 1) + 1,
-        thesis: memoData.thesis_summary,
-        businessSnapshot: memoData.business_snapshot,
-        valuation: memoData.valuation,
-        positionSizing: memoData.position_sizing,
-        tradingStrategy: memoData.trading_strategy,
-        disclaimerFlags: { ...memoData.disclaimer_flags, snapshot_fetched_at: snapshot?.fetchedAt },
-        sources: buildResearchSources(memoData, snapshot),
-        modelId: "deepseek-v4-pro",
-        generatedAt: new Date().toISOString(),
-        createdAt: today,
-      };
-
-      const dbRuleChecks = ruleCheckResults.map(rc => ({
-        id: newId("rrc"), versionId,
-        ruleText: rc.rule_text || "", result: rc.result || "n/a",
-        notes: rc.notes || "", overrideReason: null,
-      }));
-
-      await saveResearchMemo(updatedMemo, newVersion, dbRuleChecks);
-      setVersion(newVersion);
-      setRuleChecks(dbRuleChecks);
-
-      memoryManager.recordInsight({
-        type: "research_memo",
-        scope: sym,
-        content: `${memoData.status?.toUpperCase()}: ${memoData.thesis_summary || ""}. Invalidated if: ${memoData.position_sizing?.invalidation_condition || "(not set)"}`,
-        structured: {
-          status: memoData.status, confidence: memoData.confidence,
-          next_review_date: reviewDate, version_id: versionId,
-          rules_pass: ruleCheckResults.every(r => r.result !== "fail"),
-        },
-        modelId: "deepseek-v4-pro",
-      }).catch(() => {});
+      }).catch((e) => setRegenError(e?.message || "Regeneration failed."));
     } catch (e) {
       setRegenError(e.message || "Regeneration failed.");
-    } finally {
-      setRegenerating(false);
     }
-  }, [memo, version, allVersions, apiKeyPresent, prices, holdings, profile, rules, saveResearchMemo]);
+  }, [memo, version, allVersions, apiKeyPresent, prices, holdings, profile, rules, saveResearchMemo, isGenerating]);
 
   const handleAttachTrade = useCallback(async (tradeId) => {
     await linkResearchMemo(memoId, "trade", tradeId);
@@ -231,73 +312,155 @@ export default function ResearchMemoScreen() {
 
         <HR />
 
-        {!version ? (
-          <View style={{ alignItems: "center", paddingVertical: 24 }}>
-            <ActivityIndicator color={colors.inkFaint} />
-          </View>
-        ) : (
-          <>
-            <CollapsibleSection title="当前结论  Current Conclusion" defaultOpen>
-              <Field label="Thesis">{version.thesis || "(none)"}</Field>
-              {version.positionSizing?.invalidation_condition ? (
-                <Field label="Invalidated if">
-                  <TSerif style={{ fontSize: 13, color: "#a03434" }}>
-                    {version.positionSizing.invalidation_condition}
-                  </TSerif>
-                </Field>
-              ) : null}
-              {version.disclaimerFlags?.confidence_basis ? (
-                <Field label="Confidence basis">{version.disclaimerFlags.confidence_basis}</Field>
-              ) : null}
-            </CollapsibleSection>
-
-            <CollapsibleSection title="商业概况  Business Snapshot" defaultOpen>
-              {version.businessSnapshot?.summary ? (
-                <Field label="Summary">{version.businessSnapshot.summary}</Field>
-              ) : null}
-              {version.businessSnapshot?.revenue_drivers ? (
-                <Field label="Revenue Drivers">{version.businessSnapshot.revenue_drivers}</Field>
-              ) : null}
-              {version.businessSnapshot?.competitive_edge ? (
-                <Field label="Competitive Edge">{version.businessSnapshot.competitive_edge}</Field>
-              ) : null}
-              {version.businessSnapshot?.market_debates ? (
-                <Field label="Market Debates">{version.businessSnapshot.market_debates}</Field>
-              ) : null}
-            </CollapsibleSection>
-
-            <CollapsibleSection title="估值检验  Valuation Check" defaultOpen>
-              <ValuationSection valuation={version.valuation} />
-            </CollapsibleSection>
-
-            <CollapsibleSection title="仓位管理  Position Sizing" defaultOpen>
-              <PositionSection ps={version.positionSizing} />
-            </CollapsibleSection>
-
-            <CollapsibleSection title="3–6月计划  Trading Strategy">
-              <StrategySection ts={version.tradingStrategy} />
-            </CollapsibleSection>
-
-            <CollapsibleSection title="研究清单  Deep Research Checklist">
-              <ChecklistSection version={version} />
-            </CollapsibleSection>
-
-            <CollapsibleSection title="规则检验  Rules Conflict Check" defaultOpen>
-              <RulesSection ruleChecks={ruleChecks} />
-            </CollapsibleSection>
-
-            <CollapsibleSection title="信息来源  Sources">
-              {(version.sources || []).map((s, i) => (
-                <SourceCard key={i} source={s} />
-              ))}
-              {(!version.sources || version.sources.length === 0) && (
-                <TSerifItalic style={{ fontSize: 12 }}>No sources recorded.</TSerifItalic>
-              )}
-            </CollapsibleSection>
-
-            <DisclaimerBlock flags={version.disclaimerFlags} />
-          </>
+        {isOrphan && (
+          <Pressable
+            onPress={handleRetryOrphan}
+            style={({ pressed }) => ({
+              flexDirection: "row", alignItems: "center", gap: 10,
+              backgroundColor: "#fde8d0", borderRadius: 6, padding: 12,
+              marginBottom: 14, marginTop: 8,
+              opacity: pressed ? 0.7 : 1,
+              borderLeftWidth: 3, borderLeftColor: "#8a4800",
+            })}
+          >
+            <RotateCw size={14} color="#8a4800" />
+            <View style={{ flex: 1 }}>
+              <TSerifBold style={{ fontSize: 13, color: "#8a4800" }}>生成被中断</TSerifBold>
+              <TSerifItalic style={{ fontSize: 11, color: "#6b5a3f", marginTop: 2 }}>
+                上次生成未完成（可能因 app 退到后台太久）。点击重试。
+              </TSerifItalic>
+            </View>
+            <TMono style={{ fontSize: 10, color: "#8a4800" }}>重试 →</TMono>
+          </Pressable>
         )}
+
+        {isGenerating && !isOrphan && (
+          <ProgressChip stages={stages} />
+        )}
+
+        <CollapsibleSection title="当前结论  Current Conclusion" defaultOpen>
+          <SectionBody
+            stage={stages.headline}
+            hasContent={!!version?.thesis}
+            skeletonLines={3}
+            skeletonHint="正在生成结论… (Flash, ~5s)"
+            emptyText="(none)"
+            errorText="结论生成失败。点击「更新研究」重试。"
+          >
+            <Field label="Thesis">{version?.thesis}</Field>
+          </SectionBody>
+          {version?.positionSizing?.invalidation_condition ? (
+            <Field label="Invalidated if">
+              <TSerif style={{ fontSize: 13, color: "#a03434" }}>
+                {version.positionSizing.invalidation_condition}
+              </TSerif>
+            </Field>
+          ) : null}
+          {version?.disclaimerFlags?.confidence_basis ? (
+            <Field label="Confidence basis">{version.disclaimerFlags.confidence_basis}</Field>
+          ) : null}
+        </CollapsibleSection>
+
+        <CollapsibleSection title="商业概况  Business Snapshot" defaultOpen>
+          <SectionBody
+            stage={stages.headline}
+            hasContent={!!version?.businessSnapshot?.summary}
+            skeletonLines={4}
+            emptyText="(none)"
+          >
+            <Field label="Summary">{version?.businessSnapshot?.summary}</Field>
+            {version?.businessSnapshot?.revenue_drivers ? (
+              <Field label="Revenue Drivers">{version.businessSnapshot.revenue_drivers}</Field>
+            ) : null}
+            {version?.businessSnapshot?.competitive_edge ? (
+              <Field label="Competitive Edge">{version.businessSnapshot.competitive_edge}</Field>
+            ) : null}
+            {version?.businessSnapshot?.market_debates ? (
+              <Field label="Market Debates">{version.businessSnapshot.market_debates}</Field>
+            ) : null}
+          </SectionBody>
+        </CollapsibleSection>
+
+        <CollapsibleSection title="估值检验  Valuation Check" defaultOpen>
+          <SectionBody
+            stage={stages.deep}
+            hasContent={!!version?.valuation && Object.keys(version.valuation).length > 0}
+            skeletonLines={5}
+            skeletonHint="正在生成估值情景… (Pro, ~25-40s)"
+            emptyText="No valuation data."
+          >
+            <ValuationSection valuation={version?.valuation} />
+          </SectionBody>
+        </CollapsibleSection>
+
+        <CollapsibleSection title="仓位管理  Position Sizing" defaultOpen>
+          <SectionBody
+            stage={stages.deep}
+            hasContent={!!version?.positionSizing && Object.keys(version.positionSizing).length > 0}
+            skeletonLines={4}
+            emptyText="No position sizing data."
+          >
+            <PositionSection ps={version?.positionSizing} />
+          </SectionBody>
+        </CollapsibleSection>
+
+        <CollapsibleSection title="3–6月计划  Trading Strategy">
+          <SectionBody
+            stage={stages.deep}
+            hasContent={!!version?.tradingStrategy && Object.keys(version.tradingStrategy).length > 0}
+            skeletonLines={3}
+            emptyText="No strategy data."
+          >
+            <StrategySection ts={version?.tradingStrategy} />
+          </SectionBody>
+        </CollapsibleSection>
+
+        <CollapsibleSection title="研究清单  Deep Research Checklist">
+          <SectionBody
+            stage={stages.deep}
+            hasContent={(version?.businessSnapshot?.deep_research_checklist?.length > 0)
+              || (version?.valuation?.checklist?.length > 0)}
+            skeletonLines={3}
+            emptyText="No checklist items."
+          >
+            <ChecklistSection version={version} />
+          </SectionBody>
+        </CollapsibleSection>
+
+        <CollapsibleSection title="规则检验  Rules Conflict Check" defaultOpen>
+          <SectionBody
+            stage={stages.rules}
+            hasContent={ruleChecks.length > 0}
+            skeletonLines={2}
+            skeletonHint="正在对照规则…"
+            emptyText="No rules to check."
+            errorText="规则检查失败。"
+          >
+            <RulesSection ruleChecks={ruleChecks} />
+          </SectionBody>
+        </CollapsibleSection>
+
+        <CollapsibleSection title="信息来源  Sources">
+          {(() => {
+            // Defensive: `sources` should always be an array (parsed by
+            // rowToResearchVersion), but a corrupted row or a buggy caller
+            // could pass a string/object. Coerce to array to avoid a
+            // render-time crash here.
+            const srcList = Array.isArray(version?.sources) ? version.sources : [];
+            return (
+              <>
+                {srcList.map((s, i) => <SourceCard key={i} source={s} />)}
+                {srcList.length === 0 && (
+                  <TSerifItalic style={{ fontSize: 12 }}>
+                    {isGenerating ? "(loading…)" : "No sources recorded."}
+                  </TSerifItalic>
+                )}
+              </>
+            );
+          })()}
+        </CollapsibleSection>
+
+        {version?.disclaimerFlags && <DisclaimerBlock flags={version.disclaimerFlags} />}
 
         {regenError ? (
           <View style={{ backgroundColor: "#f8d7da", borderRadius: 6, padding: 10, marginTop: 12 }}>
@@ -314,10 +477,14 @@ export default function ResearchMemoScreen() {
         padding: 16, paddingBottom: 28,
         flexDirection: "row", gap: 10,
       }}>
-        {regenerating ? (
+        {isGenerating ? (
           <View style={{ flex: 1, alignItems: "center", paddingVertical: 10 }}>
             <ActivityIndicator color={colors.inkFaint} />
-            <TSerifItalic style={{ fontSize: 12, marginTop: 4 }}>Updating memo…</TSerifItalic>
+            <TSerifItalic style={{ fontSize: 12, marginTop: 4 }}>
+              {isStageBusy(stages.deep)
+                ? "深度分析进行中…可继续阅读已生成内容"
+                : "Updating memo…"}
+            </TSerifItalic>
           </View>
         ) : (
           <>
@@ -362,6 +529,51 @@ export default function ResearchMemoScreen() {
 }
 
 // ── Section components ────────────────────────────────────────────────────────
+
+// Gate a section's body on pipeline progress: show content if we have it,
+// otherwise a skeleton while the stage is running, an error chip on failure,
+// or an empty-state message when nothing's coming.
+function SectionBody({ stage, hasContent, skeletonLines, skeletonHint, emptyText, errorText, children }) {
+  if (hasContent) return children;
+  if (isStageBusy(stage)) return <SkeletonBlock lines={skeletonLines} hint={skeletonHint} />;
+  if (stage === StagePhase.ERROR) {
+    return <TSerifItalic style={{ fontSize: 12, color: "#a03434" }}>{errorText || "Generation failed."}</TSerifItalic>;
+  }
+  return <TSerifItalic style={{ fontSize: 12 }}>{emptyText}</TSerifItalic>;
+}
+
+const STAGE_DOT_META = {
+  [StagePhase.DONE]:    { dot: "●", color: "#2d5f3f" },
+  [StagePhase.ERROR]:   { dot: "✕", color: "#a03434" },
+  [StagePhase.RUNNING]: { dot: "◐", color: "#856404" },
+  [StagePhase.PENDING]: { dot: "◐", color: "#856404" },
+};
+const STAGE_DOT_DEFAULT = { dot: "○", color: "#6b5a3f" };
+
+function ProgressChip({ stages }) {
+  const items = [
+    { key: StageName.HEADLINE, label: "结论", model: "Flash" },
+    { key: StageName.RULES,    label: "规则", model: "Flash" },
+    { key: StageName.DEEP,     label: "深度", model: "Pro" },
+  ];
+  return (
+    <View style={{
+      flexDirection: "row", flexWrap: "wrap", gap: 8,
+      backgroundColor: "#f0ebe0", borderRadius: 6, padding: 10, marginBottom: 14,
+    }}>
+      {items.map((it) => {
+        const meta = STAGE_DOT_META[stages?.[it.key]] || STAGE_DOT_DEFAULT;
+        return (
+          <View key={it.key} style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+            <TMono style={{ fontSize: 11, color: meta.color }}>{meta.dot}</TMono>
+            <TMono style={{ fontSize: 10, color: meta.color }}>{it.label}</TMono>
+            <TMono style={{ fontSize: 8, color: colors.inkFaint }}>{it.model}</TMono>
+          </View>
+        );
+      })}
+    </View>
+  );
+}
 
 function CollapsibleSection({ title, defaultOpen = false, children }) {
   const [open, setOpen] = useState(defaultOpen);

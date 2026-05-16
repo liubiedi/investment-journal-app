@@ -2,10 +2,18 @@
 
 ## 投资日志 · The Investor's Ledger
 
-**Version:** 1.6
-**Date:** 2026-05-14
+**Version:** 1.6.1
+**Date:** 2026-05-16
 **Format:** Android mobile application
 **Target:** AI coding agents (single-source-of-truth for autonomous implementation)
+
+**v1.6.1 changelog** (2026-05-16, defensive hardening pass):
+- Fixed `listResearchVersions` returning raw SQLite rows — JSON columns now parsed via `rowToResearchVersion` (sources was leaking as a stringified JSON into render, crashing the version-history selector).
+- Fixed "Updating memo…" indicator getting stuck after content was already rendered — `isGenerating` now derives from `memo.status` + visible-content stages, ignoring the background rules check. FINALIZE.DONE also force-clears any stuck stage state.
+- Fixed `_finalize` errors silently swallowing FINALIZE.DONE emission — wrapped in try/finally so `_activeJobs` always drains and the screen always receives the cleanup signal.
+- Fixed Mentor screen showing a permanent ~120-150px dead zone between input row and tab bar on Android — `KeyboardAvoidingView` had `keyboardVerticalOffset={tabBarHeight}` with `behavior="height"`, which reserves that many pixels even when the keyboard is hidden. Offset is now iOS-only.
+- Added `scripts/check-imports.mjs` — catches missing imports in `src/` before runtime. React Native has no compile step; a missing import only surfaces as a render-time `ReferenceError`.
+- Added "DB row → model boundary" invariant in `CLAUDE.md` — every exported query on a JSON-bearing table MUST map through a `rowTo*()` transformer.
 
 ---
 
@@ -417,6 +425,8 @@ Sub-tab switcher: two full-width buttons at the top; active tab has ink backgrou
 
 **Chat reload on focus:** The screen uses `useFocusEffect` to reload `chat_history` from DB each time it gains focus. This ensures that entries written by "带入问道" from the Log screen appear immediately without requiring a manual refresh.
 
+**Keyboard handling:** wrap in `KeyboardAvoidingView` with `behavior="padding"` + `keyboardVerticalOffset={tabBarHeight}` on iOS only. On Android, pass `behavior="height"` with `keyboardVerticalOffset=0` — Android's default `windowSoftInputMode=adjustResize` (Expo default) already shrinks the window when the keyboard appears, and a non-zero offset reserves that many pixels of bottom padding even when the keyboard is hidden, leaving a dead zone between the input bar and the tab bar.
+
 
 ### 5.7 Roundtable (hidden screen, route: `roundtable`)
 
@@ -463,7 +473,7 @@ EmptyState if no memos  ← hint: "在「持仓」或「记录」中点击「深
 1. `StockSearchInput` — ticker autocomplete (Yahoo Finance search); `onSelect(sym, name)` fills ticker + company name
 2. `PaperInput` — 投资逻辑 Thesis (optional; 2–3 lines)
 3. Toggle "+ 添加补充信息" → expands `PaperInput` for Manual Notes (public-data gaps; hidden by default)
-4. [生成研究备忘录] → parallel `fetchResearchSnapshot()` + `assembleResearchContext()` → `generateResearchMemo()` → `checkResearchRules()` → save → navigate to memo
+4. [生成研究备忘录] → `buildPlaceholder()` writes a `status="generating"` memo + version row → navigate immediately → `startResearchGeneration()` runs in background (see §8.3 Research Pipeline). The composer modal closes within ~100ms; the user sees skeletons on the memo screen while three parallel LLM calls fill in sections progressively.
 5. Review Horizon removed — AI provides `trading_strategy.review_date`; fallback hardcoded to 3 months.
 
 **Auto-open:** when navigated with `route.params.prefillTicker` (from Holdings or Log `深度研究` chip), composer opens pre-filled and YF crumb is pre-warmed.
@@ -491,6 +501,8 @@ EmptyState if no memos  ← hint: "在「持仓」或「记录」中点击「深
 - Attach to Trade writes `memo_execution` entry to `semantic_memory` recording alignment/override signal for InvestorDNA.
 
 **Version history:** tap version chip → sheet with list; tap any → diff view (status / thesis / valuation side-by-side).
+
+**DB→model boundary (do not break):** the version-history sheet feeds `setVersion(rawRow)` directly from `listResearchVersions(memoId)`. That function MUST map rows through `rowToResearchVersion` — otherwise `sources`/`businessSnapshot`/`valuation` arrive as JSON strings and `.map`/`.length`/member access on them throws at render. `rowToResearchVersion` also guards `sources` with `Array.isArray(parsed) ? parsed : []` so a corrupted legacy row can't crash the Sources section. See CLAUDE.md → "DB row → model boundary" for the full convention.
 
 **LLM output language:** all narrative text fields (`thesis_summary`, `business_snapshot.*`, `trading_strategy.*`, etc.) are Simplified Chinese. JSON keys and enum values stay English.
 
@@ -621,7 +633,7 @@ When building `<investor_profile>`:
 - Rotate between `query1` / `query2` subdomains on failure. Retry up to 4× with exponential backoff; 401 uses 1s base, 429 uses 2s base.
 - Result cached 24h in `research_snapshot_cache` SQLite table. Stale cache sets `disclaimer_flags.stale = true`.
 - Fields extracted: `businessSummary`, `sector`, `industry`, `marketCap`, `52w range`, `beta`, `trailingPE`, `forwardPE`, `pegRatio`, `priceToBook`, `evToEbitda`, `profitMargins`, `roe`, `roa`, `freeCashflow`, `debtToEquity`, `currentRatio`, `revenueGrowth`, `earningsGrowth`, `epsEstimateNextQ`, `nextEarningsDate`, `latestFilingDate`, `latestFilingUrl`.
-- Passed as structured XML block `<snapshot>` into `generateResearchMemo()` so AI focuses on analysis, not recall.
+- Passed as structured XML block `<snapshot>` into both `generateResearchHeadline()` and `generateResearchDeepAnalysis()` (via shared `_buildResearchContextBlocks` helper) so the LLMs focus on analysis, not recall.
 
 **Symbol search (autocomplete):**
 - Endpoint: `https://query1.finance.yahoo.com/v1/finance/search?q=<query>&quotesCount=5`
@@ -657,6 +669,55 @@ When building `<investor_profile>`:
 - No WebSocket to iFlytek. No HMAC signing. No PCM streaming.
 - No credential screens. No `expo-av`, no `expo-crypto`.
 - No provider selection logic. `useSpeech` stays simple (single provider: native).
+
+### 8.4 Research Pipeline (parallel streaming generation)
+
+**Problem solved:** the original `generateResearchMemo` was a single blocking `deepseek-v4-pro` call with `max_tokens: 8000` that produced a 10-section JSON. Wall-clock latency was ~2 minutes with no feedback — unacceptable on mobile.
+
+**Architecture:** `src/research/pipeline.js` fans out into three parallel LLM calls and writes each slice to the placeholder version row as it lands.
+
+| Stage | Model | Output | Latency | What user sees |
+|---|---|---|---|---|
+| **Placeholder** | — | DB row written, status="generating" | ~50ms | Memo screen opens, skeletons render |
+| **Snapshot + Memory** (parallel) | — | Yahoo Finance fundamentals + memory context | ~1-2s | (concurrent with stage 1 below) |
+| **1. Headline** (parallel) | `deepseek-v4-flash`, streamed | `status`, `confidence`, `confidence_basis`, `max_risk_summary`, `thesis_summary`, `business_snapshot` | ~5-8s | Verdict + business view fill in |
+| **2. Rules** (depends on Headline) | `deepseek-v4-flash` | rules pass/fail/n/a | ~3-5s after Headline | Rules section fills in |
+| **3. Deep** (parallel with Headline) | `deepseek-v4-pro`, streamed | `valuation`, `position_sizing`, `trading_strategy`, `deep_research_checklist` | ~25-40s | Below-the-fold sections fill in |
+| **Finalize** | — | `sources`, `disclaimerFlags`, `generatedAt`; record rich insight to `semantic_memory` | <100ms | DisclaimerBlock renders, ProgressChip disappears |
+
+**Time-to-first-useful-content: ~5-8s.** Total wall clock: ~25-40s, bounded by the Pro call. User can read and interact with the memo while deep analysis is still running.
+
+**Why this preserves accuracy:**
+- Headline (flash) handles summarization/extraction from the Yahoo Finance snapshot — task flash is good at.
+- Deep (pro) keeps the reasoning-heavy work (valuation scenarios, sizing math, conditional triggers) with ~40% smaller token output because the headline fields are removed from its schema.
+- Both calls receive identical context blocks via `_buildResearchContextBlocks` — no information loss.
+
+**Progress events:** subscribers receive `{stage, phase, chunk?, data?, error?}`. Phases use the exported `StagePhase` const (`PENDING | RUNNING | CHUNK | DONE | ERROR | STALLED`). `ResearchMemo.js` subscribes via `subscribeResearchProgress(memoId, listener)` and dispatches per-stage refreshes:
+- `HEADLINE/DONE` → reloadVersion + refreshMemoById (status/confidence flipped)
+- `DEEP/DONE` → reloadVersion + refreshMemoById (nextReviewDate may have changed)
+- `RULES/DONE` → reloadRuleChecks only
+- `FINALIZE/DONE` → reloadVersion + refreshMemoById
+
+**Failure handling:**
+- Headline fails → `_finalize` sets memo status to `"watch"` with `confidence: "low"` and adds `headline_generation_failed` to `disclaimer_flags.missing_data`. The memo is still readable rather than stuck on `"generating"`.
+- Deep fails → headline fields still render; `disclaimer_flags.partial: true` is set.
+- Rules fails → `SectionBody` shows red error message via `errorText` prop instead of empty placeholder.
+- Race avoided: deep_research_checklist is stored in `valuation.checklist` (not `business_snapshot`) so headline's `business_snapshot` write can't clobber a deep write that landed first. The viewer's `ChecklistSection` already falls back to this location.
+- `_finalize` itself is wrapped in try/finally so the `_activeJobs.delete()` + FINALIZE.DONE emit always fire — a DB write failure inside `_finalize` must never leave the memo screen stuck on "Updating memo…".
+
+**Loading-indicator semantics:** `ResearchMemo.js` derives `isGenerating` from `memo.status === "generating"` OR `isStageBusy(stages.headline | stages.deep)`. Crucially, `stages.rules` is NOT in this expression — the rules check is a background sanity check; a slow or never-fired RULES.DONE event must never block the action bar. On FINALIZE.DONE the subscriber also force-settles any headline/deep/rules still marked RUNNING/PENDING, as a safety net for missed events.
+
+**Orphan recovery (app force-quit mid-pipeline):**
+- DB row stays at `status="generating"` but `_activeJobs` map in pipeline.js is process-scoped — empty after a relaunch.
+- ResearchMemo screen detects this (`status === "generating"` + no active job) and renders an amber retry banner instead of stuck skeletons.
+- One-tap retry re-fires `startResearchGeneration` against the same versionId — pipeline UPDATEs overwrite any half-filled fields.
+
+**Background resilience (within OS limits):**
+- `expo-keep-awake` holds a wake lock during generation so iOS doesn't sleep the device + suspend the JS thread mid-call.
+- `expo-task-manager` + `expo-background-task` installed; periodic background task registration is a planned follow-up (needs dev-build cycle to test).
+- Full resilience to force-quit / phone reboot requires server-side execution; not implemented (would require moving the DeepSeek API key off-device).
+
+**Mentor enrichment:** `_finalize` records a ~600-char prose insight per memo into `semantic_memory` (memory_type="research_memo", scope=ticker) containing the verdict, live Yahoo Finance fundamentals, business summary, valuation scenarios, position plan, watch items, and review date. The mentor's `MemoryManager.assemble()` pulls the 2 most-recent memos per ticker — gives the mentor situational awareness of current market data despite DeepSeek's 2025 training cutoff. Token cost: +400-600 input tokens per mentor query (prefix-cached after first hit; <50ms TTFT impact).
 
 ---
 
@@ -750,7 +811,7 @@ investment-journal-app/
 │   ├── constants.js                # ACTIONS, EMOTIONS, MASTERS, MASTER_STYLES, DEFAULT_RULES
 │   ├── utils.js                    # fmtDate, monthKey, weekKey, weekRange, fmtCurrency, ago, todayIso, addMonths
 │   ├── db.js                       # SQLite schema + typed CRUD helpers (9 tables + research tables)
-│   ├── api.js                      # DeepSeek + Yahoo Finance (incl. fetchResearchSnapshot, generateResearchMemo)
+│   ├── api.js                      # DeepSeek + Yahoo Finance (incl. fetchResearchSnapshot, generateResearchHeadline, generateResearchDeepAnalysis, parseLooseJson, fmtNumber)
 │   ├── voice.js                    # useSpeech hook — wraps @react-native-voice/voice
 │   ├── context.js                  # AppCtx React context + useApp hook (avoids circular imports)
 │   ├── components.js               # shared UI primitives (incl. StatusBadge, ConfidencePill, SourceCard, DisclaimerBlock)
@@ -763,6 +824,8 @@ investment-journal-app/
 │   │   │   └── InvestorDNA.js      # InvestorDNA entity: distill(), toPromptBlock(), isExpired()
 │   │   └── retrieval/
 │   │       └── EpisodicMemoryRetriever.js  # FTS5 BM25 retrieval with _hydrate() for all source types
+│   ├── research/
+│   │   └── pipeline.js             # Parallel research generation pipeline: startResearchGeneration(), buildPlaceholder(), subscribeResearchProgress(), getResearchJobStatus(), StagePhase, StageName
 │   └── screens/
 │       ├── Home.js                 # 心法 tab — philosophy, rules, mentor default, stats
 │       ├── Review.js               # 复盘 tab — sub-tab container for Weekly + Monthly
@@ -811,12 +874,16 @@ fetchLivePrices(symbols: string[]): Promise<{[symbol]: {price, currency, changeP
 // Research: Yahoo Finance quoteSummary (7 modules, 24h SQLite cache, exponential-backoff retry)
 fetchResearchSnapshot(ticker: string): Promise<ResearchSnapshot | null>
 
-// Research: AI memo generation (deepseek-v4-pro)
-generateResearchMemo({ticker, currentPrice, snapshot, userThesis, manualNotes, holdingContext, profile, rules}): Promise<ResearchMemoData>
-// ResearchMemoData: {status, confidence, max_risk_summary, thesis_summary, business_snapshot, deep_research_checklist,
-//                    valuation, position_sizing, trading_strategy, disclaimer_flags}
+// Research: AI memo generation — split into two parallel calls (see §8.4 Research Pipeline)
+generateResearchHeadline({ticker, currentPrice, snapshot, userThesis, manualNotes, holdingContext, profile, preAssembledCtx, onChunk}): Promise<HeadlineData>
+// HeadlineData: {status, confidence, confidence_basis, max_risk_summary, thesis_summary, business_snapshot}
+// Model: deepseek-v4-flash, streamed, ~5-8s
 // status: "buy_setup"|"watch"|"reduce_risk"|"avoid"
 // confidence: "high"|"medium"|"low"
+
+generateResearchDeepAnalysis({ticker, currentPrice, snapshot, userThesis, manualNotes, holdingContext, profile, preAssembledCtx, onChunk}): Promise<DeepData>
+// DeepData: {valuation, position_sizing, trading_strategy, deep_research_checklist, disclaimer_flags}
+// Model: deepseek-v4-pro, streamed, ~25-40s
 // Strictly no imperative language ("Buy now" / "Sell now" forbidden in system prompt)
 
 // Research: rules conflict check (deepseek-v4-flash)
@@ -826,8 +893,43 @@ checkResearchRules(memoSummary: object, rules: string[]): Promise<{rule_text, re
 // Research: shared source builder
 buildResearchSources(memoData: object, snapshot: ResearchSnapshot | null): SourceRecord[]
 
+// Shared utilities (exported for cross-module reuse)
+parseLooseJson(raw: string, opts?: {label, shape: "object"|"array", fallback}): object | array
+// Strips markdown fences + Chinese curly quotes; carves out outermost {...} or [...]; throws on parse failure unless fallback given.
+
+fmtNumber(n: number|null, decimals?: 2, missing?: "N/A"): string
+// Compact number formatter with B/M suffix above 1e6.
+
 // Internal helper
 buildProfileContext({philosophy, rules, weeklyNotes, monthlyReviews, trades, holdings, prices, maxTrades, maxWeekly, maxMonthly}): string
+```
+
+### `src/research/pipeline.js`
+
+```js
+// Pipeline entry point — caller must pre-persist the placeholder memo + version
+// via saveResearchMemoWithVersion (status: "generating") and navigate to the
+// memo screen so skeletons render immediately. Returns once all stages settle;
+// callers usually fire-and-forget and rely on progress events.
+startResearchGeneration({memoId, versionId, ticker, currentPrice, userThesis, manualNotes, holdingContext, profile, rules, onMemoComplete?}): Promise<void>
+
+// Build a placeholder {memo, version} pair (status="generating") for immediate
+// DB insertion before the pipeline starts. Headline lands first and flips
+// status to its real value.
+buildPlaceholder({memoId, versionId, ticker, companyName, holdingId, versionNum?: 1}): {memo, version}
+
+// Subscribe to progress events for one memo. Returns an unsubscribe fn.
+// Event shape: {stage: StageName, phase: StagePhase, chunk?, data?, error?}
+// Chunk events fire many times per second during streaming — subscribers
+// typically ignore them.
+subscribeResearchProgress(memoId, listener: (event) => void): () => void
+
+// Read the active job's stage map (or null if no job for this memoId in this process).
+getResearchJobStatus(memoId): {stages: {headline, deep, rules}, startedAt} | null
+
+// Exported string-union constants — use these instead of raw stage/phase literals.
+StageName.{ SNAPSHOT, HEADLINE, DEEP, RULES, FINALIZE }
+StagePhase.{ IDLE, PENDING, RUNNING, CHUNK, DONE, ERROR, STALLED }
 ```
 
 ### `src/db.js`
@@ -889,6 +991,8 @@ getResearchVersion(id: string): Promise<ResearchVersion | null>
 insertResearchRuleChecks(checks: ResearchRuleCheck[]): Promise<void>
 listResearchRuleChecks(versionId: string): Promise<ResearchRuleCheck[]>
 updateRuleCheckOverride(id: string, overrideReason: string): Promise<void>
+updateResearchVersionFields(versionId: string, fields: Partial<ResearchVersion>): Promise<void>  // partial UPDATE; used by pipeline stages to patch slices
+updateResearchMemoFields(memoId: string, fields: Partial<ResearchMemo>): Promise<void>           // partial UPDATE on memo header; used when headline lands
 insertResearchLink(memoId, entityType, entityId): Promise<void>
 listResearchLinks(memoId: string): Promise<ResearchLink[]>
 getCachedSnapshot(ticker: string): Promise<ResearchSnapshot | null>     // null if stale > 24h

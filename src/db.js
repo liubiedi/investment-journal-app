@@ -900,10 +900,14 @@ export async function deleteResearchMemo(memoId) {
 
 export async function listResearchVersions(memoId) {
   const db = await getDb();
-  return await db.getAllAsync(
+  const rows = await db.getAllAsync(
     "SELECT * FROM research_versions WHERE memo_id = ? ORDER BY version_num DESC",
     [memoId]
   );
+  // Parse JSON fields before returning — callers (e.g. the version history
+  // sheet) hand these rows straight to render code, which crashes if
+  // `sources` is still a JSON string instead of an array.
+  return rows.map(rowToResearchVersion);
 }
 
 export async function getResearchVersion(versionId) {
@@ -934,6 +938,9 @@ export async function insertResearchVersion(v) {
 }
 
 function rowToResearchVersion(r) {
+  // Defensive parse: `sources` must always be an array — older rows or
+  // partial writes could leave a stringified object behind.
+  const parsedSources = safeJson(r.sources, []);
   return {
     id: r.id, memoId: r.memo_id, versionNum: r.version_num,
     thesis: r.thesis || '',
@@ -942,9 +949,60 @@ function rowToResearchVersion(r) {
     positionSizing: safeJson(r.position_sizing, {}),
     tradingStrategy: safeJson(r.trading_strategy, {}),
     disclaimerFlags: safeJson(r.disclaimer_flags, {}),
-    sources: safeJson(r.sources, []),
+    sources: Array.isArray(parsedSources) ? parsedSources : [],
     modelId: r.model_id, generatedAt: r.generated_at, createdAt: r.created_at,
   };
+}
+
+// Patch a subset of fields on an existing research_version row.
+// Used by the streaming pipeline to fill in fields as they arrive from the LLM.
+// `fields` is an object with any of: thesis, businessSnapshot, valuation,
+// positionSizing, tradingStrategy, disclaimerFlags, sources, modelId, generatedAt.
+export async function updateResearchVersionFields(versionId, fields) {
+  const db = await getDb();
+  const map = {
+    thesis: ["thesis", (v) => v ?? null],
+    businessSnapshot: ["business_snapshot", (v) => v ? JSON.stringify(v) : null],
+    valuation: ["valuation", (v) => v ? JSON.stringify(v) : null],
+    positionSizing: ["position_sizing", (v) => v ? JSON.stringify(v) : null],
+    tradingStrategy: ["trading_strategy", (v) => v ? JSON.stringify(v) : null],
+    disclaimerFlags: ["disclaimer_flags", (v) => v ? JSON.stringify(v) : null],
+    sources: ["sources", (v) => v ? JSON.stringify(v) : null],
+    modelId: ["model_id", (v) => v ?? null],
+    generatedAt: ["generated_at", (v) => v ?? null],
+  };
+  const cols = [], vals = [];
+  for (const [k, v] of Object.entries(fields)) {
+    if (!map[k]) continue;
+    cols.push(`${map[k][0]} = ?`);
+    vals.push(map[k][1](v));
+  }
+  if (cols.length === 0) return;
+  vals.push(versionId);
+  await db.runAsync(`UPDATE research_versions SET ${cols.join(", ")} WHERE id = ?`, vals);
+}
+
+// Patch status / confidence / review-date on a memo without rewriting all fields.
+export async function updateResearchMemoFields(memoId, fields) {
+  const db = await getDb();
+  const map = {
+    status: "status",
+    confidence: "confidence",
+    companyName: "company_name",
+    lastReviewedAt: "last_reviewed_at",
+    nextReviewDate: "next_review_date",
+    currentVersionId: "current_version_id",
+    holdingId: "holding_id",
+  };
+  const cols = [], vals = [];
+  for (const [k, v] of Object.entries(fields)) {
+    if (!map[k]) continue;
+    cols.push(`${map[k]} = ?`);
+    vals.push(v ?? null);
+  }
+  if (cols.length === 0) return;
+  vals.push(memoId);
+  await db.runAsync(`UPDATE research_memos SET ${cols.join(", ")} WHERE id = ?`, vals);
 }
 
 // ── rule checks ──

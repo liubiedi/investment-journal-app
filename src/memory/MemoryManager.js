@@ -174,6 +174,12 @@ export class MemoryManager {
     }
 
     // Research memos for this ticker (STANDARD + DEEP)
+    //
+    // The pipeline's _finalize records ~600-char rich content including live
+    // Yahoo Finance numbers (mcap, P/E, growth, FCF, next earnings, latest
+    // filing) — critical because DeepSeek v4's training cutoff predates the
+    // current market. Surface that content in full, plus a few structured
+    // fields (review date, version id) for traceability.
     if (ticker) {
       try {
         const researchRows = await db.getRecentResearchMemos(ticker.toUpperCase(), 2);
@@ -181,8 +187,12 @@ export class MemoryManager {
           const lines = researchRows.map(r => {
             let sd = {};
             try { if (r.structured_data) sd = JSON.parse(r.structured_data); } catch { /* malformed — skip structured fields */ }
-            return `  [${sd.status?.toUpperCase() || "?"}] ${r.content?.slice(0, 200)}\n  Review by: ${sd.next_review_date || "not set"}`;
-          }).join("\n");
+            const distilledAt = r.distilled_at ? new Date(r.distilled_at).toISOString().slice(0, 10) : "?";
+            const meta = `  (memo ${distilledAt}${sd.next_review_date ? `, review ${sd.next_review_date}` : ""})`;
+            // r.content is already structured multi-line text built by the
+            // pipeline. Pass it through verbatim — no slicing.
+            return `${r.content || ""}\n${meta}`;
+          }).join("\n\n");
           sections.push({
             key: "researchMemos",
             priority: 4.5,
