@@ -47,7 +47,8 @@
         {
           "calendarPermission": "Allow 投资日志 to access your calendar to create trade reminders."
         }
-      ]
+      ],
+      "expo-background-task"
     ],
     "extra": {
       "eas": {

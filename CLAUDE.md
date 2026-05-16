@@ -34,6 +34,82 @@ launch crash. Removed in `71de95d`.
 
 ---
 
+## Import hygiene — run after every code change to src/
+
+React Native has no compile step. Missing imports only surface as a runtime
+`ReferenceError` on first render. Run this after touching any file in `src/`:
+
+```sh
+node scripts/check-imports.mjs
+```
+
+Or check a single file:
+
+```sh
+node scripts/check-imports.mjs src/screens/Research.js
+```
+
+The script cross-references every use of known shared symbols (`todayIso`,
+`colors`, `useApp`, `newId`, etc.) against the actual import block.
+**If it exits 1, fix the imports before running the app.**
+
+When you add a new export to `src/utils.js`, `src/db.js`, `src/api.js`, or
+`src/context.js`, add the symbol to `SYMBOL_MAP` in `scripts/check-imports.mjs`
+so future checks catch it.
+
+---
+
+## DB row → model boundary (JSON-blob hygiene)
+
+Several SQLite tables store complex fields as JSON-encoded `TEXT` columns:
+
+| Table | JSON columns |
+|---|---|
+| `research_versions` | `business_snapshot`, `valuation`, `position_sizing`, `trading_strategy`, `disclaimer_flags`, `sources` |
+| `roundtable_sessions` | `data` |
+| `kv` | `value` (sometimes) |
+| `monthly_reviews` | `bullets` |
+| `monthly_mentor_cache` | (stored as plain text) |
+
+**Rule:** every exported function in `src/db.js` that returns rows from a
+table with JSON columns **MUST** parse them via the canonical `rowTo*()`
+transformer (e.g. `rowToResearchVersion`). Returning raw rows leaks JSON
+strings into render code, where `.map`, `.length`, member access etc.
+silently break at runtime.
+
+**The bug pattern this catches** (real example, fixed once):
+```js
+// BAD — raw rows; sources is still a JSON string
+export async function listResearchVersions(memoId) {
+  return await db.getAllAsync("SELECT * FROM research_versions WHERE memo_id = ?", [memoId]);
+}
+
+// GOOD — every consumer sees parsed objects
+export async function listResearchVersions(memoId) {
+  const rows = await db.getAllAsync("SELECT * FROM research_versions WHERE memo_id = ?", [memoId]);
+  return rows.map(rowToResearchVersion);
+}
+```
+
+**Why this slips past code review:** the singular getter (`getResearchVersion`)
+parses correctly, the plural lister (`listResearchVersions`) doesn't. A
+reviewer looking at either function in isolation sees nothing wrong — the
+discrepancy only matters when a consumer treats `sources` as an array.
+
+**Audit before every release** (and after touching `src/db.js`):
+```sh
+# Lists every getAllAsync/getFirstAsync on a JSON-bearing table.
+# Each result must either map through rowTo*(), be a private helper, or
+# select only non-JSON columns.
+grep -nE "getAllAsync|getFirstAsync" src/db.js | grep -E "research_versions|roundtable_sessions|monthly_reviews"
+```
+
+**Also harden the transformer itself:** in `rowTo*` parsers, wrap any field
+that consumers iterate over (`.map`, `.forEach`, spread) with
+`Array.isArray(x) ? x : []` — corrupted or legacy rows shouldn't crash render.
+
+---
+
 ## Merge checklist
 
 Before running `git merge` or `git push` after a merge:
@@ -44,12 +120,21 @@ Before running `git merge` or `git push` after a merge:
    ```
    Verify `newArchEnabled: false` is still present.
 
-2. **Run the pre-push hook manually** if you want to check before pushing:
+2. **Run the import checker:**
+   ```sh
+   node scripts/check-imports.mjs
+   ```
+
+3. **If `src/db.js` was touched**, audit every new `getAllAsync` /
+   `getFirstAsync` against the "DB row → model boundary" rule above. Any
+   query that pulls JSON columns must map through a `rowTo*()` transformer.
+
+4. **Run the pre-push hook manually** if you want to check before pushing:
    ```sh
    .git/hooks/pre-push
    ```
 
-3. **After any large branch merge**, explicitly confirm the three guards above
+5. **After any large branch merge**, explicitly confirm the three guards above
    are intact — don't assume git resolved conflicts correctly.
 
 ---

@@ -29,6 +29,8 @@ import { getApiKey, callFlash } from "./src/api";
 import { initHotCache, updateHotCache, setDNA, getDNA, getHotCache } from "./src/memory/HotCache";
 import { memoryManager } from "./src/memory/MemoryManager";
 import { dreamJob } from "./src/memory/background/DreamJob";
+import { resumeOrphanedMemos } from "./src/research/pipeline";
+import { registerResearchBackgroundTask } from "./src/research/background";
 
 import HomeScreen from "./src/screens/Home";
 import LogScreen from "./src/screens/Log";
@@ -261,8 +263,20 @@ function AppContent() {
       getApiKey().then(key => {
         if (key) _runMemoryJobs(s.trades, s.weeklyNotes, s.monthlyReviews, key).catch(() => {});
       }).catch(() => {});
+      // Sweep for orphaned "generating" memos that died with the app last time.
+      // resumeOrphanedMemos has its own freshness guard (skips memos < 2 min old)
+      // so this won't race the in-flight foreground pipeline.
+      resumeOrphanedMemos().catch(() => {});
     });
     return () => sub.remove();
+  }, [bootstrapped]);
+
+  // Register the periodic background task that finishes orphaned memos
+  // during OS-granted background windows. Also sweep once on cold start.
+  useEffect(() => {
+    if (!bootstrapped) return;
+    registerResearchBackgroundTask();
+    resumeOrphanedMemos().catch(() => {});
   }, [bootstrapped]);
 
   // ---- action handlers ----
@@ -357,6 +371,21 @@ function AppContent() {
       setResearchMemos((prev) => [saved, ...prev.filter((m) => m.id !== memo.id)]);
     }
   }, []);
+  // Refetch a single memo after the background pipeline patches its fields.
+  // Short-circuits when nothing user-visible changed so list consumers don't
+  // re-render on every stage-done event.
+  const refreshResearchMemoById = useCallback(async (memoId) => {
+    const saved = await db.getResearchMemo(memoId);
+    if (!saved) return;
+    const SIGNIFICANT_FIELDS = ["status", "confidence", "next_review_date", "current_version_id", "last_reviewed_at", "company_name"];
+    setResearchMemos((prev) => {
+      const existing = prev.find((m) => m.id === memoId);
+      if (existing && SIGNIFICANT_FIELDS.every((k) => existing[k] === saved[k])) {
+        return prev;
+      }
+      return prev.map((m) => m.id === memoId ? saved : m);
+    });
+  }, []);
   const deleteResearchMemo = useCallback(async (id) => {
     await db.deleteResearchMemo(id);
     setResearchMemos((prev) => prev.filter((m) => m.id !== id));
@@ -411,7 +440,7 @@ function AppContent() {
     addThought, deleteThoughtById, updateThoughtById, updateThoughtFeedback,
     addHolding, updateHoldingById, deleteHoldingById,
     savePricesData,
-    saveResearchMemo, deleteResearchMemo, linkResearchMemo,
+    saveResearchMemo, refreshResearchMemoById, deleteResearchMemo, linkResearchMemo,
     reloadAll,
   };
 

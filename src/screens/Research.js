@@ -15,18 +15,15 @@ import {
   StockSearchInput, PaperInput,
   StatusBadge, ConfidencePill,
 } from "../components";
-import {
-  fetchResearchSnapshot, generateResearchMemo, checkResearchRules, buildResearchSources,
-  assembleResearchContext, preWarmYFCrumb,
-} from "../api";
-import { memoryManager } from "../memory/MemoryManager";
+import { preWarmYFCrumb } from "../api";
+import { todayIso } from "../utils";
 import { newId } from "../db";
-import { todayIso, addMonths } from "../utils";
+import { startResearchGeneration, buildPlaceholder } from "../research/pipeline";
 
 export default function ResearchScreen() {
   const nav = useNavigation();
   const route = useRoute();
-  const { researchMemos, holdings, prices, rules, profile, saveResearchMemo, apiKeyPresent } = useApp();
+  const { researchMemos, holdings, prices, rules, profile, saveResearchMemo, refreshResearchMemoById, apiKeyPresent } = useApp();
 
   const [composerVisible, setComposerVisible] = useState(false);
   const [prefillTicker, setPrefillTicker] = useState(null);
@@ -96,6 +93,7 @@ export default function ResearchScreen() {
         rules={rules}
         profile={profile}
         saveResearchMemo={saveResearchMemo}
+        refreshResearchMemoById={refreshResearchMemoById}
         apiKeyPresent={apiKeyPresent}
       />
     </SafeAreaView>
@@ -166,7 +164,7 @@ function EmptyState() {
 
 // ── Composer modal ────────────────────────────────────────────────────────────
 
-function MemoComposer({ visible, onClose, onCreated, prefillTicker, prefillHoldingId, holdings, prices, rules, profile, saveResearchMemo, apiKeyPresent }) {
+function MemoComposer({ visible, onClose, onCreated, prefillTicker, prefillHoldingId, holdings, prices, rules, profile, saveResearchMemo, refreshResearchMemoById, apiKeyPresent }) {
   const [ticker, setTicker] = useState(prefillTicker || "");
   const [companyName, setCompanyName] = useState("");
   const [thesis, setThesis] = useState("");
@@ -184,6 +182,7 @@ function MemoComposer({ visible, onClose, onCreated, prefillTicker, prefillHoldi
       setManualNotes("");
       setShowNotes(false);
       setError(null);
+      setGenerating(false);
       preWarmYFCrumb();
     }
   }, [visible, prefillTicker]);
@@ -200,103 +199,46 @@ function MemoComposer({ visible, onClose, onCreated, prefillTicker, prefillHoldi
         ? holdings.find(h => h.id === prefillHoldingId)
         : holdings.find(h => h.symbol.toUpperCase() === sym);
 
-      // Fetch YF snapshot and assemble investor memory in parallel — they're independent.
-      const [snapshot, preAssembledCtx] = await Promise.all([
-        fetchResearchSnapshot(sym).catch(() => null),
-        assembleResearchContext({ ticker: sym, thesis, profile }),
-      ]);
+      // Build placeholder + persist it so we have a memoId to navigate to.
+      const memoId = newId("rmemo");
+      const versionId = newId("rv");
+      const { memo, version } = buildPlaceholder({
+        memoId, versionId, ticker: sym,
+        companyName: companyName || null,
+        holdingId: holdingCtx?.id || null,
+      });
+      await saveResearchMemo(memo, version, []);
 
-      // Generate memo via DeepSeek Pro
-      const memoData = await generateResearchMemo({
+      // Navigate immediately — the memo screen will show skeletons + subscribe
+      // to progress events as the pipeline fills in fields.
+      onCreated(memo);
+
+      // Fire-and-forget the pipeline. It writes partial fields to the DB and
+      // emits progress events; the open memo screen re-fetches on each event.
+      startResearchGeneration({
+        memoId,
+        versionId,
         ticker: sym,
         currentPrice,
-        snapshot,
         userThesis: thesis,
         manualNotes,
         holdingContext: holdingCtx,
         profile,
         rules,
-        preAssembledCtx,
+        onMemoComplete: () => {
+          // Refresh queue state so the Research home list shows the final status.
+          refreshResearchMemoById?.(memoId);
+        },
+      }).catch((e) => {
+        // Pipeline-level failure (e.g. network down before any call started).
+        // Stage-level failures are already surfaced via progress events.
+        console.warn("Research pipeline failed:", e?.message);
       });
-
-      // Run rules check (flash model)
-      const ruleChecks = await checkResearchRules(memoData, rules).catch(() => []);
-
-      // Build DB objects
-      const memoId = newId("rmemo");
-      const versionId = newId("rv");
-      const today = todayIso();
-
-      const reviewDate = memoData.trading_strategy?.review_date
-        || addMonths(today, 3);
-
-      const memo = {
-        id: memoId,
-        ticker: sym,
-        companyName: companyName || null,
-        currentVersionId: versionId,
-        status: memoData.status,
-        confidence: memoData.confidence,
-        createdAt: today,
-        lastReviewedAt: today,
-        nextReviewDate: reviewDate,
-        holdingId: holdingCtx?.id || null,
-      };
-
-      const version = {
-        id: versionId,
-        memoId,
-        versionNum: 1,
-        thesis: memoData.thesis_summary,
-        businessSnapshot: memoData.business_snapshot,
-        valuation: memoData.valuation,
-        positionSizing: memoData.position_sizing,
-        tradingStrategy: memoData.trading_strategy,
-        disclaimerFlags: {
-          ...memoData.disclaimer_flags,
-          snapshot_fetched_at: snapshot?.fetchedAt,
-        },
-        sources: buildResearchSources(memoData, snapshot),
-        modelId: "deepseek-v4-pro",
-        generatedAt: new Date().toISOString(),
-        createdAt: today,
-      };
-
-      const dbRuleChecks = ruleChecks.map(rc => ({
-        id: newId("rrc"),
-        versionId,
-        ruleText: rc.rule_text || "",
-        result: rc.result || "n/a",
-        notes: rc.notes || "",
-        overrideReason: null,
-      }));
-
-      await saveResearchMemo(memo, version, dbRuleChecks);
-
-      // Record insight in semantic_memory for mentor context
-      memoryManager.recordInsight({
-        type: "research_memo",
-        scope: sym,
-        content: `${memoData.status?.toUpperCase()}: ${memoData.thesis_summary || ""}. Invalidated if: ${memoData.position_sizing?.invalidation_condition || "(not set)"}`,
-        structured: {
-          status: memoData.status,
-          confidence: memoData.confidence,
-          max_risk_summary: memoData.max_risk_summary,
-          next_review_date: reviewDate,
-          version_id: versionId,
-          key_assumptions: memoData.valuation?.assumptions || [],
-          rules_pass: ruleChecks.every(r => r.result !== "fail"),
-        },
-        modelId: "deepseek-v4-pro",
-      }).catch(() => {});
-
-      onCreated(memo);
     } catch (e) {
       setError(e.message || "Generation failed. Please try again.");
-    } finally {
       setGenerating(false);
     }
-  }, [ticker, thesis, manualNotes, apiKeyPresent, prices, holdings, prefillHoldingId, profile, rules, saveResearchMemo, companyName, onCreated]);
+  }, [ticker, thesis, manualNotes, apiKeyPresent, prices, holdings, prefillHoldingId, profile, rules, saveResearchMemo, refreshResearchMemoById, companyName, onCreated]);
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
@@ -370,7 +312,7 @@ function MemoComposer({ visible, onClose, onCreated, prefillTicker, prefillHoldi
           {generating ? (
             <View style={{ alignItems: "center", paddingVertical: 20, gap: 10 }}>
               <ActivityIndicator color={colors.inkFaint} />
-              <TSerifItalic style={{ fontSize: 13 }}>正在获取数据并生成研究备忘录…</TSerifItalic>
+              <TSerifItalic style={{ fontSize: 13 }}>打开备忘录…</TSerifItalic>
             </View>
           ) : (
             <FilledButton
