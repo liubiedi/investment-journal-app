@@ -762,6 +762,41 @@ export async function fetchLivePrices(symbols) {
   return out;
 }
 
+// Fetch PEG ratios for a list of symbols in parallel.
+// Returns { symbol -> number | null }. Null means unavailable (ETFs, no forward earnings, error).
+export async function fetchPEGRatios(symbols) {
+  if (!symbols || symbols.length === 0) return {};
+  const unique = [...new Set(symbols)];
+
+  async function fetchOnePEG(symbol) {
+    let crumb = await getYFCrumb().catch(() => null);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const crumbParam = crumb ? `&crumb=${encodeURIComponent(crumb)}` : "";
+      const host = YF_HOSTS[attempt % 2];
+      const url = `${host}/v10/finance/quoteSummary/${encodeURIComponent(symbol.toUpperCase())}?modules=defaultKeyStatistics${crumbParam}`;
+      const res = await fetch(url, { headers: YF_HEADERS });
+      if (res.status === 401) {
+        _yfCrumb = null;
+        _yfCrumbPromise = null;
+        crumb = await getYFCrumb().catch(() => null);
+        continue;
+      }
+      if (!res.ok) return null;
+      const json = await res.json();
+      const raw = json?.quoteSummary?.result?.[0]?.defaultKeyStatistics?.pegRatio?.raw;
+      return typeof raw === "number" && raw > 0 ? raw : null;
+    }
+    return null;
+  }
+
+  const results = await Promise.allSettled(unique.map(fetchOnePEG));
+  const out = {};
+  results.forEach((r, i) => {
+    out[unique[i]] = r.status === "fulfilled" ? r.value : null;
+  });
+  return out;
+}
+
 // Optional: symbol search for resolving Chinese names etc.
 export async function yahooSearch(query) {
   const url = `${YF_BASE}/v1/finance/search?q=${encodeURIComponent(query)}&quotesCount=5`;
