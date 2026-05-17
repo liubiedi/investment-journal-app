@@ -635,14 +635,25 @@ function parseSynthesisResponse(raw) {
   }
   if (!parsed.headlineVerdict) throw new Error("综合解析失败：缺少 headlineVerdict");
 
-  // Defensive normalisation — consumers iterate these arrays in render code.
+  // Defensive normalisation — consumers iterate these arrays in render code,
+  // and DeepSeek occasionally returns vote-tally counts as strings even when
+  // the prompt asks for integers. `"2" + "1" + "1"` would render as "211" in
+  // the dashboard's total — coerce to Number here so consumers can rely on
+  // arithmetic working.
+  const tallyRaw = parsed.voteTally && typeof parsed.voteTally === "object" ? parsed.voteTally : {};
+  const toCount = (v) => {
+    const n = Number(v);
+    return Number.isFinite(n) && n >= 0 ? Math.round(n) : 0;
+  };
   return {
     version: 1,
     generatedAt: Date.now(),
     headlineVerdict: parsed.headlineVerdict,
-    voteTally: parsed.voteTally && typeof parsed.voteTally === "object"
-      ? parsed.voteTally
-      : { BULL: 0, BEAR: 0, NEUTRAL: 0 },
+    voteTally: {
+      BULL: toCount(tallyRaw.BULL),
+      BEAR: toCount(tallyRaw.BEAR),
+      NEUTRAL: toCount(tallyRaw.NEUTRAL),
+    },
     axisOfDisagreement: typeof parsed.axisOfDisagreement === "string" ? parsed.axisOfDisagreement : "",
     consensusPoints: Array.isArray(parsed.consensusPoints) ? parsed.consensusPoints : [],
     triggerConditions: Array.isArray(parsed.triggerConditions)
