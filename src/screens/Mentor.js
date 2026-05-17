@@ -1,11 +1,11 @@
 // Mentor screen — chat with AI mentor. Auto-refreshes prices on mount if stale.
 import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import {
-  View, ScrollView, Pressable, ActivityIndicator, KeyboardAvoidingView, Platform, TextInput, Modal, Text,
+  View, ScrollView, Pressable, ActivityIndicator, KeyboardAvoidingView, Platform, TextInput, Text,
 } from "react-native";
 import { useSafeAreaInsets, SafeAreaView } from "react-native-safe-area-context";
 import {
-  MessageCircle, Send, RotateCcw, Loader2, AlertCircle, Maximize2, X, Users, Copy,
+  MessageCircle, Send, RotateCcw, Loader2, AlertCircle, Maximize2, Users, Copy,
 } from "lucide-react-native";
 import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
 import { useFocusEffect, useRoute } from "@react-navigation/native";
@@ -17,7 +17,7 @@ import { chatMessage, fetchLivePrices } from "../api";
 import { getMaster } from "../constants";
 import * as db from "../db";
 import {
-  TSerif, TSerifBold, TSerifItalic, TMono, Kicker, MasterChips,
+  TSerif, TSerifBold, TSerifItalic, TMono, Kicker, MasterChips, ModalShell,
 } from "../components";
 import RoundtableModal from "./Roundtable";
 
@@ -434,29 +434,16 @@ function MessageBubble({ role, content, masterId }) {
 
 function FullMessageModal({ visible, content, masterName, onClose }) {
   return (
-    <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
-      <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
-        <View style={{
-          flexDirection: "row", alignItems: "center", justifyContent: "space-between",
-          paddingHorizontal: 20, paddingVertical: 14,
-          borderBottomWidth: 1, borderBottomColor: colors.divider,
-        }}>
-          <View style={{ flex: 1, paddingRight: 12 }}>
-            <Kicker>MENTOR REPLY</Kicker>
-            <Text style={{ fontFamily: fonts.serifBold, fontSize: 18, color: colors.ink, marginTop: 2 }}>
-              {masterName}
-            </Text>
-          </View>
-          <Pressable onPress={onClose} hitSlop={12}>
-            <X size={18} color={colors.inkMuted} />
-          </Pressable>
-        </View>
-        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 24 }}>
-          <Text selectable style={{ fontFamily: fonts.serif, fontSize: 16, lineHeight: 28, color: colors.ink }}>
-            {content}
-          </Text>
-        </ScrollView>
-      </SafeAreaView>
-    </Modal>
+    <ModalShell
+      visible={visible}
+      onClose={onClose}
+      kicker="MENTOR REPLY"
+      title={masterName}
+      contentPadding={24}
+    >
+      <Text selectable style={{ fontFamily: fonts.serif, fontSize: 16, lineHeight: 28, color: colors.ink }}>
+        {content}
+      </Text>
+    </ModalShell>
   );
 }

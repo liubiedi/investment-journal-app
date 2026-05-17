@@ -1,6 +1,6 @@
 // Home screen — philosophy, rules, default mentor, stats
 import React, { useState, useEffect } from "react";
-import { View, ScrollView, Pressable, Alert, KeyboardAvoidingView, Platform, Modal, Text } from "react-native";
+import { View, ScrollView, Pressable, Alert, KeyboardAvoidingView, Platform, Text } from "react-native";
 import { useSafeAreaInsets, SafeAreaView } from "react-native-safe-area-context";
 import { useNavigation } from "@react-navigation/native";
 import { MessageCircle, ChevronRight, Sparkles, X, Edit2, Plus, Settings as SettingsIcon, Share2, Maximize2 } from "lucide-react-native";
@@ -15,7 +15,7 @@ import * as db from "../db";
 import {
   TSerif, TSerifBold, TSerifItalic, TMono, Kicker,
   Section, Stat, PaperInput, FilledButton, OutlineButton, MasterChips,
-  Masthead,
+  Masthead, ModalShell,
 } from "../components";
 
 export default function HomeScreen() {
@@ -303,65 +303,54 @@ function stripReportFrontMatter(report) {
 
 function StrategyReportModal({ visible, report, exportingPdf, onClose, onExportPdf, onDiscuss }) {
   const body = stripReportFrontMatter(report);
+  const footer = (
+    <View style={{
+      paddingHorizontal: 20, paddingVertical: 16,
+      borderTopWidth: 1, borderTopColor: colors.divider,
+      gap: 10,
+    }}>
+      <Pressable
+        onPress={onDiscuss}
+        style={{
+          flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8,
+          paddingVertical: 14, backgroundColor: colors.ink,
+        }}
+      >
+        <MessageCircle size={14} color={colors.accent} />
+        <Text style={{ fontFamily: fonts.serifBold, fontSize: 14, color: colors.bg }}>
+          Discuss in Mentor
+        </Text>
+      </Pressable>
+      <Pressable
+        onPress={onExportPdf}
+        disabled={exportingPdf}
+        style={{
+          flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8,
+          paddingVertical: 12, borderWidth: 1, borderColor: colors.divider,
+          opacity: exportingPdf ? 0.5 : 1,
+        }}
+      >
+        <Share2 size={13} color={colors.ink} />
+        <Text style={{ fontFamily: fonts.serif, fontSize: 13, color: colors.ink }}>
+          {exportingPdf ? "Generating PDF..." : "Export PDF"}
+        </Text>
+      </Pressable>
+    </View>
+  );
+
   return (
-    <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
-      <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
-        <View style={{
-          flexDirection: "row", alignItems: "center", justifyContent: "space-between",
-          paddingHorizontal: 20, paddingVertical: 14,
-          borderBottomWidth: 1, borderBottomColor: colors.divider,
-        }}>
-          <View style={{ flex: 1, paddingRight: 12 }}>
-            <Kicker>STRATEGY PROFILE</Kicker>
-            <Text style={{ fontFamily: fonts.serifBold, fontSize: 18, color: colors.ink, marginTop: 2 }}>
-              Investment Strategy Report
-            </Text>
-          </View>
-          <Pressable onPress={onClose} hitSlop={12}>
-            <X size={18} color={colors.inkMuted} />
-          </Pressable>
-        </View>
-
-        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 24 }}>
-          <Text style={{ fontFamily: fonts.serif, fontSize: 16, lineHeight: 28, color: colors.ink }}>
-            {body}
-          </Text>
-        </ScrollView>
-
-        <View style={{
-          paddingHorizontal: 20, paddingVertical: 16,
-          borderTopWidth: 1, borderTopColor: colors.divider,
-          gap: 10,
-        }}>
-          <Pressable
-            onPress={onDiscuss}
-            style={{
-              flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8,
-              paddingVertical: 14, backgroundColor: colors.ink,
-            }}
-          >
-            <MessageCircle size={14} color={colors.accent} />
-            <Text style={{ fontFamily: fonts.serifBold, fontSize: 14, color: colors.bg }}>
-              Discuss in Mentor
-            </Text>
-          </Pressable>
-          <Pressable
-            onPress={onExportPdf}
-            disabled={exportingPdf}
-            style={{
-              flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8,
-              paddingVertical: 12, borderWidth: 1, borderColor: colors.divider,
-              opacity: exportingPdf ? 0.5 : 1,
-            }}
-          >
-            <Share2 size={13} color={colors.ink} />
-            <Text style={{ fontFamily: fonts.serif, fontSize: 13, color: colors.ink }}>
-              {exportingPdf ? "Generating PDF..." : "Export PDF"}
-            </Text>
-          </Pressable>
-        </View>
-      </SafeAreaView>
-    </Modal>
+    <ModalShell
+      visible={visible}
+      onClose={onClose}
+      kicker="STRATEGY PROFILE"
+      title="Investment Strategy Report"
+      contentPadding={24}
+      footer={footer}
+    >
+      <Text style={{ fontFamily: fonts.serif, fontSize: 16, lineHeight: 28, color: colors.ink }}>
+        {body}
+      </Text>
+    </ModalShell>
   );
 }
 
