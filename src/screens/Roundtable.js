@@ -9,6 +9,7 @@ import { X, ChevronDown, ChevronUp, Trash2 } from "lucide-react-native";
 
 import { colors, fonts } from "../theme";
 import { useApp } from "../context";
+import { useTransientMessage } from "../utils";
 import { ROUNDTABLE_MASTERS, ROUNDTABLE_MAX_MENTORS, MASTER_MEETING_ROLES, getMaster } from "../constants";
 import { mentorPanelResponse, generateMeetingMinutes } from "../api";
 import * as db from "../db";
@@ -30,7 +31,7 @@ export default function RoundtableModal({ visible, onClose }) {
   const [selectedMasters, setSelectedMasters] = useState(
     () => ROUNDTABLE_MASTERS.slice(0, ROUNDTABLE_MAX_MENTORS)
   );
-  const [selectionWarning, setSelectionWarning] = useState("");
+  const [selectionWarning, showSelectionWarning] = useTransientMessage(2200);
 
   const [topicInput, setTopicInput] = useState("");
   const [debateInput, setDebateInput] = useState("");
@@ -46,7 +47,6 @@ export default function RoundtableModal({ visible, onClose }) {
   const [showMinutesPreview, setShowMinutesPreview] = useState(false);
 
   const scrollRef = useRef(null);
-  const warningTimeoutRef = useRef(null);
 
   const isLoading = loadingMasters.size > 0 || isDebating;
 
@@ -56,23 +56,13 @@ export default function RoundtableModal({ visible, onClose }) {
     db.updateRoundtableSession(sessionId, session).catch(() => {});
   }, [session, sessionId, isLoading]);
 
-  // Cancel any pending warning timeout on unmount to avoid setState-after-unmount.
-  useEffect(() => () => {
-    if (warningTimeoutRef.current) clearTimeout(warningTimeoutRef.current);
-  }, []);
-
   const toggleMaster = (id) => {
     if (session) return;
     setSelectedMasters(prev => {
       if (prev.includes(id)) return prev.filter(m => m !== id);
       if (prev.length >= ROUNDTABLE_MAX_MENTORS) {
         // Soft-block at the cap: surface the constraint, let the user decide who to drop.
-        setSelectionWarning(`最多选 ${ROUNDTABLE_MAX_MENTORS} 位 · 请先取消一位`);
-        if (warningTimeoutRef.current) clearTimeout(warningTimeoutRef.current);
-        warningTimeoutRef.current = setTimeout(() => {
-          setSelectionWarning("");
-          warningTimeoutRef.current = null;
-        }, 2200);
+        showSelectionWarning(`最多选 ${ROUNDTABLE_MAX_MENTORS} 位 · 请先取消一位`);
         return prev;
       }
       return [...prev, id];

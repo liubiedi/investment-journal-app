@@ -7,7 +7,7 @@ import { Sparkles, Plus, Quote, Users, RefreshCw } from "lucide-react-native";
 
 import { colors, fonts } from "../theme";
 import { useApp } from "../context";
-import { monthKey, monthLabel } from "../utils";
+import { monthKey, monthLabel, useTransientMessage } from "../utils";
 import { ACTIONS, getMaster } from "../constants";
 import { generateMonthlyCommentary } from "../api";
 import * as db from "../db";
@@ -114,9 +114,8 @@ const padBullets = (arr) => arr.concat(Array(Math.max(0, 4 - arr.length)).fill("
 
 function MonthlyEditor({ month, initial, trades, onSave, hasReview, profile, defaultMaster, onAskMentor }) {
   const [draft, setDraft] = useState(() => padBullets(initial));
-  const [saved, setSaved] = useState(false);
+  const [saved, showSaved] = useTransientMessage(1500);
   const draftTouched = useRef(false);
-  const savedTimer = useRef(null);
 
   // Sync draft when lazy bootstrap delivers real data — only if user hasn't typed yet.
   useEffect(() => {
@@ -124,8 +123,6 @@ function MonthlyEditor({ month, initial, trades, onSave, hasReview, profile, def
       setDraft(padBullets(initial));
     }
   }, [initial]);
-
-  useEffect(() => () => { if (savedTimer.current) clearTimeout(savedTimer.current); }, []);
 
   const actionStats = useMemo(() => {
     const s = {};
@@ -186,9 +183,7 @@ function MonthlyEditor({ month, initial, trades, onSave, hasReview, profile, def
               try {
                 await onSave(draft.filter((b) => b.trim()));
               } catch { /* save errors are handled upstream */ }
-              setSaved(true);
-              if (savedTimer.current) clearTimeout(savedTimer.current);
-              savedTimer.current = setTimeout(() => setSaved(false), 1500);
+              showSaved();
             }}
             style={{ flex: 1 }}
           >

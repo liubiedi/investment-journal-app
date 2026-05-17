@@ -11,6 +11,7 @@ import * as DocumentPicker from "expo-document-picker";
 
 import { colors, fonts } from "../theme";
 import { useApp } from "../context";
+import { useTransientMessage } from "../utils";
 import { getApiKey, setApiKey, clearApiKey } from "../api";
 import * as db from "../db";
 import { exportToObsidianVault } from "../markdown-export";
@@ -26,7 +27,7 @@ export default function SettingsScreen() {
 
   const [apiKeyInput, setApiKeyInput] = useState("");
   const [savingKey, setSavingKey] = useState(false);
-  const [keySaved, setKeySaved] = useState(false);
+  const [keySaved, showKeySaved] = useTransientMessage(2000);
   const [hasKey, setHasKey] = useState(app.apiKeyPresent);
 
   const [exportingVault, setExportingVault] = useState(false);
@@ -48,9 +49,8 @@ export default function SettingsScreen() {
       await setApiKey(apiKeyInput.trim());
       setHasKey(true);
       setApiKeyInput("");
-      setKeySaved(true);
+      showKeySaved();
       app.setApiKeyPresent(true);
-      setTimeout(() => setKeySaved(false), 2000);
     } catch {
       // Silently fail; user will retry
     } finally {

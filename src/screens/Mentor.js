@@ -12,7 +12,7 @@ import { useFocusEffect, useRoute } from "@react-navigation/native";
 
 import { colors, fonts } from "../theme";
 import { useApp } from "../context";
-import { ago } from "../utils";
+import { ago, useTransientMessage } from "../utils";
 import { chatMessage, fetchLivePrices } from "../api";
 import { getMaster } from "../constants";
 import * as db from "../db";
@@ -373,15 +373,14 @@ export default function MentorScreen() {
 }
 
 function MessageBubble({ role, content, masterId }) {
-  const [copied, setCopied] = useState(false);
+  const [copied, showCopied] = useTransientMessage(1500);
   const [showFullText, setShowFullText] = useState(false);
 
   const handleCopy = async () => {
     try {
       const Clipboard = require("expo-clipboard");
       await Clipboard.setStringAsync(content);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
+      showCopied();
     } catch { /* silently ignore */ }
   };
 

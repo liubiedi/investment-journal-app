@@ -18,6 +18,8 @@ import { fileURLToPath } from "url";
 //   kind "obj" → detected by member access pattern: sym.
 // Extend this whenever you export something new from a shared module.
 const SYMBOL_MAP = {
+  // src/utils.js — React hooks
+  useTransientMessage: { src: "utils.js", kind: "fn" },
   // src/utils.js  — all functions
   todayIso:    { src: "utils.js",   kind: "fn" },
   addMonths:   { src: "utils.js",   kind: "fn" },
