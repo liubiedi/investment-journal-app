@@ -56,17 +56,22 @@ export default function RoundtableModal({ visible, onClose }) {
     db.updateRoundtableSession(sessionId, session).catch(() => {});
   }, [session, sessionId, isLoading]);
 
+  // Decision made from the current state (closure-captured), then side effects
+  // dispatched separately. Keeping the setState updater pure avoids duplicate
+  // warning timers under React Strict Mode (which double-invokes updaters) and
+  // stays correct under future concurrent-rendering paths.
   const toggleMaster = (id) => {
     if (session) return;
-    setSelectedMasters(prev => {
-      if (prev.includes(id)) return prev.filter(m => m !== id);
-      if (prev.length >= ROUNDTABLE_MAX_MENTORS) {
-        // Soft-block at the cap: surface the constraint, let the user decide who to drop.
-        showSelectionWarning(`最多选 ${ROUNDTABLE_MAX_MENTORS} 位 · 请先取消一位`);
-        return prev;
-      }
-      return [...prev, id];
-    });
+    if (selectedMasters.includes(id)) {
+      setSelectedMasters(selectedMasters.filter(m => m !== id));
+      return;
+    }
+    if (selectedMasters.length >= ROUNDTABLE_MAX_MENTORS) {
+      // Soft-block at the cap: surface the constraint, let the user decide who to drop.
+      showSelectionWarning(`最多选 ${ROUNDTABLE_MAX_MENTORS} 位 · 请先取消一位`);
+      return;
+    }
+    setSelectedMasters([...selectedMasters, id]);
   };
 
   // Functional update — safe to call from parallel async ops
