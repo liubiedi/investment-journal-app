@@ -281,56 +281,98 @@ export function MasterChips({ active, onSelect }) {
   );
 }
 
+// ========== ModalShell ==========
+// Standard full-screen modal scaffold: slide-up modal, SafeAreaView, header
+// (KICKER · title · close-X), optional scrollable body, optional fixed footer.
+//
+// Props:
+//   visible, onClose       — required
+//   kicker, title          — header strings
+//   children               — body content
+//   footer                 — optional React node, fixed below the scroll body
+//   scrollable             — false to render children directly (caller owns layout)
+//   contentPadding         — ScrollView contentContainerStyle padding (default 20)
+//   edges                  — SafeAreaView edges; omitted entirely when undefined,
+//                            so the library default (all 4) applies. Pass
+//                            ["top", "bottom"] for full-width modals.
+export function ModalShell({
+  visible,
+  onClose,
+  kicker,
+  title,
+  children,
+  footer,
+  scrollable = true,
+  contentPadding = 20,
+  edges,
+}) {
+  const safeAreaProps = edges ? { edges } : {};
+  return (
+    <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }} {...safeAreaProps}>
+        <View style={{
+          flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+          paddingHorizontal: 20, paddingVertical: 14,
+          borderBottomWidth: 1, borderBottomColor: colors.divider,
+        }}>
+          <View style={{ flex: 1, paddingRight: 12 }}>
+            <Kicker>{kicker}</Kicker>
+            <TSerifBold style={{ fontSize: 18, marginTop: 2 }}>{title}</TSerifBold>
+          </View>
+          <Pressable onPress={onClose} hitSlop={12}>
+            <X size={18} color={colors.inkMuted} />
+          </Pressable>
+        </View>
+        {scrollable ? (
+          <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: contentPadding }}>
+            {children}
+          </ScrollView>
+        ) : children}
+        {footer}
+      </SafeAreaView>
+    </Modal>
+  );
+}
+
 // ========== Feedback block (shown on entry rows) ==========
 // Props:
 //   feedback: [{ masterId, text, createdAt }]
 //   onRequestMaster: (masterId, onChunk) => Promise<void>
 //   onContinueInMentor: (masterId, text) => void  — optional, shows "带入问道" button
 function FullFeedbackModal({ visible, text, masterName, onClose, onContinueInMentor }) {
+  const footer = onContinueInMentor ? (
+    <View style={{
+      paddingHorizontal: 20, paddingVertical: 16,
+      borderTopWidth: 1, borderTopColor: colors.divider,
+    }}>
+      <Pressable
+        onPress={() => { onClose(); onContinueInMentor(); }}
+        style={{
+          flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8,
+          paddingVertical: 14, backgroundColor: colors.ink,
+        }}
+      >
+        <MessageCircle size={14} color={colors.accent} />
+        <Text style={{ fontFamily: fonts.serifBold, fontSize: 14, color: colors.bg }}>
+          带入问道继续讨论 ↗
+        </Text>
+      </Pressable>
+    </View>
+  ) : null;
+
   return (
-    <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
-      <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
-        <View style={{
-          flexDirection: "row", alignItems: "center", justifyContent: "space-between",
-          paddingHorizontal: 20, paddingVertical: 14,
-          borderBottomWidth: 1, borderBottomColor: colors.divider,
-        }}>
-          <View>
-            <Kicker>MENTOR'S VIEW · 导师点评</Kicker>
-            <Text style={{ fontFamily: fonts.serifBold, fontSize: 18, color: colors.ink, marginTop: 2 }}>
-              {masterName}
-            </Text>
-          </View>
-          <Pressable onPress={onClose} hitSlop={12}>
-            <X size={18} color={colors.inkMuted} />
-          </Pressable>
-        </View>
-        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 24 }}>
-          <Text style={{ fontFamily: fonts.serif, fontSize: 16, lineHeight: 28, color: colors.ink }}>
-            {text}
-          </Text>
-        </ScrollView>
-        {onContinueInMentor && (
-          <View style={{
-            paddingHorizontal: 20, paddingVertical: 16,
-            borderTopWidth: 1, borderTopColor: colors.divider,
-          }}>
-            <Pressable
-              onPress={() => { onClose(); onContinueInMentor(); }}
-              style={{
-                flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8,
-                paddingVertical: 14, backgroundColor: colors.ink,
-              }}
-            >
-              <MessageCircle size={14} color={colors.accent} />
-              <Text style={{ fontFamily: fonts.serifBold, fontSize: 14, color: colors.bg }}>
-                带入问道继续讨论 ↗
-              </Text>
-            </Pressable>
-          </View>
-        )}
-      </SafeAreaView>
-    </Modal>
+    <ModalShell
+      visible={visible}
+      onClose={onClose}
+      kicker="MENTOR'S VIEW · 导师点评"
+      title={masterName}
+      contentPadding={24}
+      footer={footer}
+    >
+      <Text style={{ fontFamily: fonts.serif, fontSize: 16, lineHeight: 28, color: colors.ink }}>
+        {text}
+      </Text>
+    </ModalShell>
   );
 }
 

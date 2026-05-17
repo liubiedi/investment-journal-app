@@ -13,7 +13,7 @@ import { useTransientMessage } from "../utils";
 import { ROUNDTABLE_MASTERS, ROUNDTABLE_MAX_MENTORS, MASTER_MEETING_ROLES, getMaster } from "../constants";
 import { mentorPanelResponse, runSynthesis } from "../api";
 import * as db from "../db";
-import { TSerif, TSerifBold, TSerifItalic, TMono, Kicker } from "../components";
+import { TSerif, TSerifBold, TSerifItalic, TMono, Kicker, ModalShell } from "../components";
 
 // Mentor cards emit BULL/BEAR/NEUTRAL; committee-level synthesis adds WAIT
 // (treated as warn-amber, distinct from a mentor's faint NEUTRAL).
@@ -692,55 +692,44 @@ function SynthesisHistoryModal({ visible, items, onClose, onPreview }) {
   );
 
   return (
-    <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
-      <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }} edges={["top", "bottom"]}>
-        <View style={{
-          flexDirection: "row", alignItems: "center", justifyContent: "space-between",
-          paddingHorizontal: 20, paddingVertical: 14,
-          borderBottomWidth: 1, borderBottomColor: colors.divider,
-        }}>
-          <View>
-            <Kicker>SYNTHESIS ARCHIVE</Kicker>
-            <TSerifBold style={{ fontSize: 18, marginTop: 2 }}>历史综合</TSerifBold>
-          </View>
-          <Pressable onPress={onClose} hitSlop={12}>
-            <X size={18} color={colors.inkMuted} />
+    <ModalShell
+      visible={visible}
+      onClose={onClose}
+      kicker="SYNTHESIS ARCHIVE"
+      title="历史综合"
+      edges={["top", "bottom"]}
+    >
+      {sessions.length === 0 && (
+        <TSerifItalic style={{ fontSize: 14, color: colors.inkMuted, textAlign: "center", marginTop: 40 }}>
+          暂无历史综合
+        </TSerifItalic>
+      )}
+      {sessions.map(item => {
+        const isLegacy = !item.synthesis && !!item.minutes;
+        return (
+          <Pressable
+            key={item.id}
+            onPress={() => onPreview(item)}
+            style={{
+              marginBottom: 12, padding: 14,
+              borderWidth: 1, borderColor: colors.divider,
+              backgroundColor: colors.bgElev,
+            }}
+          >
+            <TSerif style={{ fontSize: 14, marginBottom: 4 }} numberOfLines={2}>
+              {item.topic || "(无题)"}
+            </TSerif>
+            <TMono style={{ fontSize: 10, color: colors.inkFaint }}>
+              {item.createdAt
+                ? new Date(item.createdAt).toLocaleDateString("zh-CN", { year: "numeric", month: "short", day: "numeric" })
+                : ""}
+              {" · "}{item.rounds?.length ?? 0} 轮
+              {isLegacy ? " · 旧版纪要" : ` · ${item.synthesis?.headlineVerdict ?? ""}`}
+            </TMono>
           </Pressable>
-        </View>
-        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 20 }}>
-          {sessions.length === 0 && (
-            <TSerifItalic style={{ fontSize: 14, color: colors.inkMuted, textAlign: "center", marginTop: 40 }}>
-              暂无历史综合
-            </TSerifItalic>
-          )}
-          {sessions.map(item => {
-            const isLegacy = !item.synthesis && !!item.minutes;
-            return (
-              <Pressable
-                key={item.id}
-                onPress={() => onPreview(item)}
-                style={{
-                  marginBottom: 12, padding: 14,
-                  borderWidth: 1, borderColor: colors.divider,
-                  backgroundColor: colors.bgElev,
-                }}
-              >
-                <TSerif style={{ fontSize: 14, marginBottom: 4 }} numberOfLines={2}>
-                  {item.topic || "(无题)"}
-                </TSerif>
-                <TMono style={{ fontSize: 10, color: colors.inkFaint }}>
-                  {item.createdAt
-                    ? new Date(item.createdAt).toLocaleDateString("zh-CN", { year: "numeric", month: "short", day: "numeric" })
-                    : ""}
-                  {" · "}{item.rounds?.length ?? 0} 轮
-                  {isLegacy ? " · 旧版纪要" : ` · ${item.synthesis?.headlineVerdict ?? ""}`}
-                </TMono>
-              </Pressable>
-            );
-          })}
-        </ScrollView>
-      </SafeAreaView>
-    </Modal>
+        );
+      })}
+    </ModalShell>
   );
 }
 
@@ -753,38 +742,25 @@ function SynthesisModal({ visible, synthesis, legacyMinutes, onClose }) {
   const hasLegacy = !hasSynthesis && typeof legacyMinutes === "string" && legacyMinutes.length > 0;
 
   return (
-    <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
-      <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }} edges={["top", "bottom"]}>
-        <View style={{
-          flexDirection: "row", alignItems: "center", justifyContent: "space-between",
-          paddingHorizontal: 20, paddingVertical: 14,
-          borderBottomWidth: 1, borderBottomColor: colors.divider,
-        }}>
-          <View>
-            <Kicker>DECISION SYNTHESIS</Kicker>
-            <TSerifBold style={{ fontSize: 18, marginTop: 2 }}>
-              {hasSynthesis ? "决策综合" : hasLegacy ? "会议纪要（旧版）" : "决策综合"}
-            </TSerifBold>
-          </View>
-          <Pressable onPress={onClose} hitSlop={12}>
-            <X size={18} color={colors.inkMuted} />
-          </Pressable>
-        </View>
-        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 20 }}>
-          {hasSynthesis ? (
-            <SynthesisDashboard synthesis={synthesis} />
-          ) : hasLegacy ? (
-            <Text selectable style={{ fontFamily: fonts.serif, fontSize: 14, lineHeight: 24, color: colors.ink }}>
-              {legacyMinutes}
-            </Text>
-          ) : (
-            <TSerifItalic style={{ fontSize: 14, color: colors.inkMuted, textAlign: "center", marginTop: 40 }}>
-              暂无综合内容
-            </TSerifItalic>
-          )}
-        </ScrollView>
-      </SafeAreaView>
-    </Modal>
+    <ModalShell
+      visible={visible}
+      onClose={onClose}
+      kicker="DECISION SYNTHESIS"
+      title={hasSynthesis ? "决策综合" : hasLegacy ? "会议纪要（旧版）" : "决策综合"}
+      edges={["top", "bottom"]}
+    >
+      {hasSynthesis ? (
+        <SynthesisDashboard synthesis={synthesis} />
+      ) : hasLegacy ? (
+        <Text selectable style={{ fontFamily: fonts.serif, fontSize: 14, lineHeight: 24, color: colors.ink }}>
+          {legacyMinutes}
+        </Text>
+      ) : (
+        <TSerifItalic style={{ fontSize: 14, color: colors.inkMuted, textAlign: "center", marginTop: 40 }}>
+          暂无综合内容
+        </TSerifItalic>
+      )}
+    </ModalShell>
   );
 }
 
@@ -930,58 +906,47 @@ function HistoryModal({ visible, items, onClose, onLoad, onDelete }) {
   };
 
   return (
-    <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
-      <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }} edges={["top", "bottom"]}>
-        <View style={{
-          flexDirection: "row", alignItems: "center", justifyContent: "space-between",
-          paddingHorizontal: 20, paddingVertical: 14,
-          borderBottomWidth: 1, borderBottomColor: colors.divider,
-        }}>
-          <View>
-            <Kicker>HISTORY</Kicker>
-            <TSerifBold style={{ fontSize: 18, marginTop: 2 }}>历史论道</TSerifBold>
-          </View>
-          <Pressable onPress={onClose} hitSlop={12}>
-            <X size={18} color={colors.inkMuted} />
-          </Pressable>
-        </View>
-        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 20 }}>
-          {items.length === 0 && (
-            <TSerifItalic style={{ fontSize: 14, color: colors.inkMuted, textAlign: "center", marginTop: 40 }}>
-              暂无历史记录
-            </TSerifItalic>
-          )}
-          {items.map(item => (
-            <Pressable
-              key={item.id}
-              onPress={() => onLoad(item)}
-              style={{
-                marginBottom: 12, padding: 14,
-                borderWidth: 1, borderColor: colors.divider,
-                backgroundColor: colors.bgElev,
-              }}
-            >
-              <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" }}>
-                <View style={{ flex: 1, paddingRight: 12 }}>
-                  <TSerif style={{ fontSize: 14, marginBottom: 4 }} numberOfLines={2}>
-                    {item.topic || "(无题)"}
-                  </TSerif>
-                  <TMono style={{ fontSize: 10, color: colors.inkFaint }}>
-                    {item.createdAt
-                      ? new Date(item.createdAt).toLocaleDateString("zh-CN", { year: "numeric", month: "short", day: "numeric" })
-                      : ""}
-                    {" · "}{item.rounds?.length ?? 0} 轮
-                    {item.synthesis ? " · 有综合" : item.minutes ? " · 有纪要" : ""}
-                  </TMono>
-                </View>
-                <Pressable onPress={() => confirmDelete(item.id)} hitSlop={10}>
-                  <Trash2 size={14} color={colors.inkFaint} />
-                </Pressable>
-              </View>
+    <ModalShell
+      visible={visible}
+      onClose={onClose}
+      kicker="HISTORY"
+      title="历史论道"
+      edges={["top", "bottom"]}
+    >
+      {items.length === 0 && (
+        <TSerifItalic style={{ fontSize: 14, color: colors.inkMuted, textAlign: "center", marginTop: 40 }}>
+          暂无历史记录
+        </TSerifItalic>
+      )}
+      {items.map(item => (
+        <Pressable
+          key={item.id}
+          onPress={() => onLoad(item)}
+          style={{
+            marginBottom: 12, padding: 14,
+            borderWidth: 1, borderColor: colors.divider,
+            backgroundColor: colors.bgElev,
+          }}
+        >
+          <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" }}>
+            <View style={{ flex: 1, paddingRight: 12 }}>
+              <TSerif style={{ fontSize: 14, marginBottom: 4 }} numberOfLines={2}>
+                {item.topic || "(无题)"}
+              </TSerif>
+              <TMono style={{ fontSize: 10, color: colors.inkFaint }}>
+                {item.createdAt
+                  ? new Date(item.createdAt).toLocaleDateString("zh-CN", { year: "numeric", month: "short", day: "numeric" })
+                  : ""}
+                {" · "}{item.rounds?.length ?? 0} 轮
+                {item.synthesis ? " · 有综合" : item.minutes ? " · 有纪要" : ""}
+              </TMono>
+            </View>
+            <Pressable onPress={() => confirmDelete(item.id)} hitSlop={10}>
+              <Trash2 size={14} color={colors.inkFaint} />
             </Pressable>
-          ))}
-        </ScrollView>
-      </SafeAreaView>
-    </Modal>
+          </View>
+        </Pressable>
+      ))}
+    </ModalShell>
   );
 }
