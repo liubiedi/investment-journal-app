@@ -762,6 +762,60 @@ export async function fetchLivePrices(symbols) {
   return out;
 }
 
+// Fetch PEG ratios for a list of symbols in parallel.
+// Returns { symbol -> number | null }. Null means unavailable (ETFs, no forward earnings, error).
+export async function fetchPEGRatios(symbols) {
+  if (!symbols || symbols.length === 0) return {};
+  const unique = [...new Set(symbols)];
+
+  async function fetchOnePEG(symbol) {
+    let crumb = await getYFCrumb().catch(() => null);
+    // Yahoo's quoteSummary endpoint throttles bursty calls — without a 429/5xx
+    // retry a single transient response permanently suppresses PEG for the symbol.
+    // Three attempts covers the common throttle burst without blocking the
+    // parallel batch on one slow symbol's exponential backoff.
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const crumbParam = crumb ? `&crumb=${encodeURIComponent(crumb)}` : "";
+      const host = YF_HOSTS[attempt % 2];
+      const url = `${host}/v10/finance/quoteSummary/${encodeURIComponent(symbol.toUpperCase())}?modules=defaultKeyStatistics${crumbParam}`;
+      let res;
+      try {
+        res = await fetch(url, { headers: YF_HEADERS });
+      } catch {
+        // Network error — back off and retry on the other host.
+        // Jitter prevents parallel fetches from waking in lockstep after a shared outage.
+        await new Promise(r => setTimeout(r, Math.pow(2, attempt) * 500 + Math.random() * 200));
+        continue;
+      }
+      if (res.status === 401) {
+        _yfCrumb = null;
+        _yfCrumbPromise = null;
+        crumb = await getYFCrumb().catch(() => null);
+        continue;
+      }
+      if (res.status === 429 || res.status >= 500) {
+        // Jitter is critical here: when Yahoo throttles, every parallel symbol
+        // gets 429 at the same time. Without spread, they all retry in lockstep
+        // and trigger another 429 burst.
+        await new Promise(r => setTimeout(r, Math.pow(2, attempt) * 800 + Math.random() * 200));
+        continue;
+      }
+      if (!res.ok) return null;
+      const json = await res.json();
+      const raw = json?.quoteSummary?.result?.[0]?.defaultKeyStatistics?.pegRatio?.raw;
+      return typeof raw === "number" && raw > 0 ? raw : null;
+    }
+    return null;
+  }
+
+  const results = await Promise.allSettled(unique.map(fetchOnePEG));
+  const out = {};
+  results.forEach((r, i) => {
+    out[unique[i]] = r.status === "fulfilled" ? r.value : null;
+  });
+  return out;
+}
+
 // Optional: symbol search for resolving Chinese names etc.
 export async function yahooSearch(query) {
   const url = `${YF_BASE}/v1/finance/search?q=${encodeURIComponent(query)}&quotesCount=5`;

@@ -1,4 +1,6 @@
-// Shared utilities for dates, currency, formatting
+// Shared utilities for dates, currency, formatting, and small React hooks
+
+import { useState, useRef, useEffect, useCallback } from "react";
 
 export const fmtDate = (iso) => {
   const d = new Date(iso);
@@ -67,3 +69,32 @@ export const addMonths = (isoDate, months) => {
   d.setMonth(d.getMonth() + months);
   return d.toISOString().slice(0, 10);
 };
+
+// ============================================================
+// React hooks
+// ============================================================
+
+// Transient message / flag — auto-clears after `defaultMs`.
+// Boolean call sites: `show()` (defaults to "1", truthy) and render `{value ? "..." : "..."}`.
+// String call sites:  `show("warning text")` and render `{value ? <Text>{value}</Text> : null}`.
+// The internal timeout is cancelled on rapid re-trigger and on unmount, so callers don't
+// race or leak setState-after-unmount.
+export function useTransientMessage(defaultMs = 2000) {
+  const [message, setMessage] = useState("");
+  const timeoutRef = useRef(null);
+
+  useEffect(() => () => {
+    if (timeoutRef.current) clearTimeout(timeoutRef.current);
+  }, []);
+
+  const show = useCallback((text = "1", ms = defaultMs) => {
+    setMessage(text);
+    if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    timeoutRef.current = setTimeout(() => {
+      setMessage("");
+      timeoutRef.current = null;
+    }, ms);
+  }, [defaultMs]);
+
+  return [message, show];
+}

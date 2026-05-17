@@ -11,7 +11,7 @@ import DateTimePicker from "@react-native-community/datetimepicker";
 import { colors, fonts } from "../theme";
 import { useApp } from "../context";
 import { fmtCurrency, ago } from "../utils";
-import { fetchLivePrices } from "../api";
+import { fetchLivePrices, fetchPEGRatios } from "../api";
 import * as db from "../db";
 import {
   TSerif, TSerifBold, TSerifItalic, TMono, Kicker,
@@ -54,13 +54,18 @@ export default function HoldingsScreen() {
   const [editingId, setEditingId] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
   const [refreshError, setRefreshError] = useState("");
+  const [pegRatios, setPegRatios] = useState({});
 
   const doRefresh = async () => {
     if (refreshing || app.holdings.length === 0) return;
     setRefreshing(true); setRefreshError("");
     try {
       const symbols = [...new Set(app.holdings.map((h) => h.symbol))];
-      const map = await fetchLivePrices(symbols);
+      const [map, pegs] = await Promise.all([
+        fetchLivePrices(symbols),
+        fetchPEGRatios(symbols),
+      ]);
+      setPegRatios(pegs);
       // Fetch forex rates for non-USD currencies (e.g. HKDUSD=X, CNHUSD=X)
       const currencies = new Set(
         app.holdings.map((h) => h.currency || map[h.symbol]?.currency || "?")
@@ -267,6 +272,7 @@ export default function HoldingsScreen() {
                 <HoldingRow key={h.id} holding={h} price={app.prices?.data?.[h.symbol]}
                   weightPct={holdingWeights[h.id] ?? 0}
                   weightIsForex={hasForex}
+                  peg={pegRatios[h.symbol] ?? null}
                   onEdit={() => setEditingId(h.id)}
                   onAskMentor={() => startAskMentor(h, app.prices?.data?.[h.symbol])}
                   researchStatus={(app.researchMemos || []).find(m => m.ticker?.toUpperCase() === h.symbol?.toUpperCase())?.status || null}
@@ -303,7 +309,7 @@ function fmtBuyDate(iso) {
   return `${y}.${m}.${d}`;
 }
 
-function HoldingRow({ holding, price, weightPct, weightIsForex, onEdit, onAskMentor, researchStatus, onResearch }) {
+function HoldingRow({ holding, price, weightPct, weightIsForex, peg, onEdit, onAskMentor, researchStatus, onResearch }) {
   const cost = holding.shares * holding.costBasis;
   const hasLive = !!price;
   const market = hasLive ? holding.shares * price.price : cost;
@@ -361,16 +367,29 @@ function HoldingRow({ holding, price, weightPct, weightIsForex, onEdit, onAskMen
           </TSerifBold>
         </View>
       )}
-      {weightPct > 0 && (
-        <TMono style={{
-          fontSize: 10, color: colors.inkMuted,
-          backgroundColor: colors.bgElev,
-          paddingHorizontal: 5, paddingVertical: 2,
-          borderRadius: 3, alignSelf: "flex-start", marginTop: 4,
-        }}>
-          {weightIsForex ? "总仓位" : "仓位"} {(weightPct * 100).toFixed(1)}%
-        </TMono>
-      )}
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+        {weightPct > 0 && (
+          <TMono style={{
+            fontSize: 10, color: colors.inkMuted,
+            backgroundColor: colors.bgElev,
+            paddingHorizontal: 5, paddingVertical: 2,
+            borderRadius: 3, marginTop: 4,
+          }}>
+            {weightIsForex ? "总仓位" : "仓位"} {(weightPct * 100).toFixed(1)}%
+          </TMono>
+        )}
+        {peg != null && (
+          <TMono style={{
+            fontSize: 10,
+            color: peg < 1 ? colors.good : peg < 2 ? colors.warn : colors.bad,
+            backgroundColor: colors.bgElev,
+            paddingHorizontal: 5, paddingVertical: 2,
+            borderRadius: 3, marginTop: 4,
+          }}>
+            PEG {peg.toFixed(2)}
+          </TMono>
+        )}
+      </View>
       {price?.asOf && (
         <TMono style={{ fontSize: 9, marginTop: 4, color: colors.inkFaint }}>
           {price.asOf}{price.resolvedTicker && price.resolvedTicker !== holding.symbol ? ` · ${price.resolvedTicker}` : ""}
