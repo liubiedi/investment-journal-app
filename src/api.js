@@ -770,15 +770,30 @@ export async function fetchPEGRatios(symbols) {
 
   async function fetchOnePEG(symbol) {
     let crumb = await getYFCrumb().catch(() => null);
-    for (let attempt = 0; attempt < 2; attempt++) {
+    // Yahoo's quoteSummary endpoint throttles bursty calls — without a 429/5xx
+    // retry a single transient response permanently suppresses PEG for the symbol.
+    // Three attempts covers the common throttle burst without blocking the
+    // parallel batch on one slow symbol's exponential backoff.
+    for (let attempt = 0; attempt < 3; attempt++) {
       const crumbParam = crumb ? `&crumb=${encodeURIComponent(crumb)}` : "";
       const host = YF_HOSTS[attempt % 2];
       const url = `${host}/v10/finance/quoteSummary/${encodeURIComponent(symbol.toUpperCase())}?modules=defaultKeyStatistics${crumbParam}`;
-      const res = await fetch(url, { headers: YF_HEADERS });
+      let res;
+      try {
+        res = await fetch(url, { headers: YF_HEADERS });
+      } catch {
+        // Network error — back off and retry on the other host.
+        await new Promise(r => setTimeout(r, Math.pow(2, attempt) * 500));
+        continue;
+      }
       if (res.status === 401) {
         _yfCrumb = null;
         _yfCrumbPromise = null;
         crumb = await getYFCrumb().catch(() => null);
+        continue;
+      }
+      if (res.status === 429 || res.status >= 500) {
+        await new Promise(r => setTimeout(r, Math.pow(2, attempt) * 800));
         continue;
       }
       if (!res.ok) return null;
