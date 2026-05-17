@@ -612,21 +612,28 @@ export async function mentorPanelResponse(topic, masterId, profile, priorRespons
 }
 
 // Extract the structured synthesis from a model response.
-// Expects a fenced ```json``` block followed by a markdown narrative.
+// Expects a fenced ```json``` block followed by a markdown narrative,
+// but tolerates an unfenced JSON-only response (no narrative) as fallback.
 // Throws on parse failure so callers can surface a retry button.
 function parseSynthesisResponse(raw) {
+  let jsonText, narrative;
   const fence = raw.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
-  if (!fence) throw new Error("综合解析失败：未找到 JSON 段");
+  if (fence) {
+    jsonText = fence[1];
+    narrative = raw.slice(fence.index + fence[0].length).trim();
+  } else {
+    // Model skipped the fence — let parseLooseJson find the outermost {...}.
+    jsonText = raw;
+    narrative = "";
+  }
 
   let parsed;
   try {
-    parsed = JSON.parse(fence[1].trim());
+    parsed = parseLooseJson(jsonText, { label: "synthesis" });
   } catch {
     throw new Error("综合解析失败：JSON 格式错误");
   }
   if (!parsed.headlineVerdict) throw new Error("综合解析失败：缺少 headlineVerdict");
-
-  const narrative = raw.slice(fence.index + fence[0].length).trim();
 
   // Defensive normalisation — consumers iterate these arrays in render code.
   return {

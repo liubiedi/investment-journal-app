@@ -1,5 +1,5 @@
 // Roundtable.js — 华山论道 · Virtual Investment Committee
-import React, { useState, useRef, useCallback, useEffect } from "react";
+import React, { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import {
   View, ScrollView, Modal, Pressable, TextInput, ActivityIndicator,
   Alert, Text,
@@ -15,7 +15,14 @@ import { mentorPanelResponse, runSynthesis } from "../api";
 import * as db from "../db";
 import { TSerif, TSerifBold, TSerifItalic, TMono, Kicker } from "../components";
 
-const VERDICT_COLOR = { BULL: colors.good, BEAR: colors.bad, NEUTRAL: colors.inkMuted };
+// Mentor cards emit BULL/BEAR/NEUTRAL; committee-level synthesis adds WAIT
+// (treated as warn-amber, distinct from a mentor's faint NEUTRAL).
+const VERDICT_COLOR = {
+  BULL: colors.good,
+  BEAR: colors.bad,
+  NEUTRAL: colors.inkMuted,
+  WAIT: colors.warn,
+};
 
 // ──────────────────────────────────────────────────────────────
 // Main modal
@@ -678,7 +685,11 @@ function MasterCard({ masterId, response, loading, pending, onRetry }) {
 // structured synthesis (PR2+) or legacy markdown minutes.
 // ──────────────────────────────────────────────────────────────
 function SynthesisHistoryModal({ visible, items, onClose, onPreview }) {
-  const sessions = items.filter(item => item.synthesis || (typeof item.minutes === "string" && item.minutes));
+  // Memoised so this work doesn't recompute on every parent re-render while hidden.
+  const sessions = useMemo(
+    () => items.filter(item => item.synthesis || (typeof item.minutes === "string" && item.minutes)),
+    [items],
+  );
 
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
@@ -785,9 +796,7 @@ function SynthesisModal({ visible, synthesis, legacyMinutes, onClose }) {
 // ──────────────────────────────────────────────────────────────
 function SynthesisDashboard({ synthesis }) {
   const verdict = synthesis.headlineVerdict || "WAIT";
-  const verdictColor = verdict === "BULL" ? colors.good
-    : verdict === "BEAR" ? colors.bad
-    : colors.warn;
+  const verdictColor = VERDICT_COLOR[verdict] || colors.warn;
   const tally = synthesis.voteTally || { BULL: 0, BEAR: 0, NEUTRAL: 0 };
   const tallyTotal = (tally.BULL || 0) + (tally.BEAR || 0) + (tally.NEUTRAL || 0);
 
