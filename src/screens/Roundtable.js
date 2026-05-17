@@ -9,7 +9,7 @@ import { X, ChevronDown, ChevronUp, Trash2 } from "lucide-react-native";
 
 import { colors, fonts } from "../theme";
 import { useApp } from "../context";
-import { ROUNDTABLE_MASTERS, MASTER_MEETING_ROLES, getMaster } from "../constants";
+import { ROUNDTABLE_MASTERS, ROUNDTABLE_MAX_MENTORS, MASTER_MEETING_ROLES, getMaster } from "../constants";
 import { mentorPanelResponse, generateMeetingMinutes } from "../api";
 import * as db from "../db";
 import { TSerif, TSerifBold, TSerifItalic, TMono, Kicker } from "../components";
@@ -26,7 +26,11 @@ export default function RoundtableModal({ visible, onClose }) {
   const [sessionId, setSessionId] = useState(null);
   const [loadingMasters, setLoadingMasters] = useState(new Set());
   const [isDebating, setIsDebating] = useState(false);
-  const [selectedMasters, setSelectedMasters] = useState(ROUNDTABLE_MASTERS);
+  // Default to the first N (cross-philosophy balanced) — user can swap from the full pool.
+  const [selectedMasters, setSelectedMasters] = useState(
+    () => ROUNDTABLE_MASTERS.slice(0, ROUNDTABLE_MAX_MENTORS)
+  );
+  const [selectionWarning, setSelectionWarning] = useState("");
 
   const [topicInput, setTopicInput] = useState("");
   const [debateInput, setDebateInput] = useState("");
@@ -53,9 +57,16 @@ export default function RoundtableModal({ visible, onClose }) {
 
   const toggleMaster = (id) => {
     if (session) return;
-    setSelectedMasters(prev =>
-      prev.includes(id) ? prev.filter(m => m !== id) : [...prev, id]
-    );
+    setSelectedMasters(prev => {
+      if (prev.includes(id)) return prev.filter(m => m !== id);
+      if (prev.length >= ROUNDTABLE_MAX_MENTORS) {
+        // Soft-block — explicit user choice is better than silent removal.
+        setSelectionWarning(`最多选 ${ROUNDTABLE_MAX_MENTORS} 位 · 请先取消一位`);
+        setTimeout(() => setSelectionWarning(""), 2200);
+        return prev;
+      }
+      return [...prev, id];
+    });
   };
 
   // Functional update — safe to call from parallel async ops
@@ -351,11 +362,22 @@ export default function RoundtableModal({ visible, onClose }) {
           {/* ── Topic setup (pre-session) ── */}
           {!session && (
             <View>
-              <Kicker style={{ marginBottom: 10 }}>选择参与宗师</Kicker>
-              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 24 }}>
+              <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+                <Kicker>选择参与宗师</Kicker>
+                <TMono style={{
+                  fontSize: 10,
+                  color: selectedMasters.length === ROUNDTABLE_MAX_MENTORS ? colors.good : colors.inkMuted,
+                }}>
+                  已选 {selectedMasters.length}/{ROUNDTABLE_MAX_MENTORS}
+                </TMono>
+              </View>
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
                 {ROUNDTABLE_MASTERS.map(id => {
                   const m = getMaster(id);
                   const sel = selectedMasters.includes(id);
+                  const capReached = selectedMasters.length >= ROUNDTABLE_MAX_MENTORS;
+                  // Fade non-selected chips when cap is reached — still tappable to surface the warning.
+                  const dimmed = !sel && capReached;
                   return (
                     <Pressable
                       key={id}
@@ -365,6 +387,7 @@ export default function RoundtableModal({ visible, onClose }) {
                         borderWidth: 1,
                         borderColor: sel ? colors.ink : colors.divider,
                         backgroundColor: sel ? colors.ink : colors.bgElev,
+                        opacity: dimmed ? 0.45 : 1,
                       }}
                     >
                       <TMono style={{ fontSize: 10, color: sel ? colors.bg : colors.inkMuted }}>
@@ -374,6 +397,15 @@ export default function RoundtableModal({ visible, onClose }) {
                   );
                 })}
               </View>
+              {selectionWarning ? (
+                <TMono style={{ fontSize: 10, color: colors.bad, marginBottom: 16 }}>
+                  {selectionWarning}
+                </TMono>
+              ) : (
+                <TSerifItalic style={{ fontSize: 11, color: colors.inkFaint, marginBottom: 16 }}>
+                  恰好 {ROUNDTABLE_MAX_MENTORS} 位 · 不同流派的对撞才有信息增量
+                </TSerifItalic>
+              )}
 
               <Kicker style={{ marginBottom: 8 }}>投资议题</Kicker>
               <TextInput
@@ -389,18 +421,23 @@ export default function RoundtableModal({ visible, onClose }) {
                   minHeight: 80, textAlignVertical: "top",
                 }}
               />
-              <Pressable
-                onPress={startRound1}
-                disabled={!topicInput.trim() || selectedMasters.length === 0}
-                style={{
-                  backgroundColor: colors.ink, padding: 14, alignItems: "center",
-                  opacity: !topicInput.trim() || selectedMasters.length === 0 ? 0.35 : 1,
-                }}
-              >
-                <TMono style={{ color: colors.bg, fontSize: 12, letterSpacing: 0.5 }}>
-                  开始第一轮 · 独立发言
-                </TMono>
-              </Pressable>
+              {(() => {
+                const ready = topicInput.trim() && selectedMasters.length === ROUNDTABLE_MAX_MENTORS;
+                return (
+                  <Pressable
+                    onPress={startRound1}
+                    disabled={!ready}
+                    style={{
+                      backgroundColor: colors.ink, padding: 14, alignItems: "center",
+                      opacity: ready ? 1 : 0.35,
+                    }}
+                  >
+                    <TMono style={{ color: colors.bg, fontSize: 12, letterSpacing: 0.5 }}>
+                      开始第一轮 · 独立发言
+                    </TMono>
+                  </Pressable>
+                );
+              })()}
             </View>
           )}
 
