@@ -783,7 +783,8 @@ export async function fetchPEGRatios(symbols) {
         res = await fetch(url, { headers: YF_HEADERS });
       } catch {
         // Network error — back off and retry on the other host.
-        await new Promise(r => setTimeout(r, Math.pow(2, attempt) * 500));
+        // Jitter prevents parallel fetches from waking in lockstep after a shared outage.
+        await new Promise(r => setTimeout(r, Math.pow(2, attempt) * 500 + Math.random() * 200));
         continue;
       }
       if (res.status === 401) {
@@ -793,7 +794,10 @@ export async function fetchPEGRatios(symbols) {
         continue;
       }
       if (res.status === 429 || res.status >= 500) {
-        await new Promise(r => setTimeout(r, Math.pow(2, attempt) * 800));
+        // Jitter is critical here: when Yahoo throttles, every parallel symbol
+        // gets 429 at the same time. Without spread, they all retry in lockstep
+        // and trigger another 429 burst.
+        await new Promise(r => setTimeout(r, Math.pow(2, attempt) * 800 + Math.random() * 200));
         continue;
       }
       if (!res.ok) return null;
