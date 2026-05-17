@@ -41,6 +41,7 @@ const SYMBOL_MAP = {
   generateResearchMemo: { src: "api.js", kind: "fn" },
   callLLMStream:        { src: "api.js", kind: "fn" },
   fetchPEGRatios:       { src: "api.js", kind: "fn" },
+  runSynthesis:         { src: "api.js", kind: "fn" },
 
   // src/context.js
   useApp: { src: "context.js", kind: "fn" },  // hook call

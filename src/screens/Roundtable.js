@@ -11,7 +11,7 @@ import { colors, fonts } from "../theme";
 import { useApp } from "../context";
 import { useTransientMessage } from "../utils";
 import { ROUNDTABLE_MASTERS, ROUNDTABLE_MAX_MENTORS, MASTER_MEETING_ROLES, getMaster } from "../constants";
-import { mentorPanelResponse, generateMeetingMinutes } from "../api";
+import { mentorPanelResponse, runSynthesis } from "../api";
 import * as db from "../db";
 import { TSerif, TSerifBold, TSerifItalic, TMono, Kicker } from "../components";
 
@@ -36,15 +36,19 @@ export default function RoundtableModal({ visible, onClose }) {
   const [topicInput, setTopicInput] = useState("");
   const [debateInput, setDebateInput] = useState("");
 
-  const [minutes, setMinutes] = useState("");
-  const [generatingMinutes, setGeneratingMinutes] = useState(false);
-  const [showMinutes, setShowMinutes] = useState(false);
+  // `synthesis` is the new structured decision object (PR 2). `legacyMinutes`
+  // holds the old markdown string for sessions saved before PR 2 — readable
+  // but not regenerable. The "view" modal dispatches between them.
+  const [synthesis, setSynthesis] = useState(null);
+  const [legacyMinutes, setLegacyMinutes] = useState("");
+  const [generatingSynthesis, setGeneratingSynthesis] = useState(false);
+  const [showSynthesis, setShowSynthesis] = useState(false);
 
   const [historyVisible, setHistoryVisible] = useState(false);
   const [historyItems, setHistoryItems] = useState([]);
-  const [minutesHistoryVisible, setMinutesHistoryVisible] = useState(false);
-  const [previewMinutes, setPreviewMinutes] = useState("");
-  const [showMinutesPreview, setShowMinutesPreview] = useState(false);
+  const [synthesisHistoryVisible, setSynthesisHistoryVisible] = useState(false);
+  const [preview, setPreview] = useState({ synthesis: null, legacyMinutes: "" });
+  const [showPreview, setShowPreview] = useState(false);
 
   const scrollRef = useRef(null);
 
@@ -131,11 +135,12 @@ export default function RoundtableModal({ visible, onClose }) {
       topic,
       selectedMasters,
       rounds: [{ roundNum: 1, type: "parallel", userInput: topic, responses: [] }],
-      minutes: "",
+      synthesis: null,
     };
 
     setSession(newSession);
-    setMinutes("");
+    setSynthesis(null);
+    setLegacyMinutes("");
     setLoadingMasters(new Set(selectedMasters));
     setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 150);
 
@@ -232,22 +237,24 @@ export default function RoundtableModal({ visible, onClose }) {
     setIsDebating(false);
   };
 
-  // ── Meeting minutes ────────────────────────────────────────
-  const doGenerateMinutes = async () => {
-    if (!session || generatingMinutes) return;
-    setGeneratingMinutes(true);
+  // ── Decision synthesis ─────────────────────────────────────
+  const doGenerateSynthesis = async () => {
+    if (!session || generatingSynthesis) return;
+    setGeneratingSynthesis(true);
     try {
-      const text = await generateMeetingMinutes(session, app.profile);
-      setMinutes(text);
-      const updated = { ...session, minutes: text };
+      const result = await runSynthesis(session, app.profile);
+      setSynthesis(result);
+      // Persist synthesis on the session; legacy `minutes` is dropped on regeneration.
+      const updated = { ...session, synthesis: result, minutes: undefined };
       setSession(updated);
+      setLegacyMinutes("");
       if (sessionId) await db.updateRoundtableSession(sessionId, updated);
-      setShowMinutes(true);
+      setShowSynthesis(true);
     } catch (e) {
-      const msg = e.message === "NO_API_KEY" ? "请先配置 API key" : (e.message || "纪要生成失败，请稍后重试");
+      const msg = e.message === "NO_API_KEY" ? "请先配置 API key" : (e.message || "综合生成失败，请稍后重试");
       Alert.alert("生成失败", msg);
     } finally {
-      setGeneratingMinutes(false);
+      setGeneratingSynthesis(false);
     }
   };
 
@@ -260,18 +267,19 @@ export default function RoundtableModal({ visible, onClose }) {
     } catch {}
   };
 
-  const openMinutesHistory = async () => {
+  const openSynthesisHistory = async () => {
     try {
       const items = await db.listRoundtableSessions();
       setHistoryItems(items);
-      setMinutesHistoryVisible(true);
+      setSynthesisHistoryVisible(true);
     } catch {}
   };
 
   const loadFromHistory = (item) => {
     setSession(item);
     setSessionId(item.id);
-    setMinutes(item.minutes || "");
+    setSynthesis(item.synthesis || null);
+    setLegacyMinutes(typeof item.minutes === "string" ? item.minutes : "");
     // Clear any in-flight state from a previous session
     setLoadingMasters(new Set());
     setIsDebating(false);
@@ -294,7 +302,8 @@ export default function RoundtableModal({ visible, onClose }) {
     setSessionId(null);
     setTopicInput("");
     setDebateInput("");
-    setMinutes("");
+    setSynthesis(null);
+    setLegacyMinutes("");
     setLoadingMasters(new Set());
     setIsDebating(false);
   };
@@ -330,13 +339,13 @@ export default function RoundtableModal({ visible, onClose }) {
           <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
             <Kicker>INVESTMENT COMMITTEE</Kicker>
             <View style={{ flexDirection: "row", alignItems: "center", gap: 14 }}>
-              {session && minutes ? (
-                <Pressable onPress={() => setShowMinutes(true)} hitSlop={8}>
-                  <TMono style={{ fontSize: 10, color: colors.accent }}>查看纪要</TMono>
+              {session && (synthesis || legacyMinutes) ? (
+                <Pressable onPress={() => setShowSynthesis(true)} hitSlop={8}>
+                  <TMono style={{ fontSize: 10, color: colors.accent }}>查看综合</TMono>
                 </Pressable>
               ) : null}
-              <Pressable onPress={openMinutesHistory} hitSlop={8}>
-                <TMono style={{ fontSize: 10 }}>历史纪要</TMono>
+              <Pressable onPress={openSynthesisHistory} hitSlop={8}>
+                <TMono style={{ fontSize: 10 }}>历史综合</TMono>
               </Pressable>
               <Pressable onPress={openHistory} hitSlop={8}>
                 <TMono style={{ fontSize: 10 }}>历史议题</TMono>
@@ -501,7 +510,7 @@ export default function RoundtableModal({ visible, onClose }) {
                   opacity: canStartDebate ? 1 : 0.35,
                 }}
               >
-                {isLoading && !generatingMinutes ? (
+                {isLoading && !generatingSynthesis ? (
                   <ActivityIndicator size="small" color={colors.bg} />
                 ) : (
                   <TMono style={{ color: colors.bg, fontSize: 11, letterSpacing: 0.5 }}>
@@ -510,19 +519,19 @@ export default function RoundtableModal({ visible, onClose }) {
                 )}
               </Pressable>
               <Pressable
-                onPress={doGenerateMinutes}
-                disabled={!canStartDebate || generatingMinutes}
+                onPress={doGenerateSynthesis}
+                disabled={!canStartDebate || generatingSynthesis}
                 style={{
                   flex: 1, padding: 12, alignItems: "center",
                   borderWidth: 1, borderColor: colors.ink,
-                  opacity: (!canStartDebate || generatingMinutes) ? 0.35 : 1,
+                  opacity: (!canStartDebate || generatingSynthesis) ? 0.35 : 1,
                 }}
               >
-                {generatingMinutes ? (
+                {generatingSynthesis ? (
                   <ActivityIndicator size="small" color={colors.ink} />
                 ) : (
                   <TMono style={{ color: colors.ink, fontSize: 11, letterSpacing: 0.5 }}>
-                    终止辩论，生成纪要
+                    终止辩论，生成综合
                   </TMono>
                 )}
               </Pressable>
@@ -531,17 +540,29 @@ export default function RoundtableModal({ visible, onClose }) {
         )}
       </SafeAreaView>
 
-      <MinutesModal visible={showMinutes} minutes={minutes} onClose={() => setShowMinutes(false)} />
-      <MinutesModal
-        visible={showMinutesPreview}
-        minutes={previewMinutes}
-        onClose={() => setShowMinutesPreview(false)}
+      <SynthesisModal
+        visible={showSynthesis}
+        synthesis={synthesis}
+        legacyMinutes={legacyMinutes}
+        onClose={() => setShowSynthesis(false)}
       />
-      <MinutesHistoryModal
-        visible={minutesHistoryVisible}
+      <SynthesisModal
+        visible={showPreview}
+        synthesis={preview.synthesis}
+        legacyMinutes={preview.legacyMinutes}
+        onClose={() => setShowPreview(false)}
+      />
+      <SynthesisHistoryModal
+        visible={synthesisHistoryVisible}
         items={historyItems}
-        onClose={() => setMinutesHistoryVisible(false)}
-        onPreview={(mins) => { setPreviewMinutes(mins); setShowMinutesPreview(true); }}
+        onClose={() => setSynthesisHistoryVisible(false)}
+        onPreview={(item) => {
+          setPreview({
+            synthesis: item.synthesis || null,
+            legacyMinutes: typeof item.minutes === "string" ? item.minutes : "",
+          });
+          setShowPreview(true);
+        }}
       />
       <HistoryModal
         visible={historyVisible}
@@ -653,10 +674,11 @@ function MasterCard({ masterId, response, loading, pending, onRetry }) {
 }
 
 // ──────────────────────────────────────────────────────────────
-// Minutes history modal — lists past sessions that have minutes
+// Synthesis history modal — lists past sessions with either a
+// structured synthesis (PR2+) or legacy markdown minutes.
 // ──────────────────────────────────────────────────────────────
-function MinutesHistoryModal({ visible, items, onClose, onPreview }) {
-  const sessionsWithMinutes = items.filter(item => item.minutes);
+function SynthesisHistoryModal({ visible, items, onClose, onPreview }) {
+  const sessions = items.filter(item => item.synthesis || (typeof item.minutes === "string" && item.minutes));
 
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
@@ -667,40 +689,44 @@ function MinutesHistoryModal({ visible, items, onClose, onPreview }) {
           borderBottomWidth: 1, borderBottomColor: colors.divider,
         }}>
           <View>
-            <Kicker>MINUTES ARCHIVE</Kicker>
-            <TSerifBold style={{ fontSize: 18, marginTop: 2 }}>历史纪要</TSerifBold>
+            <Kicker>SYNTHESIS ARCHIVE</Kicker>
+            <TSerifBold style={{ fontSize: 18, marginTop: 2 }}>历史综合</TSerifBold>
           </View>
           <Pressable onPress={onClose} hitSlop={12}>
             <X size={18} color={colors.inkMuted} />
           </Pressable>
         </View>
         <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 20 }}>
-          {sessionsWithMinutes.length === 0 && (
+          {sessions.length === 0 && (
             <TSerifItalic style={{ fontSize: 14, color: colors.inkMuted, textAlign: "center", marginTop: 40 }}>
-              暂无历史纪要
+              暂无历史综合
             </TSerifItalic>
           )}
-          {sessionsWithMinutes.map(item => (
-            <Pressable
-              key={item.id}
-              onPress={() => onPreview(item.minutes)}
-              style={{
-                marginBottom: 12, padding: 14,
-                borderWidth: 1, borderColor: colors.divider,
-                backgroundColor: colors.bgElev,
-              }}
-            >
-              <TSerif style={{ fontSize: 14, marginBottom: 4 }} numberOfLines={2}>
-                {item.topic || "(无题)"}
-              </TSerif>
-              <TMono style={{ fontSize: 10, color: colors.inkFaint }}>
-                {item.createdAt
-                  ? new Date(item.createdAt).toLocaleDateString("zh-CN", { year: "numeric", month: "short", day: "numeric" })
-                  : ""}
-                {" · "}{item.rounds?.length ?? 0} 轮
-              </TMono>
-            </Pressable>
-          ))}
+          {sessions.map(item => {
+            const isLegacy = !item.synthesis && !!item.minutes;
+            return (
+              <Pressable
+                key={item.id}
+                onPress={() => onPreview(item)}
+                style={{
+                  marginBottom: 12, padding: 14,
+                  borderWidth: 1, borderColor: colors.divider,
+                  backgroundColor: colors.bgElev,
+                }}
+              >
+                <TSerif style={{ fontSize: 14, marginBottom: 4 }} numberOfLines={2}>
+                  {item.topic || "(无题)"}
+                </TSerif>
+                <TMono style={{ fontSize: 10, color: colors.inkFaint }}>
+                  {item.createdAt
+                    ? new Date(item.createdAt).toLocaleDateString("zh-CN", { year: "numeric", month: "short", day: "numeric" })
+                    : ""}
+                  {" · "}{item.rounds?.length ?? 0} 轮
+                  {isLegacy ? " · 旧版纪要" : ` · ${item.synthesis?.headlineVerdict ?? ""}`}
+                </TMono>
+              </Pressable>
+            );
+          })}
         </ScrollView>
       </SafeAreaView>
     </Modal>
@@ -708,9 +734,13 @@ function MinutesHistoryModal({ visible, items, onClose, onPreview }) {
 }
 
 // ──────────────────────────────────────────────────────────────
-// Meeting minutes modal
+// Synthesis modal — dispatches between the new dashboard and
+// the legacy markdown renderer based on what the session holds.
 // ──────────────────────────────────────────────────────────────
-function MinutesModal({ visible, minutes, onClose }) {
+function SynthesisModal({ visible, synthesis, legacyMinutes, onClose }) {
+  const hasSynthesis = !!synthesis;
+  const hasLegacy = !hasSynthesis && typeof legacyMinutes === "string" && legacyMinutes.length > 0;
+
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
       <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }} edges={["top", "bottom"]}>
@@ -720,20 +750,162 @@ function MinutesModal({ visible, minutes, onClose }) {
           borderBottomWidth: 1, borderBottomColor: colors.divider,
         }}>
           <View>
-            <Kicker>MEETING MINUTES</Kicker>
-            <TSerifBold style={{ fontSize: 18, marginTop: 2 }}>会议纪要</TSerifBold>
+            <Kicker>DECISION SYNTHESIS</Kicker>
+            <TSerifBold style={{ fontSize: 18, marginTop: 2 }}>
+              {hasSynthesis ? "决策综合" : hasLegacy ? "会议纪要（旧版）" : "决策综合"}
+            </TSerifBold>
           </View>
           <Pressable onPress={onClose} hitSlop={12}>
             <X size={18} color={colors.inkMuted} />
           </Pressable>
         </View>
-        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 24 }}>
-          <Text selectable style={{ fontFamily: fonts.serif, fontSize: 14, lineHeight: 24, color: colors.ink }}>
-            {minutes}
-          </Text>
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 20 }}>
+          {hasSynthesis ? (
+            <SynthesisDashboard synthesis={synthesis} />
+          ) : hasLegacy ? (
+            <Text selectable style={{ fontFamily: fonts.serif, fontSize: 14, lineHeight: 24, color: colors.ink }}>
+              {legacyMinutes}
+            </Text>
+          ) : (
+            <TSerifItalic style={{ fontSize: 14, color: colors.inkMuted, textAlign: "center", marginTop: 40 }}>
+              暂无综合内容
+            </TSerifItalic>
+          )}
         </ScrollView>
       </SafeAreaView>
     </Modal>
+  );
+}
+
+// ──────────────────────────────────────────────────────────────
+// Synthesis dashboard — the structured decision view.
+// Renders verdict badge, vote tally, axis of disagreement,
+// consensus bullets, trigger-condition table, decisive crux,
+// suggested next action, and the narrative.
+// ──────────────────────────────────────────────────────────────
+function SynthesisDashboard({ synthesis }) {
+  const verdict = synthesis.headlineVerdict || "WAIT";
+  const verdictColor = verdict === "BULL" ? colors.good
+    : verdict === "BEAR" ? colors.bad
+    : colors.warn;
+  const tally = synthesis.voteTally || { BULL: 0, BEAR: 0, NEUTRAL: 0 };
+  const tallyTotal = (tally.BULL || 0) + (tally.BEAR || 0) + (tally.NEUTRAL || 0);
+
+  return (
+    <View>
+      {/* Headline verdict + vote tally */}
+      <View style={{
+        padding: 18, borderWidth: 1, borderColor: verdictColor,
+        backgroundColor: colors.bgElev,
+        flexDirection: "row", alignItems: "center", gap: 16,
+      }}>
+        <View style={{
+          paddingHorizontal: 16, paddingVertical: 10,
+          backgroundColor: verdictColor,
+        }}>
+          <TMono style={{ color: colors.bg, fontSize: 20, letterSpacing: 1, fontWeight: "700" }}>
+            {verdict}
+          </TMono>
+        </View>
+        <View style={{ flex: 1 }}>
+          <Kicker style={{ marginBottom: 4 }}>VOTE TALLY · 投票</Kicker>
+          <TMono style={{ fontSize: 12, color: colors.inkSoft }}>
+            {tally.BULL || 0} BULL · {tally.BEAR || 0} BEAR · {tally.NEUTRAL || 0} NEUTRAL
+            {tallyTotal > 0 ? `  (${tallyTotal})` : ""}
+          </TMono>
+        </View>
+      </View>
+
+      {/* Axis of disagreement */}
+      {synthesis.axisOfDisagreement ? (
+        <View style={{ marginTop: 24 }}>
+          <Kicker style={{ marginBottom: 6 }}>AXIS OF DISAGREEMENT · 分歧轴心</Kicker>
+          <TSerifItalic style={{ fontSize: 15, lineHeight: 22, color: colors.ink }}>
+            「{synthesis.axisOfDisagreement}」
+          </TSerifItalic>
+        </View>
+      ) : null}
+
+      {/* Decisive crux */}
+      {synthesis.decisiveCrux ? (
+        <View style={{
+          marginTop: 20, padding: 14,
+          borderLeftWidth: 3, borderLeftColor: colors.cool,
+          backgroundColor: colors.bgElev,
+        }}>
+          <Kicker style={{ marginBottom: 4 }}>DECISIVE CRUX · 决胜事实</Kicker>
+          <TSerif style={{ fontSize: 14, lineHeight: 21, color: colors.ink }}>
+            {synthesis.decisiveCrux}
+          </TSerif>
+        </View>
+      ) : null}
+
+      {/* Consensus points */}
+      {synthesis.consensusPoints?.length > 0 ? (
+        <View style={{ marginTop: 24 }}>
+          <Kicker style={{ marginBottom: 8 }}>CONSENSUS · 共识</Kicker>
+          {synthesis.consensusPoints.map((point, i) => (
+            <View key={i} style={{ flexDirection: "row", alignItems: "flex-start", gap: 8, marginBottom: 6 }}>
+              <TSerifBold style={{ color: colors.accent, fontSize: 14, marginTop: 2 }}>·</TSerifBold>
+              <TSerif style={{ fontSize: 14, lineHeight: 21, flex: 1, color: colors.ink }}>{point}</TSerif>
+            </View>
+          ))}
+        </View>
+      ) : null}
+
+      {/* Trigger conditions */}
+      {synthesis.triggerConditions?.length > 0 ? (
+        <View style={{ marginTop: 24 }}>
+          <Kicker style={{ marginBottom: 8 }}>TRIGGER CONDITIONS · 触发条件</Kicker>
+          <View style={{ borderWidth: 1, borderColor: colors.divider }}>
+            <View style={{
+              flexDirection: "row", backgroundColor: colors.ink,
+              paddingVertical: 6, paddingHorizontal: 10,
+            }}>
+              <TMono style={{ flex: 1, fontSize: 9, color: colors.bg, letterSpacing: 1 }}>IF · 若</TMono>
+              <TMono style={{ flex: 1, fontSize: 9, color: colors.bg, letterSpacing: 1 }}>THEN · 则</TMono>
+            </View>
+            {synthesis.triggerConditions.map((row, i) => (
+              <View key={i} style={{
+                flexDirection: "row", paddingVertical: 10, paddingHorizontal: 10,
+                borderTopWidth: i === 0 ? 0 : 1, borderTopColor: colors.dividerSoft,
+                backgroundColor: i % 2 === 0 ? colors.bgElev : colors.bgCard,
+              }}>
+                <TSerif style={{ flex: 1, fontSize: 13, lineHeight: 19, color: colors.ink, paddingRight: 8 }}>
+                  {row.if || "—"}
+                </TSerif>
+                <TSerif style={{ flex: 1, fontSize: 13, lineHeight: 19, color: colors.ink }}>
+                  {row.then || "—"}
+                </TSerif>
+              </View>
+            ))}
+          </View>
+        </View>
+      ) : null}
+
+      {/* Suggested next action */}
+      {synthesis.suggestedNextAction ? (
+        <View style={{
+          marginTop: 24, padding: 14,
+          borderWidth: 1, borderColor: colors.accent,
+          backgroundColor: colors.bgCard,
+        }}>
+          <Kicker style={{ marginBottom: 6, color: colors.accent }}>NEXT ACTION · 建议下一步</Kicker>
+          <TSerifBold style={{ fontSize: 15, lineHeight: 22, color: colors.ink }}>
+            {synthesis.suggestedNextAction}
+          </TSerifBold>
+        </View>
+      ) : null}
+
+      {/* Narrative */}
+      {synthesis.narrative ? (
+        <View style={{ marginTop: 28, paddingTop: 20, borderTopWidth: 1, borderTopColor: colors.dividerSoft }}>
+          <Text selectable style={{ fontFamily: fonts.serif, fontSize: 14, lineHeight: 23, color: colors.inkSoft }}>
+            {synthesis.narrative}
+          </Text>
+        </View>
+      ) : null}
+    </View>
   );
 }
 
@@ -790,7 +962,7 @@ function HistoryModal({ visible, items, onClose, onLoad, onDelete }) {
                       ? new Date(item.createdAt).toLocaleDateString("zh-CN", { year: "numeric", month: "short", day: "numeric" })
                       : ""}
                     {" · "}{item.rounds?.length ?? 0} 轮
-                    {item.minutes ? " · 有纪要" : ""}
+                    {item.synthesis ? " · 有综合" : item.minutes ? " · 有纪要" : ""}
                   </TMono>
                 </View>
                 <Pressable onPress={() => confirmDelete(item.id)} hitSlop={10}>

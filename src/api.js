@@ -611,9 +611,48 @@ export async function mentorPanelResponse(topic, masterId, profile, priorRespons
   return { text, verdict };
 }
 
-// Generate structured meeting minutes from a complete session.
-export async function generateMeetingMinutes(session, profile) {
+// Extract the structured synthesis from a model response.
+// Expects a fenced ```json``` block followed by a markdown narrative.
+// Throws on parse failure so callers can surface a retry button.
+function parseSynthesisResponse(raw) {
+  const fence = raw.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
+  if (!fence) throw new Error("综合解析失败：未找到 JSON 段");
+
+  let parsed;
+  try {
+    parsed = JSON.parse(fence[1].trim());
+  } catch {
+    throw new Error("综合解析失败：JSON 格式错误");
+  }
+  if (!parsed.headlineVerdict) throw new Error("综合解析失败：缺少 headlineVerdict");
+
+  const narrative = raw.slice(fence.index + fence[0].length).trim();
+
+  // Defensive normalisation — consumers iterate these arrays in render code.
+  return {
+    version: 1,
+    generatedAt: Date.now(),
+    headlineVerdict: parsed.headlineVerdict,
+    voteTally: parsed.voteTally && typeof parsed.voteTally === "object"
+      ? parsed.voteTally
+      : { BULL: 0, BEAR: 0, NEUTRAL: 0 },
+    axisOfDisagreement: typeof parsed.axisOfDisagreement === "string" ? parsed.axisOfDisagreement : "",
+    consensusPoints: Array.isArray(parsed.consensusPoints) ? parsed.consensusPoints : [],
+    triggerConditions: Array.isArray(parsed.triggerConditions)
+      ? parsed.triggerConditions.filter(t => t && (t.if || t.then))
+      : [],
+    decisiveCrux: typeof parsed.decisiveCrux === "string" ? parsed.decisiveCrux : "",
+    suggestedNextAction: typeof parsed.suggestedNextAction === "string" ? parsed.suggestedNextAction : "",
+    narrative,
+  };
+}
+
+// Produce a structured decision synthesis from a complete roundtable session.
+// Replaces the previous markdown-minutes generator — output is now consumed
+// by SynthesisDashboard in the Roundtable screen.
+export async function runSynthesis(session, profile) {
   const today = new Date().toISOString().slice(0, 10);
+  const lang = detectLang(session.topic || "");
 
   // Truncate each response to 600 chars to keep the transcript within API
   // context limits. Full responses are already visible in the UI.
@@ -633,73 +672,81 @@ export async function generateMeetingMinutes(session, profile) {
     }
   }
 
+  const memberCount = session.selectedMasters.length;
   const memberNames = session.selectedMasters.map(id => {
     const m = getMaster(id);
     return `${m.name}（${MASTER_MEETING_ROLES[id]?.roleZh}）`;
   }).join("、");
 
-  const system = `You are a neutral investment committee secretary producing meeting minutes. Write in the SAME LANGUAGE as the discussion (Chinese if most content is Chinese). Be factual, concise, and structured.`;
+  const system = `You are a neutral investment committee secretary producing a DECISION SYNTHESIS — not a meeting recap.
 
-  const user = `Full transcript of an investment committee roundtable:
+LANGUAGE: ${lang}. Be factual, precise, decision-oriented. No throat-clearing.
 
-Topic: ${session.topic}
+Output has TWO parts in this order:
+
+PART 1 — Structured JSON in a single fenced code block:
+\`\`\`json
+{
+  "headlineVerdict": "BULL" | "BEAR" | "WAIT",
+  "voteTally": { "BULL": <int>, "BEAR": <int>, "NEUTRAL": <int> },
+  "axisOfDisagreement": "<one sentence: the single point the committee disagrees on most>",
+  "consensusPoints": ["<≤20 words>", "<≤20 words>"],
+  "triggerConditions": [
+    { "if": "<observable market or news condition>", "then": "<recommended action / lean>" }
+  ],
+  "decisiveCrux": "<one sentence: the single fact whose resolution would settle the debate>",
+  "suggestedNextAction": "<one concrete actionable sentence for the investor>"
+}
+\`\`\`
+
+PART 2 — A 120-150 word markdown narrative grounded in specific committee arguments. Lead with a single "## " heading.
+
+HARD RULES:
+- voteTally counts MUST sum to ${memberCount} (the committee size).
+- Each triggerCondition.if MUST be observable from market data or news (price level, macro print, earnings beat, etc.) — NOT a vague feeling.
+- suggestedNextAction is ONE concrete sentence (e.g. "维持现有头寸 5%，待 10Y 实际利率跌破 1.5% 后加仓至 8%").
+- decisiveCrux names a single resolvable fact (not a list, not a question chain).
+- Do NOT include anything outside PART 1 and PART 2. No preamble, no closing remarks.`;
+
+  const user = `Topic: ${session.topic}
 Date: ${today}
-Committee: ${memberNames}
+Committee (${memberCount}): ${memberNames}
 
 TRANSCRIPT:
 ${transcript}
 
-Produce meeting minutes in this EXACT Markdown format:
+Produce the structured synthesis and narrative now.`;
 
-# 投资委员会纪要
-**议题：** ${session.topic}
-**日期：** ${today}
-
-## 委员会投票
-| 宗师 | 立场 | 信念度 | 核心理由（≤15字）|
-|------|------|--------|----------------|
-[One row per member from their VERDICT lines]
-
-**多数立场：[BULL/BEAR/NEUTRAL]（X/${session.selectedMasters.length}）**
-
-## 共识观点
-- [2-3 bullets where most agree]
-
-## 核心分歧
-- [2-3 named disagreements, e.g. "Munger vs Lynch: ..."]
-
-## 最大风险（委员会排序）
-1. [Most cited risk]
-2. [Second risk]
-3. [Third risk]
-
-## 行动建议
-- [ ] [Specific actionable item]
-- [ ] [Second item]
-
-## 一句话结论
-[Single sentence summarizing the committee's overall view]`;
-
-  const result = await callLLM({
+  const raw = await callLLM({
     system,
     messages: [{ role: "user", content: user }],
     max_tokens: 2000,
   });
-  if (!result) throw new Error("收到空回复，请重试");
+  if (!raw) throw new Error("收到空回复，请重试");
 
-  // Record per-ticker stock thesis from the minutes (non-blocking)
+  const synthesis = parseSynthesisResponse(raw);
+
+  // Record per-ticker stock thesis (non-blocking) — preserves the memory-write
+  // behaviour of the old minutes generator so the broader memory system keeps
+  // working.
   const tickerMatch = session.topic?.match(/\b([A-Z]{2,5})\b/);
   if (tickerMatch) {
+    const memoryContent = [
+      `Verdict: ${synthesis.headlineVerdict}`,
+      synthesis.decisiveCrux ? `Crux: ${synthesis.decisiveCrux}` : null,
+      synthesis.suggestedNextAction ? `Action: ${synthesis.suggestedNextAction}` : null,
+      synthesis.narrative ? synthesis.narrative.slice(0, 500) : null,
+    ].filter(Boolean).join("\n");
     memoryManager.recordInsight({
       type: "stock_thesis",
       scope: tickerMatch[1],
-      content: result.slice(0, 700),
-      structured: { topic: session.topic, date: today, masters: session.selectedMasters },
-      modelId: "committee-minutes",
+      content: memoryContent,
+      structured: { topic: session.topic, date: today, masters: session.selectedMasters, synthesis },
+      modelId: "committee-synthesis",
     }).catch(() => {});
   }
 
-  return result;
+  return synthesis;
 }
 
 // Lightweight flash helper — used by DreamJob and InvestorDNA.distill()
