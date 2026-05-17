@@ -46,6 +46,7 @@ export default function RoundtableModal({ visible, onClose }) {
   const [showMinutesPreview, setShowMinutesPreview] = useState(false);
 
   const scrollRef = useRef(null);
+  const warningTimeoutRef = useRef(null);
 
   const isLoading = loadingMasters.size > 0 || isDebating;
 
@@ -55,14 +56,23 @@ export default function RoundtableModal({ visible, onClose }) {
     db.updateRoundtableSession(sessionId, session).catch(() => {});
   }, [session, sessionId, isLoading]);
 
+  // Cancel any pending warning timeout on unmount to avoid setState-after-unmount.
+  useEffect(() => () => {
+    if (warningTimeoutRef.current) clearTimeout(warningTimeoutRef.current);
+  }, []);
+
   const toggleMaster = (id) => {
     if (session) return;
     setSelectedMasters(prev => {
       if (prev.includes(id)) return prev.filter(m => m !== id);
       if (prev.length >= ROUNDTABLE_MAX_MENTORS) {
-        // Soft-block — explicit user choice is better than silent removal.
+        // Soft-block at the cap: surface the constraint, let the user decide who to drop.
         setSelectionWarning(`最多选 ${ROUNDTABLE_MAX_MENTORS} 位 · 请先取消一位`);
-        setTimeout(() => setSelectionWarning(""), 2200);
+        if (warningTimeoutRef.current) clearTimeout(warningTimeoutRef.current);
+        warningTimeoutRef.current = setTimeout(() => {
+          setSelectionWarning("");
+          warningTimeoutRef.current = null;
+        }, 2200);
         return prev;
       }
       return [...prev, id];
@@ -315,6 +325,10 @@ export default function RoundtableModal({ visible, onClose }) {
   const canStartDebate = !!session && !isLoading &&
     (lastRound?.responses.length ?? 0) >= (session.selectedMasters?.length ?? 1);
 
+  // Pre-session derived state (consumed by the mentor selector + start button below).
+  const capReached = selectedMasters.length >= ROUNDTABLE_MAX_MENTORS;
+  const readyToStart = !!topicInput.trim() && selectedMasters.length === ROUNDTABLE_MAX_MENTORS;
+
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
       <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }} edges={["top", "bottom"]}>
@@ -375,7 +389,6 @@ export default function RoundtableModal({ visible, onClose }) {
                 {ROUNDTABLE_MASTERS.map(id => {
                   const m = getMaster(id);
                   const sel = selectedMasters.includes(id);
-                  const capReached = selectedMasters.length >= ROUNDTABLE_MAX_MENTORS;
                   // Fade non-selected chips when cap is reached — still tappable to surface the warning.
                   const dimmed = !sel && capReached;
                   return (
@@ -421,23 +434,18 @@ export default function RoundtableModal({ visible, onClose }) {
                   minHeight: 80, textAlignVertical: "top",
                 }}
               />
-              {(() => {
-                const ready = topicInput.trim() && selectedMasters.length === ROUNDTABLE_MAX_MENTORS;
-                return (
-                  <Pressable
-                    onPress={startRound1}
-                    disabled={!ready}
-                    style={{
-                      backgroundColor: colors.ink, padding: 14, alignItems: "center",
-                      opacity: ready ? 1 : 0.35,
-                    }}
-                  >
-                    <TMono style={{ color: colors.bg, fontSize: 12, letterSpacing: 0.5 }}>
-                      开始第一轮 · 独立发言
-                    </TMono>
-                  </Pressable>
-                );
-              })()}
+              <Pressable
+                onPress={startRound1}
+                disabled={!readyToStart}
+                style={{
+                  backgroundColor: colors.ink, padding: 14, alignItems: "center",
+                  opacity: readyToStart ? 1 : 0.35,
+                }}
+              >
+                <TMono style={{ color: colors.bg, fontSize: 12, letterSpacing: 0.5 }}>
+                  开始第一轮 · 独立发言
+                </TMono>
+              </Pressable>
             </View>
           )}
 
