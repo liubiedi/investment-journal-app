@@ -2,10 +2,19 @@
 
 ## 投资日志 · The Investor's Ledger
 
-**Version:** 1.6.1
-**Date:** 2026-05-16
+**Version:** 1.7
+**Date:** 2026-05-18
 **Format:** Android mobile application
 **Target:** AI coding agents (single-source-of-truth for autonomous implementation)
+
+**v1.7 changelog** (2026-05-18, Roundtable decision-tool turn):
+- **PEG ratio indicator on Holdings** (PR #22). Each holding row now shows a color-coded PEG chip (green < 1, amber 1–2, red ≥ 2) fetched from Yahoo Finance's `defaultKeyStatistics` module in parallel with the live-price refresh. Negative/zero PEG (declining-earnings stocks) is suppressed so misleading green never shows. The lightweight `fetchPEGRatios()` does up to 3 retries with exponential backoff + jitter on 429/5xx since Yahoo throttles bursty quote-summary calls.
+- **Roundtable mentor pool 6 → 9, session hard-capped at 4** (PR #22). Three new personas added — Taleb (tail-risk / antifragility / convex options bets), Bogle (passive ETF / cost-matters hypothesis), Cathie Wood (disruptive innovation / Wright's Law) — bringing the named-master pool to 9. Each session must select **exactly 4 mentors** (no more, no less). Default selection is the first 4 of `ROUNDTABLE_MASTERS` (`lynch, buffett, marks, taleb`) for cross-philosophy balance (growth · value · cycle · tail-risk). Trying to add a 5th surfaces a soft-block via the new `useTransientMessage` hook; non-selected chips dim at the cap. Smaller token budget per stage and sharper divergence vs the old 6-master debates.
+- **`useTransientMessage` hook** (PR #22). Extracted to `src/utils.js` to centralise the "show a message/flag, auto-clear after N ms" pattern that had been duplicated across 4 screens with inconsistent timeouts. Ref-based cancellation handles rapid re-trigger and unmount cleanup (fixed latent setState-after-unmount bugs in `Mentor.js` MessageBubble and `Settings.js`).
+- **Decision synthesis replaces meeting minutes** (PR #25). The Roundtable's end-of-session output is no longer a free-prose markdown recap. It is now a structured `synthesis` object — `{ headlineVerdict, voteTally, axisOfDisagreement, consensusPoints, triggerConditions, decisiveCrux, suggestedNextAction, narrative }` — rendered by a new `SynthesisDashboard` with a verdict badge, IF/THEN trigger-conditions table, and accent-bordered next-action callout. Prompt enforces decision usefulness via HARD RULES (trigger conditions must be observable market signals, suggested action is one concrete sentence, vote tally must sum to committee size). String-typed vote counts emitted by DeepSeek are coerced to numbers via `Number()` with rounding so the rendered total never concatenates as `"211"`.
+- **Backward-compatible legacy renderer**. Sessions saved before v1.7 stored `session.minutes` as markdown; those still render via a text-view fallback in the same modal. History list distinguishes `有综合` (new) from `有纪要` (legacy).
+- **Reusable modal scaffold** (PR #26). Extracted `<ModalShell>` in `src/components.js`; collapsed 5 full-screen modals (3 in Roundtable, plus Home's `StrategyReportModal`, Mentor's `FullMessageModal`, and `FullFeedbackModal`) into single-block invocations. Internal refactor, no behaviour change. Net -255 / +238 lines.
+- **App icon** refreshed.
 
 **v1.6.1 changelog** (2026-05-16, defensive hardening pass):
 - Fixed `listResearchVersions` returning raw SQLite rows — JSON columns now parsed via `rowToResearchVersion` (sources was leaking as a stringified JSON into render, crashing the version-history selector).
@@ -19,7 +28,7 @@
 
 ## 1. Product Summary
 
-A personal, offline-first investment journaling Android app that combines structured trade logging with an AI mentor system. Users record their investment philosophy, rules, trades, thoughts, and holdings; the app provides on-demand commentary from a personalized AI mentor or from AI personas of famous investors (Peter Lynch, Buffett, Munger, Dalio, Marks, Graham).
+A personal, offline-first investment journaling Android app that combines structured trade logging with an AI mentor system. Users record their investment philosophy, rules, trades, thoughts, and holdings; the app provides on-demand commentary from a personalized AI mentor or from AI personas of famous investors (Peter Lynch, Buffett, Munger, Dalio, Marks, Graham, Taleb, Bogle, Cathie Wood).
 
 **Key differentiators:**
 1. **Template-driven structure** — enforces philosophy → rules → weekly notes → monthly reviews → trade log, rather than freeform journaling.
@@ -28,7 +37,7 @@ A personal, offline-first investment journaling Android app that combines struct
 4. **Voice-first input** — every text field supports speech-to-text.
 5. **Local-only data** — SQLite on device, never cloud-synced. User owns their data.
 6. **Token-frugal AI** — feedback is on-demand (never auto-triggered), prompt caching reduces cost ~90% for chat.
-7. **华山论道 roundtable** — launch a multi-master AI investment committee discussion on any topic or holding; masters debate in structured rounds with meeting minutes auto-generated at the end.
+7. **华山论道 roundtable** — launch a multi-master AI investment committee discussion on any topic or holding; masters debate in structured rounds and the session closes with a **structured decision synthesis** (headline verdict, vote tally, axis of disagreement, decisive crux, IF/THEN trigger conditions, suggested next action) rendered as a dashboard — not a free-prose recap.
 8. **Research module (个股研究)** — versioned, source-backed decision memos for stocks being watched or held. AI generates conditional status (Buy Setup / Watch / Reduce Risk / Avoid) with bull/base/bear valuation, position sizing, rules conflict check, and full data provenance. Never imperative language. Every regeneration is a new immutable version. Integrated into the four-tier memory system so mentors always know the current research conclusion when a stock is discussed.
 
 ---
@@ -172,7 +181,9 @@ CREATE TABLE roundtable_sessions (
   id TEXT PRIMARY KEY,             -- session_<timestamp>_<random>
   topic TEXT NOT NULL,             -- the discussion topic/question
   masters TEXT NOT NULL,           -- JSON string[] of master IDs in this session
-  data TEXT NOT NULL,              -- JSON: { rounds: [{masterId, text, verdict}[]], minutes: string }
+  data TEXT NOT NULL,              -- JSON: { rounds: [{masterId, text, verdict}[]], synthesis: SynthesisObject | null, minutes?: string }
+                                   -- `synthesis` is the v1.7+ structured decision output (see §5.7).
+                                   -- `minutes` is the legacy markdown recap (v1.6 and earlier) — still rendered by the legacy renderer when no synthesis exists.
   created_at INTEGER NOT NULL
 );
 
@@ -379,12 +390,13 @@ Sub-tab switcher: two full-width buttons at the top; active tab has ink backgrou
 
 **Features:**
 - Masthead "当前持仓" + "What I own, at what cost, at what price."
-- **Market data bar** (when holdings exist): shows freshness ("更新于 X 分钟前" or "尚未获取实时价格"), with "刷新" button → calls `fetchLivePrices(uniqueSymbols)` → persists via `db.savePrices(map)`.
+- **Market data bar** (when holdings exist): shows freshness ("更新于 X 分钟前" or "尚未获取实时价格"), with "刷新" button → calls `fetchLivePrices(uniqueSymbols)` AND `fetchPEGRatios(uniqueSymbols)` in parallel → persists prices via `db.savePrices(map)`; PEG ratios are held in component state (not persisted).
 - **Totals block** (grouped by currency): for each currency, show cost / market value / P&L % in colored serif.
 - "新增持仓" button reveals HoldingForm.
 - **Holding row**:
   - Top row: symbol (serif bold) + display name (small serif muted) on left; current price + today's % change on right (colored green/red).
   - Bottom row (dashed separator): 市值 + P&L amount & percent (colored).
+  - **PEG chip** (v1.7+): when a forward-PEG ratio is available, a small color-coded chip displays `PEG X.XX` — green (< 1, growth at a discount), amber (1–2, fair), red (≥ 2, expensive vs growth). Hidden for ETFs, crypto, and stocks with no forward earnings. Negative/zero PEG (declining-earnings stocks) is also hidden so misleading green never shows. PEG is fetched from Yahoo Finance's `defaultKeyStatistics` module; the lightweight fetcher does up to 3 retries with exponential backoff + jitter on 429/5xx since Yahoo throttles bursty quote-summary calls.
   - Footer: mono "as of" timestamp + resolved ticker if different.
   - Tap opens HoldingForm in edit mode (with delete option).
 
@@ -434,12 +446,12 @@ Sub-tab switcher: two full-width buttons at the top; active tab has ink backgrou
 
 **Features:**
 - **Topic display**: shows the discussion topic at the top (e.g., a holding's full context or a user-typed question).
-- **Master selector**: multi-select chips (up to 6 masters). At least 2 required to start.
+- **Master selector**: multi-select chips drawn from `ROUNDTABLE_MASTERS` (the 9-mentor pool defined in `src/constants.js`). Each session is **hard-capped at exactly 4 active mentors** (`ROUNDTABLE_MAX_MENTORS`) — Start button is disabled unless `selectedMasters.length === 4`. Default selection on a fresh session is the first 4 (`[lynch, buffett, marks, taleb]`), chosen for cross-philosophy balance (growth · value · cycle · tail-risk). Trying to add a 5th surfaces a soft-block transient message (via `useTransientMessage`); non-selected chips dim at the cap.
 - **Round structure**: each round, every selected master gives a response (120-180 words, 2-3 paragraphs). Masters are shown as cards, one per master.
 - **VERDICT line**: each response includes a `VERDICT: BUY/HOLD/SELL/WATCH` line (stripped from display, used for UI tally). A verdict bar at the top tallies all masters' current stances.
 - **Round navigation**: "下一轮" button advances to next round (min 2, max 4 rounds). Each subsequent round sees all previous responses in context.
 - **Per-master retry**: if a master's response fails to load, a retry button appears on that card.
-- **Meeting minutes** (会议纪要): button generates a structured summary of the full discussion via DeepSeek (150-250 words). Cached for the session.
+- **Decision synthesis** (决策综合, v1.7+): the "终止辩论，生成综合" button generates a structured synthesis of the full discussion via DeepSeek and renders it in `<SynthesisDashboard>`. Cached on the session. Replaces the v1.6-era markdown meeting-minutes flow; legacy sessions still display their stored markdown via a fallback renderer in the same modal. Header buttons: **查看综合** (view current), **历史综合** (browse past).
 - **Language consistency**: all master responses are in the same language as the discussion topic (detected via `/[一-鿿]/` regex).
 
 **Prompt discipline:**
@@ -447,7 +459,59 @@ Sub-tab switcher: two full-width buttons at the top; active tab has ink backgrou
 - Round 2+: each master sees all Round 1 responses (as attributed quotes) plus prior rounds. Stays on topic.
 - Word count enforced via prompt instruction (not `max_tokens` ceiling). `max_tokens: 1200` is the output ceiling, never a length target.
 
-**Data:** sessions persisted to `roundtable_sessions` table; full round data (responses + verdicts + minutes) stored as JSON in `data` column.
+#### 5.7.1 Decision Synthesis (`runSynthesis`, v1.7+)
+
+**Goal:** turn a multi-round committee debate into an *actionable decision*, not a recap.
+
+**API:** `runSynthesis(session, profile) → SynthesisObject` (`src/api.js`).
+
+**Prompt shape:** a single LLM call (max_tokens 2000). The model returns a fenced ```json``` block followed by a 120–150 word markdown narrative. JSON extraction reuses the existing `parseLooseJson` helper (fence + curly-quote tolerance, unfenced-JSON fallback). All array fields are normalised through `Array.isArray(x) ? x : []` per the CLAUDE.md "DB row → model boundary" invariant; vote-tally fields are coerced to `Number()` with rounding and a non-negative finite guard so string-typed counts (`"2"`) never produce `"211"` totals via string concatenation.
+
+**SynthesisObject schema:**
+```ts
+{
+  version: 1,
+  generatedAt: number,                          // ms epoch
+  headlineVerdict: "BULL" | "BEAR" | "WAIT",
+  voteTally: { BULL: number, BEAR: number, NEUTRAL: number },   // sums to committee size
+  axisOfDisagreement: string,                   // one sentence — the single point most divisive
+  consensusPoints: string[],                    // 2-4 items, ≤20 words each
+  triggerConditions: { if: string, then: string }[],  // observable market signals → recommended action
+  decisiveCrux: string,                         // one sentence — the fact that would settle the debate
+  suggestedNextAction: string,                  // one concrete actionable sentence
+  narrative: string,                            // 120-150 word markdown summary
+}
+```
+
+**Prompt HARD RULES** (enforced in system prompt):
+- `voteTally` counts MUST sum to committee size.
+- Each `triggerCondition.if` MUST be observable from market data or news (price level, macro print, earnings beat, etc.) — NOT a vague feeling.
+- `suggestedNextAction` is ONE concrete sentence (e.g. *"维持现有头寸 5%，待 10Y 实际利率跌破 1.5% 后加仓至 8%"*).
+- `decisiveCrux` names a single resolvable fact (not a list, not a question chain).
+- No preamble or trailing commentary outside the JSON block + narrative.
+
+**Dashboard rendering (`<SynthesisDashboard synthesis>`, in `Roundtable.js`):**
+- Headline verdict badge with `VERDICT_COLOR[verdict]` border (BULL→good, BEAR→bad, WAIT→warn). `VERDICT_COLOR` is extended from the existing `BULL/BEAR/NEUTRAL` map with a `WAIT` entry; mentor-level NEUTRAL keeps its faint colour.
+- Vote tally row.
+- **Axis of disagreement** as `TSerifItalic` pull-quote with bracketed quotation marks.
+- **Decisive crux** call-out with `colors.cool` left border.
+- **Consensus points** as a bulleted list.
+- **Trigger conditions** as a two-column IF / THEN table (DOM-ready for future price/macro alert wiring).
+- **Suggested next action** as an accent-bordered call-out box.
+- **Narrative** at the bottom, separated by a soft divider.
+
+**Memory write:** `runSynthesis` preserves the v1.6 behaviour of writing a `stock_thesis` insight to `memoryManager` when the topic contains a ticker — now persists both a derived text summary and the structured synthesis object under `structured`.
+
+**Token budget:** synthesis input is at most `selectedMasters.length × roundCount × ~600-char snippets` + ~900 tokens of schema — comfortably inside the LLM context budget for any realistic committee size.
+
+**Backward compatibility:**
+- New sessions write `session.synthesis = SynthesisObject` and drop the legacy `session.minutes`.
+- Sessions created before v1.7 retain `session.minutes` as a markdown string and render via the legacy text view inside `<SynthesisModal>`.
+- `<SynthesisHistoryModal>` lists both formats; the meta line tags new sessions with their `headlineVerdict` and legacy sessions with `· 旧版纪要`.
+- `HistoryModal` (历史议题) meta now distinguishes `有综合` vs `有纪要`.
+- DB schema unchanged: both fields live in the existing `roundtable_sessions.data` JSON blob.
+
+**Data:** sessions persisted to `roundtable_sessions` table; full round data (responses + verdicts + synthesis + optional legacy minutes) stored as JSON in `data` column.
 
 ### 5.9 Research (tab: 研究, routes: `research` + `researchMemo`)
 
@@ -552,17 +616,22 @@ Accessible via the ⚙ gear icon in the 心法 (Home) masthead. Not shown in the
 
 ## 6. Investment Masters
 
-Seven selectable personas. Each has a hard-coded system prompt style (~200 words) that DeepSeek adopts. `MASTERS[0]` is always `"default"` = personal mentor. The other 6 are named masters.
+Ten selectable personas (as of v1.7). Each has a hard-coded system prompt style (~150–200 words) that DeepSeek adopts. `MASTERS[0]` is always `"default"` = personal mentor. The other 9 are named masters; `ROUNDTABLE_MASTERS` enumerates them in their default selection order (the first 4 are the out-of-box Roundtable picks: growth · value · cycle · tail-risk).
 
 | id | zh | Core stance |
 |---|---|---|
 | `default` | 你的导师 | Warm, knows user's history, pattern-spotter, challenges gently |
 | `lynch` | 彼得·林奇 | Invest in what you know, GARP, categorize stocks, pragmatic |
 | `buffett` | 巴菲特 | Wonderful companies fair prices, moats, 10-year holding mindset |
+| `marks` | 霍华德·马克斯 | Second-level thinking, cycle awareness, risk over return |
+| `taleb` | 纳西姆·塔勒布 | Tail risk, antifragility, convex options bets, barbell strategy, no false precision |
 | `munger` | 芒格 | Mental models, inversion, blunt, incentive-aware |
 | `dalio` | 达利欧 | Principles, cycles, diversification, stress-test beliefs |
-| `marks` | 霍华德·马克斯 | Second-level thinking, cycle awareness, risk over return |
 | `graham` | 格雷厄姆 | Margin of safety, investment vs speculation, conservative |
+| `bogle` | 约翰·博格 | Passive index ETF, cost-matters hypothesis, "buy the haystack", stay the course |
+| `wood` | 凯西·伍德 | Disruptive innovation, thematic active ETF, Wright's Law cost curves, 5-year time horizon |
+
+Each named master also has a meeting-role entry in `MASTER_MEETING_ROLES` (committee-specific instruction prepended to their style when they participate in a Roundtable session) — e.g. Lynch is the "Opportunity Scout", Munger the "Devil's Advocate", Taleb the "Tail-Risk Hunter", Bogle the "Passive Index Advocate", Wood the "Disruption Theorist".
 
 All master prompts end with: "Match the user's language exactly (Chinese/English/mixed). Do NOT start with 'As {name}...' — just speak naturally. Use the investor's actual record to make your advice specific, not generic."
 
@@ -759,6 +828,7 @@ cool:       "#3a5578"
 - `<OutlineButton>` — transparent with divider border
 - `<MasterChips active onSelect>` — horizontal scrollable persona selector
 - `<MasterPickerModal visible onClose onSelect subtitle>` — slide-up modal listing all masters; `subtitle` is optional. Used by Holdings, Weekly, Monthly to let user pick a master before launching the mentor chat flow.
+- `<ModalShell visible onClose kicker title children footer scrollable contentPadding edges>` (v1.7+) — shared full-screen modal scaffold: slide-up `Modal` + `SafeAreaView` + standard header (Kicker + TSerifBold + close-X) + optional `ScrollView` body + optional fixed footer. Used by `SynthesisModal`, `SynthesisHistoryModal`, `HistoryModal` (Roundtable), `StrategyReportModal` (Home), `FullMessageModal` (Mentor), and `FullFeedbackModal` (components). New modals should reuse it instead of re-implementing the scaffold. Defaults: `scrollable=true`, `contentPadding=20`, `edges` omitted (SafeAreaView's library default — all 4 edges). Pass `edges={["top","bottom"]}` for the Roundtable flavor.
 - `<FeedbackBlock feedback onRequestMaster pending defaultMaster onContinueInMentor>` — entry feedback with master switcher. `onContinueInMentor(masterId, text)` is optional; when provided, renders "带入问道继续讨论 ↗" button below any loaded feedback text. Uses internal `localCache` + `streamAccumRef` so multi-master switching never blanks already-loaded feedback.
 - `<VoiceMic currentText onChange size>` — microphone toggle button
 - `<FormHeader title onCancel>` — back + kicker row in forms
