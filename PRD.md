@@ -2,10 +2,16 @@
 
 ## 投资日志 · The Investor's Ledger
 
-**Version:** 1.6.1
-**Date:** 2026-05-16
+**Version:** 1.7
+**Date:** 2026-05-18
 **Format:** Android mobile application
 **Target:** AI coding agents (single-source-of-truth for autonomous implementation)
+
+**v1.7 changelog** (2026-05-18, Roundtable decision-tool turn):
+- **Decision synthesis replaces meeting minutes** (PR #25). The Roundtable's end-of-session output is no longer a free-prose markdown recap. It is now a structured `synthesis` object — `{ headlineVerdict, voteTally, axisOfDisagreement, consensusPoints, triggerConditions, decisiveCrux, suggestedNextAction, narrative }` — rendered by a new `SynthesisDashboard` with a verdict badge, IF/THEN trigger-conditions table, and accent-bordered next-action callout. Prompt enforces decision usefulness via HARD RULES (trigger conditions must be observable market signals, suggested action is one concrete sentence, vote tally must sum to committee size). String-typed vote counts emitted by DeepSeek are coerced to numbers via `Number()` with rounding so the rendered total never concatenates as `"211"`.
+- **Backward-compatible legacy renderer**. Sessions saved before v1.7 stored `session.minutes` as markdown; those still render via a text-view fallback in the same modal. History list distinguishes `有综合` (new) from `有纪要` (legacy).
+- **Reusable modal scaffold** (PR #26). Extracted `<ModalShell>` in `src/components.js`; collapsed 5 full-screen modals (3 in Roundtable, plus Home's `StrategyReportModal`, Mentor's `FullMessageModal`, and `FullFeedbackModal`) into single-block invocations. Internal refactor, no behaviour change. Net -255 / +238 lines.
+- **App icon** refreshed.
 
 **v1.6.1 changelog** (2026-05-16, defensive hardening pass):
 - Fixed `listResearchVersions` returning raw SQLite rows — JSON columns now parsed via `rowToResearchVersion` (sources was leaking as a stringified JSON into render, crashing the version-history selector).
@@ -28,7 +34,7 @@ A personal, offline-first investment journaling Android app that combines struct
 4. **Voice-first input** — every text field supports speech-to-text.
 5. **Local-only data** — SQLite on device, never cloud-synced. User owns their data.
 6. **Token-frugal AI** — feedback is on-demand (never auto-triggered), prompt caching reduces cost ~90% for chat.
-7. **华山论道 roundtable** — launch a multi-master AI investment committee discussion on any topic or holding; masters debate in structured rounds with meeting minutes auto-generated at the end.
+7. **华山论道 roundtable** — launch a multi-master AI investment committee discussion on any topic or holding; masters debate in structured rounds and the session closes with a **structured decision synthesis** (headline verdict, vote tally, axis of disagreement, decisive crux, IF/THEN trigger conditions, suggested next action) rendered as a dashboard — not a free-prose recap.
 8. **Research module (个股研究)** — versioned, source-backed decision memos for stocks being watched or held. AI generates conditional status (Buy Setup / Watch / Reduce Risk / Avoid) with bull/base/bear valuation, position sizing, rules conflict check, and full data provenance. Never imperative language. Every regeneration is a new immutable version. Integrated into the four-tier memory system so mentors always know the current research conclusion when a stock is discussed.
 
 ---
@@ -172,7 +178,9 @@ CREATE TABLE roundtable_sessions (
   id TEXT PRIMARY KEY,             -- session_<timestamp>_<random>
   topic TEXT NOT NULL,             -- the discussion topic/question
   masters TEXT NOT NULL,           -- JSON string[] of master IDs in this session
-  data TEXT NOT NULL,              -- JSON: { rounds: [{masterId, text, verdict}[]], minutes: string }
+  data TEXT NOT NULL,              -- JSON: { rounds: [{masterId, text, verdict}[]], synthesis: SynthesisObject | null, minutes?: string }
+                                   -- `synthesis` is the v1.7+ structured decision output (see §5.7).
+                                   -- `minutes` is the legacy markdown recap (v1.6 and earlier) — still rendered by the legacy renderer when no synthesis exists.
   created_at INTEGER NOT NULL
 );
 
@@ -439,7 +447,7 @@ Sub-tab switcher: two full-width buttons at the top; active tab has ink backgrou
 - **VERDICT line**: each response includes a `VERDICT: BUY/HOLD/SELL/WATCH` line (stripped from display, used for UI tally). A verdict bar at the top tallies all masters' current stances.
 - **Round navigation**: "下一轮" button advances to next round (min 2, max 4 rounds). Each subsequent round sees all previous responses in context.
 - **Per-master retry**: if a master's response fails to load, a retry button appears on that card.
-- **Meeting minutes** (会议纪要): button generates a structured summary of the full discussion via DeepSeek (150-250 words). Cached for the session.
+- **Decision synthesis** (决策综合, v1.7+): the "终止辩论，生成综合" button generates a structured synthesis of the full discussion via DeepSeek and renders it in `<SynthesisDashboard>`. Cached on the session. Replaces the v1.6-era markdown meeting-minutes flow; legacy sessions still display their stored markdown via a fallback renderer in the same modal. Header buttons: **查看综合** (view current), **历史综合** (browse past).
 - **Language consistency**: all master responses are in the same language as the discussion topic (detected via `/[一-鿿]/` regex).
 
 **Prompt discipline:**
@@ -447,7 +455,59 @@ Sub-tab switcher: two full-width buttons at the top; active tab has ink backgrou
 - Round 2+: each master sees all Round 1 responses (as attributed quotes) plus prior rounds. Stays on topic.
 - Word count enforced via prompt instruction (not `max_tokens` ceiling). `max_tokens: 1200` is the output ceiling, never a length target.
 
-**Data:** sessions persisted to `roundtable_sessions` table; full round data (responses + verdicts + minutes) stored as JSON in `data` column.
+#### 5.7.1 Decision Synthesis (`runSynthesis`, v1.7+)
+
+**Goal:** turn a multi-round committee debate into an *actionable decision*, not a recap.
+
+**API:** `runSynthesis(session, profile) → SynthesisObject` (`src/api.js`).
+
+**Prompt shape:** a single LLM call (max_tokens 2000). The model returns a fenced ```json``` block followed by a 120–150 word markdown narrative. JSON extraction reuses the existing `parseLooseJson` helper (fence + curly-quote tolerance, unfenced-JSON fallback). All array fields are normalised through `Array.isArray(x) ? x : []` per the CLAUDE.md "DB row → model boundary" invariant; vote-tally fields are coerced to `Number()` with rounding and a non-negative finite guard so string-typed counts (`"2"`) never produce `"211"` totals via string concatenation.
+
+**SynthesisObject schema:**
+```ts
+{
+  version: 1,
+  generatedAt: number,                          // ms epoch
+  headlineVerdict: "BULL" | "BEAR" | "WAIT",
+  voteTally: { BULL: number, BEAR: number, NEUTRAL: number },   // sums to committee size
+  axisOfDisagreement: string,                   // one sentence — the single point most divisive
+  consensusPoints: string[],                    // 2-4 items, ≤20 words each
+  triggerConditions: { if: string, then: string }[],  // observable market signals → recommended action
+  decisiveCrux: string,                         // one sentence — the fact that would settle the debate
+  suggestedNextAction: string,                  // one concrete actionable sentence
+  narrative: string,                            // 120-150 word markdown summary
+}
+```
+
+**Prompt HARD RULES** (enforced in system prompt):
+- `voteTally` counts MUST sum to committee size.
+- Each `triggerCondition.if` MUST be observable from market data or news (price level, macro print, earnings beat, etc.) — NOT a vague feeling.
+- `suggestedNextAction` is ONE concrete sentence (e.g. *"维持现有头寸 5%，待 10Y 实际利率跌破 1.5% 后加仓至 8%"*).
+- `decisiveCrux` names a single resolvable fact (not a list, not a question chain).
+- No preamble or trailing commentary outside the JSON block + narrative.
+
+**Dashboard rendering (`<SynthesisDashboard synthesis>`, in `Roundtable.js`):**
+- Headline verdict badge with `VERDICT_COLOR[verdict]` border (BULL→good, BEAR→bad, WAIT→warn). `VERDICT_COLOR` is extended from the existing `BULL/BEAR/NEUTRAL` map with a `WAIT` entry; mentor-level NEUTRAL keeps its faint colour.
+- Vote tally row.
+- **Axis of disagreement** as `TSerifItalic` pull-quote with bracketed quotation marks.
+- **Decisive crux** call-out with `colors.cool` left border.
+- **Consensus points** as a bulleted list.
+- **Trigger conditions** as a two-column IF / THEN table (DOM-ready for future price/macro alert wiring).
+- **Suggested next action** as an accent-bordered call-out box.
+- **Narrative** at the bottom, separated by a soft divider.
+
+**Memory write:** `runSynthesis` preserves the v1.6 behaviour of writing a `stock_thesis` insight to `memoryManager` when the topic contains a ticker — now persists both a derived text summary and the structured synthesis object under `structured`.
+
+**Token budget:** synthesis input is at most `selectedMasters.length × roundCount × ~600-char snippets` + ~900 tokens of schema — comfortably inside the LLM context budget for any realistic committee size.
+
+**Backward compatibility:**
+- New sessions write `session.synthesis = SynthesisObject` and drop the legacy `session.minutes`.
+- Sessions created before v1.7 retain `session.minutes` as a markdown string and render via the legacy text view inside `<SynthesisModal>`.
+- `<SynthesisHistoryModal>` lists both formats; the meta line tags new sessions with their `headlineVerdict` and legacy sessions with `· 旧版纪要`.
+- `HistoryModal` (历史议题) meta now distinguishes `有综合` vs `有纪要`.
+- DB schema unchanged: both fields live in the existing `roundtable_sessions.data` JSON blob.
+
+**Data:** sessions persisted to `roundtable_sessions` table; full round data (responses + verdicts + synthesis + optional legacy minutes) stored as JSON in `data` column.
 
 ### 5.9 Research (tab: 研究, routes: `research` + `researchMemo`)
 
@@ -759,6 +819,7 @@ cool:       "#3a5578"
 - `<OutlineButton>` — transparent with divider border
 - `<MasterChips active onSelect>` — horizontal scrollable persona selector
 - `<MasterPickerModal visible onClose onSelect subtitle>` — slide-up modal listing all masters; `subtitle` is optional. Used by Holdings, Weekly, Monthly to let user pick a master before launching the mentor chat flow.
+- `<ModalShell visible onClose kicker title children footer scrollable contentPadding edges>` (v1.7+) — shared full-screen modal scaffold: slide-up `Modal` + `SafeAreaView` + standard header (Kicker + TSerifBold + close-X) + optional `ScrollView` body + optional fixed footer. Used by `SynthesisModal`, `SynthesisHistoryModal`, `HistoryModal` (Roundtable), `StrategyReportModal` (Home), `FullMessageModal` (Mentor), and `FullFeedbackModal` (components). New modals should reuse it instead of re-implementing the scaffold. Defaults: `scrollable=true`, `contentPadding=20`, `edges` omitted (SafeAreaView's library default — all 4 edges). Pass `edges={["top","bottom"]}` for the Roundtable flavor.
 - `<FeedbackBlock feedback onRequestMaster pending defaultMaster onContinueInMentor>` — entry feedback with master switcher. `onContinueInMentor(masterId, text)` is optional; when provided, renders "带入问道继续讨论 ↗" button below any loaded feedback text. Uses internal `localCache` + `streamAccumRef` so multi-master switching never blanks already-loaded feedback.
 - `<VoiceMic currentText onChange size>` — microphone toggle button
 - `<FormHeader title onCancel>` — back + kicker row in forms
