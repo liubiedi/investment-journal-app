@@ -738,7 +738,7 @@ Produce the structured synthesis and narrative now.`;
   const raw = await callLLM({
     system,
     messages: [{ role: "user", content: user }],
-    max_tokens: 2000,
+    max_tokens: 8000,
   });
   if (!raw) throw new Error("收到空回复，请重试");
 
