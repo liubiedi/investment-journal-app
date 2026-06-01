@@ -166,6 +166,48 @@ async function initSchema(db) {
       data TEXT NOT NULL,
       fetched_at INTEGER NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS market_signals_cache (
+      ticker TEXT PRIMARY KEY,
+      data TEXT NOT NULL,
+      fetched_at INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS signal_events (
+      id TEXT PRIMARY KEY,
+      ticker TEXT NOT NULL,
+      direction TEXT NOT NULL,
+      trigger_price REAL,
+      earnings_surprise REAL,
+      fired_price REAL NOT NULL,
+      memo_id TEXT,
+      fired_at INTEGER NOT NULL,
+      acknowledged INTEGER DEFAULT 0,
+      conditions_detail TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS signal_outcomes (
+      id TEXT PRIMARY KEY,
+      signal_event_id TEXT NOT NULL,
+      ticker TEXT NOT NULL,
+      direction TEXT NOT NULL,
+      action_taken TEXT,
+      skip_reason TEXT,
+      entry_price REAL,
+      entry_date TEXT,
+      trade_id TEXT,
+      exit_price REAL,
+      realized_pct REAL,
+      realized_date TEXT,
+      forward_1m_pct REAL,
+      forward_3m_pct REAL,
+      forward_6m_pct REAL,
+      max_drawdown_3m REAL,
+      forward_computed_at INTEGER,
+      ai_debrief TEXT,
+      debrief_notified INTEGER DEFAULT 0,
+      reviewed INTEGER DEFAULT 0
+    );
   `);
   // FTS5 full-text search + semantic memory tables (separate exec batch)
   await db.execAsync(`
@@ -272,6 +314,20 @@ async function initSchema(db) {
   `);
 
   // Migrations for existing databases (idempotent — fails silently if column exists).
+  // Signal monitoring columns on research_memos
+  try { await db.runAsync("ALTER TABLE research_memos ADD COLUMN buy_trigger_price REAL"); } catch {}
+  try { await db.runAsync("ALTER TABLE research_memos ADD COLUMN buy_trigger_anchors TEXT"); } catch {}
+  try { await db.runAsync("ALTER TABLE research_memos ADD COLUMN buy_trigger_confidence TEXT"); } catch {}
+  try { await db.runAsync("ALTER TABLE research_memos ADD COLUMN buy_trigger_confirmed INTEGER DEFAULT 0"); } catch {}
+  try { await db.runAsync("ALTER TABLE research_memos ADD COLUMN buy_trigger_price_override REAL"); } catch {}
+  try { await db.runAsync("ALTER TABLE research_memos ADD COLUMN min_earnings_surprise_pct REAL"); } catch {}
+  try { await db.runAsync("ALTER TABLE research_memos ADD COLUMN last_checked_earnings_period TEXT"); } catch {}
+  try { await db.runAsync("ALTER TABLE research_memos ADD COLUMN sell_trim_price REAL"); } catch {}
+  try { await db.runAsync("ALTER TABLE research_memos ADD COLUMN sell_trigger_anchors TEXT"); } catch {}
+  try { await db.runAsync("ALTER TABLE research_memos ADD COLUMN sell_trigger_confidence TEXT"); } catch {}
+  try { await db.runAsync("ALTER TABLE research_memos ADD COLUMN sell_trim_confirmed INTEGER DEFAULT 0"); } catch {}
+  try { await db.runAsync("ALTER TABLE research_memos ADD COLUMN sell_trim_price_override REAL"); } catch {}
+  try { await db.runAsync("ALTER TABLE research_memos ADD COLUMN trigger_backtest TEXT"); } catch {}
   try { await db.runAsync("ALTER TABLE holdings ADD COLUMN buy_reason TEXT"); } catch {}
   try { await db.runAsync("ALTER TABLE holdings ADD COLUMN buy_date TEXT"); } catch {}
   try { await db.runAsync("ALTER TABLE chat_history ADD COLUMN master_id TEXT"); } catch {}
@@ -849,20 +905,23 @@ export async function reinforceEntry(entryId) {
 
 export async function listResearchMemos() {
   const db = await getDb();
-  return await db.getAllAsync("SELECT * FROM research_memos ORDER BY created_at DESC");
+  const rows = await db.getAllAsync("SELECT * FROM research_memos ORDER BY created_at DESC");
+  return rows.map(rowToResearchMemo);
 }
 
 export async function getResearchMemo(memoId) {
   const db = await getDb();
-  return await db.getFirstAsync("SELECT * FROM research_memos WHERE id = ?", [memoId]);
+  const row = await db.getFirstAsync("SELECT * FROM research_memos WHERE id = ?", [memoId]);
+  return row ? rowToResearchMemo(row) : null;
 }
 
 export async function getResearchMemoByTicker(ticker) {
   const db = await getDb();
-  return await db.getFirstAsync(
+  const row = await db.getFirstAsync(
     "SELECT * FROM research_memos WHERE UPPER(ticker) = UPPER(?) ORDER BY created_at DESC",
     [ticker]
   );
+  return row ? rowToResearchMemo(row) : null;
 }
 
 export async function upsertResearchMemo(memo) {
@@ -1101,6 +1160,294 @@ export async function saveResearchMemoWithVersion(memo, version, ruleChecks) {
       }
     }
   });
+}
+
+// ──────────────────────────────────────────────────────────────
+// Market signals cache
+// ──────────────────────────────────────────────────────────────
+
+const SIGNALS_CACHE_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours
+
+export async function getCachedMarketSignals(ticker) {
+  const db = await getDb();
+  const row = await db.getFirstAsync(
+    "SELECT data, fetched_at FROM market_signals_cache WHERE ticker = UPPER(?)",
+    [ticker]
+  );
+  if (!row) return null;
+  if (Date.now() - row.fetched_at > SIGNALS_CACHE_TTL_MS) return null;
+  return safeJson(row.data, null);
+}
+
+export async function saveMarketSignalsCache(ticker, data) {
+  const db = await getDb();
+  await db.runAsync(
+    "INSERT OR REPLACE INTO market_signals_cache (ticker, data, fetched_at) VALUES (UPPER(?),?,?)",
+    [ticker, JSON.stringify(data), Date.now()]
+  );
+}
+
+// ──────────────────────────────────────────────────────────────
+// Signal events
+// ──────────────────────────────────────────────────────────────
+
+export async function saveSignalEvent(event) {
+  const db = await getDb();
+  await db.runAsync(
+    `INSERT INTO signal_events
+     (id, ticker, direction, trigger_price, earnings_surprise, fired_price, memo_id, fired_at, acknowledged, conditions_detail)
+     VALUES (?,?,?,?,?,?,?,?,?,?)`,
+    [
+      event.id, event.ticker.toUpperCase(), event.direction,
+      event.triggerPrice ?? null, event.earningsSurprise ?? null,
+      event.firedPrice, event.memoId ?? null,
+      event.firedAt ?? Date.now(), 0,
+      event.conditionsDetail ? JSON.stringify(event.conditionsDetail) : null,
+    ]
+  );
+}
+
+export async function getRecentSignalEvent(ticker, direction, withinMs) {
+  const db = await getDb();
+  const since = Date.now() - withinMs;
+  return await db.getFirstAsync(
+    "SELECT * FROM signal_events WHERE ticker = UPPER(?) AND direction = ? AND fired_at > ? ORDER BY fired_at DESC",
+    [ticker, direction, since]
+  );
+}
+
+export async function getUnacknowledgedSignals() {
+  const db = await getDb();
+  return await db.getAllAsync(
+    "SELECT * FROM signal_events WHERE acknowledged = 0 ORDER BY fired_at DESC"
+  );
+}
+
+export async function acknowledgeSignal(id) {
+  const db = await getDb();
+  await db.runAsync("UPDATE signal_events SET acknowledged = 1 WHERE id = ?", [id]);
+}
+
+export async function getSignalEventsForMemo(memoId) {
+  const db = await getDb();
+  return await db.getAllAsync(
+    "SELECT * FROM signal_events WHERE memo_id = ? ORDER BY fired_at DESC",
+    [memoId]
+  );
+}
+
+// ──────────────────────────────────────────────────────────────
+// Signal outcomes
+// ──────────────────────────────────────────────────────────────
+
+export async function saveSignalOutcome(outcome) {
+  const db = await getDb();
+  await db.runAsync(
+    `INSERT INTO signal_outcomes
+     (id, signal_event_id, ticker, direction, action_taken, skip_reason,
+      entry_price, entry_date, trade_id)
+     VALUES (?,?,?,?,?,?,?,?,?)`,
+    [
+      outcome.id, outcome.signalEventId, outcome.ticker.toUpperCase(),
+      outcome.direction, outcome.actionTaken ?? null, outcome.skipReason ?? null,
+      outcome.entryPrice ?? null, outcome.entryDate ?? null, outcome.tradeId ?? null,
+    ]
+  );
+}
+
+export async function updateSignalOutcome(id, fields) {
+  const db = await getDb();
+  const map = {
+    actionTaken: "action_taken", skipReason: "skip_reason",
+    entryPrice: "entry_price", entryDate: "entry_date",
+    tradeId: "trade_id", exitPrice: "exit_price",
+    realizedPct: "realized_pct", realizedDate: "realized_date",
+    forward1mPct: "forward_1m_pct", forward3mPct: "forward_3m_pct",
+    forward6mPct: "forward_6m_pct", maxDrawdown3m: "max_drawdown_3m",
+    forwardComputedAt: "forward_computed_at", aiDebrief: "ai_debrief",
+    debriefNotified: "debrief_notified", reviewed: "reviewed",
+  };
+  const cols = [], vals = [];
+  for (const [k, v] of Object.entries(fields)) {
+    if (!map[k]) continue;
+    cols.push(`${map[k]} = ?`);
+    vals.push(v ?? null);
+  }
+  if (cols.length === 0) return;
+  vals.push(id);
+  await db.runAsync(`UPDATE signal_outcomes SET ${cols.join(", ")} WHERE id = ?`, vals);
+}
+
+export async function getSignalOutcome(signalEventId) {
+  const db = await getDb();
+  return await db.getFirstAsync(
+    "SELECT * FROM signal_outcomes WHERE signal_event_id = ?",
+    [signalEventId]
+  );
+}
+
+export async function getSignalOutcomesForMemo(memoId) {
+  const db = await getDb();
+  return await db.getAllAsync(
+    `SELECT so.*, se.fired_at, se.fired_price, se.trigger_price as event_trigger_price
+     FROM signal_outcomes so
+     JOIN signal_events se ON so.signal_event_id = se.id
+     WHERE se.memo_id = ?
+     ORDER BY se.fired_at DESC`,
+    [memoId]
+  );
+}
+
+export async function getAllSignalOutcomes() {
+  const db = await getDb();
+  return await db.getAllAsync(
+    `SELECT so.*, se.fired_at, se.fired_price, se.trigger_price as event_trigger_price,
+            se.ticker as event_ticker, se.direction as event_direction, se.memo_id
+     FROM signal_outcomes so
+     JOIN signal_events se ON so.signal_event_id = se.id
+     ORDER BY se.fired_at DESC`
+  );
+}
+
+export async function getPendingForwardReturns() {
+  const db = await getDb();
+  return await db.getAllAsync(
+    `SELECT so.*, se.ticker as event_ticker
+     FROM signal_outcomes so
+     JOIN signal_events se ON so.signal_event_id = se.id
+     WHERE so.action_taken = 'acted'
+       AND so.entry_date IS NOT NULL
+       AND (so.forward_6m_pct IS NULL OR so.forward_3m_pct IS NULL OR so.forward_1m_pct IS NULL)`
+  );
+}
+
+export async function getAnalyticsStats() {
+  const db = await getDb();
+  const row = await db.getFirstAsync(
+    `SELECT
+       count(distinct se.id) as total,
+       count(CASE WHEN so.action_taken = 'acted' THEN 1 END) as acted,
+       count(CASE WHEN so.action_taken = 'skipped' THEN 1 END) as skipped,
+       count(CASE WHEN so.action_taken = 'acted' AND so.forward_3m_pct > 0 THEN 1 END) as wins,
+       avg(CASE WHEN so.action_taken = 'acted' AND so.forward_3m_pct IS NOT NULL THEN so.forward_3m_pct END) as avg_return
+     FROM signal_events se
+     LEFT JOIN signal_outcomes so ON so.signal_event_id = se.id`
+  );
+  const actedCount = row?.acted ?? 0;
+  const winsCount = row?.wins ?? 0;
+  return {
+    total: row?.total ?? 0,
+    acted: actedCount,
+    skipped: row?.skipped ?? 0,
+    wins: winsCount,
+    avgReturn3m: row?.avg_return ?? null,
+    winRate: actedCount > 0 ? (winsCount / actedCount) * 100 : null,
+  };
+}
+
+// ──────────────────────────────────────────────────────────────
+// Research memo trigger fields
+// ──────────────────────────────────────────────────────────────
+
+export async function updateResearchMemoTriggers(memoId, {
+  buyTriggerPrice, buyTriggerAnchors, buyTriggerConfidence,
+  minEarningsSurprisePct, sellTrimPrice,
+  sellTriggerAnchors, sellTriggerConfidence,
+}) {
+  const db = await getDb();
+  await db.runAsync(
+    `UPDATE research_memos SET
+       buy_trigger_price = ?, buy_trigger_anchors = ?, buy_trigger_confidence = ?,
+       min_earnings_surprise_pct = ?, sell_trim_price = ?,
+       sell_trigger_anchors = ?, sell_trigger_confidence = ?
+     WHERE id = ?`,
+    [
+      buyTriggerPrice ?? null,
+      buyTriggerAnchors?.length ? JSON.stringify(buyTriggerAnchors) : null,
+      buyTriggerConfidence ?? null,
+      minEarningsSurprisePct ?? null,
+      sellTrimPrice ?? null,
+      sellTriggerAnchors?.length ? JSON.stringify(sellTriggerAnchors) : null,
+      sellTriggerConfidence ?? null,
+      memoId,
+    ]
+  );
+}
+
+export async function updateTriggerBacktest(memoId, backtestData) {
+  const db = await getDb();
+  await db.runAsync(
+    "UPDATE research_memos SET trigger_backtest = ? WHERE id = ?",
+    [backtestData ? JSON.stringify(backtestData) : null, memoId]
+  );
+}
+
+export async function confirmTrigger(memoId, direction, priceOverride = null) {
+  const db = await getDb();
+  if (direction === "buy") {
+    await db.runAsync(
+      "UPDATE research_memos SET buy_trigger_confirmed = 1, buy_trigger_price_override = ? WHERE id = ?",
+      [priceOverride ?? null, memoId]
+    );
+  } else {
+    await db.runAsync(
+      "UPDATE research_memos SET sell_trim_confirmed = 1, sell_trim_price_override = ? WHERE id = ?",
+      [priceOverride ?? null, memoId]
+    );
+  }
+}
+
+export async function stopTrigger(memoId, direction) {
+  const db = await getDb();
+  if (direction === "buy") {
+    await db.runAsync(
+      "UPDATE research_memos SET buy_trigger_confirmed = 0, buy_trigger_price_override = NULL WHERE id = ?",
+      [memoId]
+    );
+  } else {
+    await db.runAsync(
+      "UPDATE research_memos SET sell_trim_confirmed = 0, sell_trim_price_override = NULL WHERE id = ?",
+      [memoId]
+    );
+  }
+}
+
+export async function getMonitoredMemos() {
+  const db = await getDb();
+  const rows = await db.getAllAsync(
+    `SELECT * FROM research_memos
+     WHERE (buy_trigger_confirmed = 1 AND buy_trigger_price IS NOT NULL)
+        OR (sell_trim_confirmed = 1 AND sell_trim_price IS NOT NULL)
+     ORDER BY created_at DESC`
+  );
+  return rows.map(rowToResearchMemo);
+}
+
+// ──────────────────────────────────────────────────────────────
+// rowToResearchMemo transformer (with new trigger fields)
+// ──────────────────────────────────────────────────────────────
+
+export function rowToResearchMemo(r) {
+  return {
+    id: r.id, ticker: r.ticker, exchange: r.exchange || null,
+    companyName: r.company_name || null, currentVersionId: r.current_version_id || null,
+    status: r.status || null, confidence: r.confidence || null,
+    createdAt: r.created_at || null, lastReviewedAt: r.last_reviewed_at || null,
+    nextReviewDate: r.next_review_date || null, holdingId: r.holding_id || null,
+    buyTriggerPrice: r.buy_trigger_price ?? null,
+    buyTriggerAnchors: safeJson(r.buy_trigger_anchors, []),
+    buyTriggerConfidence: r.buy_trigger_confidence ?? null,
+    buyTriggerConfirmed: r.buy_trigger_confirmed ?? 0,
+    buyTriggerPriceOverride: r.buy_trigger_price_override ?? null,
+    minEarningsSurprisePct: r.min_earnings_surprise_pct ?? null,
+    lastCheckedEarningsPeriod: r.last_checked_earnings_period ?? null,
+    sellTrimPrice: r.sell_trim_price ?? null,
+    sellTriggerAnchors: safeJson(r.sell_trigger_anchors, []),
+    sellTriggerConfidence: r.sell_trigger_confidence ?? null,
+    sellTrimConfirmed: r.sell_trim_confirmed ?? 0,
+    sellTrimPriceOverride: r.sell_trim_price_override ?? null,
+    triggerBacktest: safeJson(r.trigger_backtest, null),
+  };
 }
 
 // Import a full backup snapshot — runs inside a transaction to avoid partial state

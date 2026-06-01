@@ -223,7 +223,8 @@ function buildMasterPersona(masterId) {
 - Ask probing questions when it helps them think.
 - Keep responses focused — usually 2-4 short paragraphs.
 - Never start with "As your mentor". Just speak naturally.
-- Don't be sycophantic. Be the mentor they need.`;
+- Don't be sycophantic. Be the mentor they need.
+- You have live market data in <market_signals> blocks. Use those numbers directly and concretely. Say "MSFT当前$410，距你的买入触发价$400还有2.5%" not "如果股价继续走弱". When signals data is present for a stock the user mentions, anchor every directional claim to the actual numbers — never describe a general scenario when you have the real data.`;
   }
 
   return `${MASTER_STYLES[master.id]}
@@ -1108,7 +1109,7 @@ export function parseLooseJson(raw, { label = "JSON", shape = "object", fallback
   }
 }
 
-function _buildResearchContextBlocks({ ticker, snapshot, userThesis, manualNotes, holdingContext, currentPrice, profileCtxBlocks }) {
+function _buildResearchContextBlocks({ ticker, snapshot, userThesis, manualNotes, holdingContext, currentPrice, profileCtxBlocks, signalsBlock }) {
   const snapshotBlock = _buildSnapshotBlock(snapshot);
   const holdingBlock = holdingContext
     ? `<holding>
@@ -1119,11 +1120,13 @@ function _buildResearchContextBlocks({ ticker, snapshot, userThesis, manualNotes
 </holding>`
     : "<holding>not currently held</holding>";
 
+  const signalsPart = signalsBlock ? `\n${signalsBlock}\n` : "";
+
   return `<ticker>${ticker.toUpperCase()}</ticker>
 <current_price>${currentPrice ?? "N/A"}</current_price>
 
 ${snapshotBlock}
-
+${signalsPart}
 <user_thesis>${userThesis || "(not provided)"}</user_thesis>
 <manual_notes>${manualNotes || "(none)"}</manual_notes>
 
@@ -1154,7 +1157,7 @@ Output strictly valid JSON matching the schema. No markdown.`;
 
 export async function generateResearchHeadline({
   ticker, currentPrice, snapshot, userThesis, manualNotes,
-  holdingContext, profile, preAssembledCtx = null, onChunk,
+  holdingContext, profile, preAssembledCtx = null, signalsBlock = null, onChunk,
 }) {
   const profileCtx = preAssembledCtx ?? await memoryManager.assemble({
     ticker, query: userThesis || ticker, depth: ContextDepth.STANDARD,
@@ -1163,7 +1166,7 @@ export async function generateResearchHeadline({
 
   const ctxBlocks = _buildResearchContextBlocks({
     ticker, snapshot, userThesis, manualNotes, holdingContext, currentPrice,
-    profileCtxBlocks: profileCtx.blocks,
+    profileCtxBlocks: profileCtx.blocks, signalsBlock,
   });
 
   const user = `Generate the HEADLINE section of a research memo for:
@@ -1211,11 +1214,18 @@ Rules:
 - deep_research_checklist: max 4 items. peer_set: max 3 tickers. watch_items: max 3 items. assumptions: max 3 items.
 - Do not repeat information across fields.
 
+Trigger price rules (CRITICAL):
+- buy_trigger_price and sell_trim_price: MUST be derived from specific numbers in <market_signals> or the <snapshot> (52w low, analyst bear PT, current price ± meaningful %). Do NOT invent numbers.
+- buy_trigger_anchors: list EVERY data point you used to derive the trigger price. Each entry must cite a specific number and its source (e.g. "52w低点$368×1.08≈$397（Yahoo Finance快照）"). Minimum 1 anchor, ideal 2-3.
+- buy_trigger_confidence: "high" if ≥2 independent anchors converge within 5% of each other; "medium" if 1 anchor + contextual support; "low" if weak or inferred.
+- min_earnings_surprise_pct: set to a number if buy_trigger prose mentions an earnings condition; otherwise null.
+- If NO <market_signals> block is present: set buy_trigger_price, sell_trim_price, buy_trigger_anchors, sell_trigger_anchors to null — do not fabricate.
+
 Output strictly valid JSON matching the schema. No markdown.`;
 
 export async function generateResearchDeepAnalysis({
   ticker, currentPrice, snapshot, userThesis, manualNotes,
-  holdingContext, profile, preAssembledCtx = null, onChunk,
+  holdingContext, profile, preAssembledCtx = null, signalsBlock = null, onChunk,
 }) {
   const profileCtx = preAssembledCtx ?? await memoryManager.assemble({
     ticker, query: userThesis || ticker, depth: ContextDepth.STANDARD,
@@ -1224,7 +1234,7 @@ export async function generateResearchDeepAnalysis({
 
   const ctxBlocks = _buildResearchContextBlocks({
     ticker, snapshot, userThesis, manualNotes, holdingContext, currentPrice,
-    profileCtxBlocks: profileCtx.blocks,
+    profileCtxBlocks: profileCtx.blocks, signalsBlock,
   });
 
   const dataFreshness = snapshot?.stale ? "cached" : "live";
@@ -1263,7 +1273,14 @@ Return JSON with this exact schema (no other keys):
   "trading_strategy": {
     "watch_items": [],
     "buy_trigger": "",
+    "buy_trigger_price": null,
+    "buy_trigger_anchors": [],
+    "buy_trigger_confidence": null,
+    "min_earnings_surprise_pct": null,
     "sell_trim_trigger": "",
+    "sell_trim_price": null,
+    "sell_trigger_anchors": [],
+    "sell_trigger_confidence": null,
     "review_date": "YYYY-MM-DD",
     "batch_plan": ""
   },

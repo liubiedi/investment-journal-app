@@ -35,7 +35,9 @@
       "permissions": [
         "android.permission.INTERNET",
         "android.permission.READ_CALENDAR",
-        "android.permission.WRITE_CALENDAR"
+        "android.permission.WRITE_CALENDAR",
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.VIBRATE"
       ]
     },
     "plugins": [
@@ -48,7 +50,8 @@
           "calendarPermission": "Allow 投资日志 to access your calendar to create trade reminders."
         }
       ],
-      "expo-background-task"
+      "expo-background-task",
+      "expo-notifications"
     ],
     "extra": {
       "eas": {

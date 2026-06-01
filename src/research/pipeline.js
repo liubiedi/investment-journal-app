@@ -12,11 +12,18 @@ import {
   buildResearchSources,
   fmtNumber,
 } from "../api";
+import {
+  fetchMarketSignals,
+  buildSignalsBlock,
+  computeTriggerBacktest,
+} from "../marketSignals";
 import * as db from "../db";
 import {
   updateResearchVersionFields,
   updateResearchMemoFields,
   insertResearchRuleChecks,
+  updateResearchMemoTriggers,
+  updateTriggerBacktest,
   newId,
 } from "../db";
 import { memoryManager } from "../memory/MemoryManager";
@@ -91,15 +98,19 @@ export async function startResearchGeneration({
   const sym = ticker.trim().toUpperCase();
 
   _emit(memoId, { stage: StageName.SNAPSHOT, phase: StagePhase.RUNNING });
-  const [snapshot, preAssembledCtx] = await Promise.all([
+  const [snapshot, marketSignals, preAssembledCtx] = await Promise.all([
     fetchResearchSnapshot(sym).catch(() => null),
+    fetchMarketSignals(sym).catch(() => null),
     assembleResearchContext({ ticker: sym, thesis: userThesis, profile }),
   ]);
+  const signalsBlock = marketSignals
+    ? buildSignalsBlock({ ticker: sym, snap: snapshot, ...marketSignals })
+    : null;
   _emit(memoId, { stage: StageName.SNAPSHOT, phase: StagePhase.DONE, data: { snapshot } });
 
   // ctx is identical across the headline and deep calls; build once.
   const ctx = { memoId, versionId, sym, currentPrice, snapshot, userThesis,
-                manualNotes, holdingContext, profile, preAssembledCtx };
+                manualNotes, holdingContext, profile, preAssembledCtx, signalsBlock };
 
   const headlinePromise = _runStage({
     ctx,
@@ -107,7 +118,7 @@ export async function startResearchGeneration({
     failMessage: "Headline generation failed",
     call: () => generateResearchHeadline({
       ticker: sym, currentPrice, snapshot, userThesis, manualNotes,
-      holdingContext, profile, preAssembledCtx,
+      holdingContext, profile, preAssembledCtx, signalsBlock,
       onChunk: (chunk) => _emit(memoId, { stage: StageName.HEADLINE, phase: StagePhase.CHUNK, chunk }),
     }),
     persist: async (headline) => {
@@ -128,7 +139,7 @@ export async function startResearchGeneration({
     failMessage: "Deep analysis failed",
     call: () => generateResearchDeepAnalysis({
       ticker: sym, currentPrice, snapshot, userThesis, manualNotes,
-      holdingContext, profile, preAssembledCtx,
+      holdingContext, profile, preAssembledCtx, signalsBlock,
       onChunk: (chunk) => _emit(memoId, { stage: StageName.DEEP, phase: StagePhase.CHUNK, chunk }),
     }),
     persist: async (deep) => {
@@ -162,7 +173,7 @@ export async function startResearchGeneration({
   // memo screen never gets the cleanup signal and its loading indicator
   // sticks at "Updating memo…" forever.
   try {
-    await _finalize({ memoId, versionId, sym, snapshot, headline: headlineResult, deep: deepResult });
+    await _finalize({ memoId, versionId, sym, snapshot, headline: headlineResult, deep: deepResult, signalsBlock });
   } catch (e) {
     if (__DEV__) console.warn(`[pipeline] _finalize failed for ${memoId}:`, e?.message);
   } finally {
@@ -232,7 +243,7 @@ async function _runRulesCheck({ memoId, versionId, headline, rules }) {
   }
 }
 
-async function _finalize({ memoId, versionId, sym, snapshot, headline, deep }) {
+async function _finalize({ memoId, versionId, sym, snapshot, headline, deep, signalsBlock }) {
   // Write the sources array + disclaimer flags + generatedAt now that we know
   // which sources actually contributed.
   const merged = {
@@ -262,6 +273,25 @@ async function _finalize({ memoId, versionId, sym, snapshot, headline, deep }) {
     sources: buildResearchSources(merged, snapshot),
     generatedAt: new Date().toISOString(),
   });
+
+  // Extract machine-readable trigger fields from trading_strategy
+  const ts = deep?.trading_strategy || {};
+  if (ts.buy_trigger_price != null || ts.sell_trim_price != null) {
+    await updateResearchMemoTriggers(memoId, {
+      buyTriggerPrice: ts.buy_trigger_price ?? null,
+      buyTriggerAnchors: Array.isArray(ts.buy_trigger_anchors) ? ts.buy_trigger_anchors : [],
+      buyTriggerConfidence: ts.buy_trigger_confidence ?? null,
+      minEarningsSurprisePct: ts.min_earnings_surprise_pct ?? null,
+      sellTrimPrice: ts.sell_trim_price ?? null,
+      sellTriggerAnchors: Array.isArray(ts.sell_trigger_anchors) ? ts.sell_trigger_anchors : [],
+      sellTriggerConfidence: ts.sell_trigger_confidence ?? null,
+    }).catch(() => {});
+  }
+  if (ts.buy_trigger_price) {
+    computeTriggerBacktest(sym, ts.buy_trigger_price)
+      .then(bt => updateTriggerBacktest(memoId, bt))
+      .catch(() => {});
+  }
 
   // DeepSeek v4's training cutoff predates the current market, so we capture
   // the just-fetched live Yahoo Finance data here. The mentor pulls 2 most-

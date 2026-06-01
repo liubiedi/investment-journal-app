@@ -38,6 +38,7 @@
     "@react-navigation/native-stack": "^6.10.0",
     "expo": "~54.0.0",
     "expo-background-task": "~1.0.10",
+    "expo-notifications": "~0.29.13",
     "expo-calendar": "~15.0.8",
     "expo-clipboard": "~8.0.8",
     "expo-document-picker": "~14.0.0",

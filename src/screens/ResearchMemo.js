@@ -1,11 +1,11 @@
 // ResearchMemo — full memo viewer with versioning, rules check, and attach-to-trade.
 import React, { useState, useEffect, useCallback, useMemo } from "react";
 import {
-  View, ScrollView, Pressable, Text, Modal, ActivityIndicator, Alert,
+  View, ScrollView, Pressable, Text, Modal, ActivityIndicator, Alert, TextInput,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useNavigation, useRoute } from "@react-navigation/native";
-import { ChevronDown, ChevronUp, ChevronLeft, History, Trash2, Link, RotateCw } from "lucide-react-native";
+import { ChevronDown, ChevronUp, ChevronLeft, History, Trash2, Link, RotateCw, Shield, Activity, TrendingUp, TrendingDown } from "lucide-react-native";
 import { activateKeepAwakeAsync, deactivateKeepAwake } from "expo-keep-awake";
 
 import { useApp } from "../context";
@@ -18,6 +18,7 @@ import {
 } from "../components";
 import {
   getResearchVersion, listResearchVersions, listResearchRuleChecks,
+  confirmTrigger, stopTrigger, getSignalOutcomesForMemo,
   newId,
 } from "../db";
 import {
@@ -411,9 +412,15 @@ export default function ResearchMemoScreen() {
             skeletonLines={3}
             emptyText="No strategy data."
           >
-            <StrategySection ts={version?.tradingStrategy} />
+            <StrategySection
+              ts={version?.tradingStrategy}
+              memo={memo}
+              onTriggerConfirmed={() => refreshResearchMemoById?.(memoId)}
+            />
           </SectionBody>
         </CollapsibleSection>
+
+        <SignalHistoryPanel memoId={memoId} />
 
         <CollapsibleSection title="研究清单  Deep Research Checklist">
           <SectionBody
@@ -693,12 +700,18 @@ function PositionSection({ ps }) {
   );
 }
 
-function StrategySection({ ts }) {
+function StrategySection({ ts, memo, onTriggerConfirmed }) {
   if (!ts) return <TSerifItalic style={{ fontSize: 12 }}>No strategy data.</TSerifItalic>;
   return (
     <>
-      {ts.buy_trigger && <Field label="Buy trigger">{ts.buy_trigger}</Field>}
-      {ts.sell_trim_trigger && <Field label="Sell / trim trigger">{ts.sell_trim_trigger}</Field>}
+      {memo && (
+        <>
+          <MonitoringPanel memo={memo} ts={ts} direction="buy" onConfirmed={onTriggerConfirmed} />
+          {(memo.sellTrimPrice || ts.sell_trim_trigger) && (
+            <MonitoringPanel memo={memo} ts={ts} direction="sell" onConfirmed={onTriggerConfirmed} />
+          )}
+        </>
+      )}
       {ts.review_date && <Field label="Scheduled review">{ts.review_date}</Field>}
       {ts.batch_plan && <Field label="Batch plan">{ts.batch_plan}</Field>}
       {ts.watch_items?.length > 0 && (
@@ -709,6 +722,287 @@ function StrategySection({ ts }) {
         </Field>
       )}
     </>
+  );
+}
+
+// ── Monitoring Panel ──────────────────────────────────────────────────────────
+
+function MonitoringPanel({ memo, ts, direction, onConfirmed }) {
+  const isBuy = direction === "buy";
+  const triggerPrice = isBuy ? memo.buyTriggerPrice : memo.sellTrimPrice;
+  const confirmed = isBuy ? memo.buyTriggerConfirmed : memo.sellTrimConfirmed;
+  const priceOverride = isBuy ? memo.buyTriggerPriceOverride : memo.sellTrimPriceOverride;
+  const anchors = isBuy ? memo.buyTriggerAnchors : memo.sellTriggerAnchors;
+  const confidence = isBuy ? memo.buyTriggerConfidence : memo.sellTriggerConfidence;
+  const backtest = memo.triggerBacktest;
+  const prose = isBuy ? ts.buy_trigger : ts.sell_trim_trigger;
+  const earningsCond = isBuy && memo.minEarningsSurprisePct;
+
+  const [anchorsExpanded, setAnchorsExpanded] = useState(false);
+  const [editingPrice, setEditingPrice] = useState(false);
+  const [priceInput, setPriceInput] = useState("");
+  const [confirming, setConfirming] = useState(false);
+
+  if (!triggerPrice && !prose) return null;
+  if (!triggerPrice) {
+    return (
+      <Field label={isBuy ? "Buy trigger" : "Sell / trim trigger"}>{prose}</Field>
+    );
+  }
+
+  const effectivePrice = priceOverride ?? triggerPrice;
+  const CONF_MAP = { high: ["高", "✦✦✦"], medium: ["中", "✦✦◇"], low: ["低", "✦◇◇"] };
+  const [confidenceLabel, confidenceStars] = CONF_MAP[confidence] ?? ["", ""];
+
+  const handleConfirm = async (override = null) => {
+    setConfirming(true);
+    try {
+      await confirmTrigger(memo.id, direction, override);
+      onConfirmed?.();
+    } catch { /* non-fatal */ }
+    setConfirming(false);
+    setEditingPrice(false);
+  };
+
+  const backtestLine = backtest
+    ? (backtest.hitCount === 0
+        ? `历史回测: 过去12个月未触发`
+        : backtest.avgForward3m != null
+          ? `历史回测: ${backtest.hitCount}次触发 | 3个月均 ${backtest.avgForward3m >= 0 ? "+" : ""}${backtest.avgForward3m.toFixed(1)}%`
+          : `历史回测: ${backtest.hitCount}次触发 | 前向数据不足`)
+    : null;
+
+  if (!confirmed) {
+    return (
+      <View style={{ backgroundColor: "#f7f3ea", borderRadius: 8, padding: 12, marginBottom: 10, borderWidth: 1, borderColor: "#e0d8c8" }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 8 }}>
+          {isBuy ? <TrendingUp size={13} color="#2d5f3f" /> : <TrendingDown size={13} color="#a03434" />}
+          <TMono style={{ fontSize: 10, color: colors.inkFaint }}>
+            {isBuy ? "买入触发价" : "减仓触发价"} (AI建议，待确认)
+          </TMono>
+          {confidence && (
+            <TMono style={{ fontSize: 9, color: "#8b6f47" }}> 信心: {confidenceLabel} {confidenceStars}</TMono>
+          )}
+        </View>
+        <TSerifBold style={{ fontSize: 20, marginBottom: 4 }}>${effectivePrice.toFixed(2)}</TSerifBold>
+
+        {anchors?.length > 0 && (
+          <View style={{ marginBottom: 8 }}>
+            <Pressable onPress={() => setAnchorsExpanded(x => !x)} style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+              <TMono style={{ fontSize: 10, color: "#6b5a3f" }}>依据 {anchorsExpanded ? "▲" : "▼"}</TMono>
+            </Pressable>
+            {anchorsExpanded && anchors.map((a, i) => (
+              <TSerifItalic key={i} style={{ fontSize: 11, lineHeight: 17, color: "#6b5a3f", marginTop: 3 }}>• {a}</TSerifItalic>
+            ))}
+          </View>
+        )}
+
+        {backtestLine && (
+          <TMono style={{ fontSize: 10, color: "#6b5a3f", marginBottom: 8 }}>{backtestLine}</TMono>
+        )}
+        {earningsCond && (
+          <TMono style={{ fontSize: 10, color: "#6b5a3f", marginBottom: 8 }}>
+            财报附加条件: 超预期 ≥{memo.minEarningsSurprisePct}%
+          </TMono>
+        )}
+        {prose && (
+          <TSerifItalic style={{ fontSize: 12, lineHeight: 18, color: colors.inkFaint, marginBottom: 10 }}>{prose}</TSerifItalic>
+        )}
+
+        {editingPrice ? (
+          <View style={{ gap: 8 }}>
+            <TextInput
+              value={priceInput}
+              onChangeText={setPriceInput}
+              keyboardType="numeric"
+              placeholder={`AI建议: $${triggerPrice.toFixed(2)}`}
+              style={{ borderWidth: 1, borderColor: colors.divider, borderRadius: 6, padding: 8, fontFamily: fonts.mono, fontSize: 14 }}
+              autoFocus
+            />
+            <View style={{ flexDirection: "row", gap: 8 }}>
+              <Pressable
+                onPress={() => handleConfirm(parseFloat(priceInput) || null)}
+                disabled={confirming}
+                style={{ flex: 1, backgroundColor: "#1a1611", borderRadius: 6, padding: 9, alignItems: "center" }}
+              >
+                <TMono style={{ fontSize: 11, color: "#f5f1e8" }}>{confirming ? "…" : "确认自定价格"}</TMono>
+              </Pressable>
+              <Pressable onPress={() => setEditingPrice(false)} style={{ padding: 9 }}>
+                <TMono style={{ fontSize: 11, color: colors.inkFaint }}>取消</TMono>
+              </Pressable>
+            </View>
+          </View>
+        ) : (
+          <View style={{ flexDirection: "row", gap: 8 }}>
+            <Pressable
+              onPress={() => handleConfirm(null)}
+              disabled={confirming}
+              style={{ flex: 1, backgroundColor: "#1a1611", borderRadius: 6, padding: 9, alignItems: "center" }}
+            >
+              <TMono style={{ fontSize: 11, color: "#f5f1e8" }}>{confirming ? "…" : "确认并开始监控"}</TMono>
+            </Pressable>
+            <Pressable
+              onPress={() => { setPriceInput(triggerPrice.toFixed(2)); setEditingPrice(true); }}
+              style={{ borderWidth: 1, borderColor: colors.divider, borderRadius: 6, padding: 9, alignItems: "center", paddingHorizontal: 12 }}
+            >
+              <TMono style={{ fontSize: 11, color: colors.ink }}>调整价格</TMono>
+            </Pressable>
+          </View>
+        )}
+      </View>
+    );
+  }
+
+  // Confirmed state
+  const isOverridden = priceOverride != null && priceOverride !== triggerPrice;
+  return (
+    <View style={{ backgroundColor: "#f0f7f2", borderRadius: 8, padding: 12, marginBottom: 10, borderWidth: 1, borderColor: "#b8d8c4" }}>
+      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+          <Shield size={13} color="#2d5f3f" />
+          <TMono style={{ fontSize: 10, color: "#2d5f3f" }}>
+            {isBuy ? "买入监控" : "减仓监控"}
+          </TMono>
+          <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: "#5cba7a" }} />
+          <TMono style={{ fontSize: 9, color: "#5cba7a" }}>监控中</TMono>
+        </View>
+        {confidence && (
+          <TMono style={{ fontSize: 9, color: "#6b8f73" }}>信心: {confidenceLabel} {confidenceStars}</TMono>
+        )}
+      </View>
+
+      <View style={{ flexDirection: "row", alignItems: "baseline", gap: 8, marginBottom: 4 }}>
+        <TSerifBold style={{ fontSize: 18 }}>${effectivePrice.toFixed(2)}</TSerifBold>
+        {isOverridden && (
+          <TMono style={{ fontSize: 9, color: "#6b5a3f" }}>AI建议 ${triggerPrice.toFixed(2)}，已手动调整</TMono>
+        )}
+      </View>
+      {earningsCond && (
+        <TMono style={{ fontSize: 10, color: "#4a7a5a", marginBottom: 4 }}>
+          财报条件: 超预期 ≥{memo.minEarningsSurprisePct}%
+        </TMono>
+      )}
+      {prose && (
+        <TSerifItalic style={{ fontSize: 12, lineHeight: 18, color: "#4a7a5a", marginBottom: 8 }}>{prose}</TSerifItalic>
+      )}
+
+      {anchors?.length > 0 && (
+        <View style={{ marginBottom: 8 }}>
+          <Pressable onPress={() => setAnchorsExpanded(x => !x)} style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+            <TMono style={{ fontSize: 10, color: "#4a7a5a" }}>查看依据 {anchorsExpanded ? "▲" : "▼"}</TMono>
+          </Pressable>
+          {anchorsExpanded && anchors.map((a, i) => (
+            <TSerifItalic key={i} style={{ fontSize: 11, lineHeight: 17, color: "#4a7a5a", marginTop: 3 }}>• {a}</TSerifItalic>
+          ))}
+        </View>
+      )}
+      {backtestLine && (
+        <TMono style={{ fontSize: 10, color: "#4a7a5a", marginBottom: 8 }}>{backtestLine}</TMono>
+      )}
+
+      <View style={{ flexDirection: "row", gap: 8 }}>
+        <Pressable
+          onPress={async () => {
+            await stopTrigger(memo.id, direction).catch(() => {});
+            onConfirmed?.();
+          }}
+          style={{ borderWidth: 1, borderColor: "#b8d8c4", borderRadius: 6, padding: 7, alignItems: "center", paddingHorizontal: 10 }}
+        >
+          <TMono style={{ fontSize: 9, color: "#4a7a5a" }}>修改价格</TMono>
+        </Pressable>
+        <Pressable
+          onPress={async () => {
+            await stopTrigger(memo.id, direction).catch(() => {});
+            onConfirmed?.();
+          }}
+          style={{ borderWidth: 1, borderColor: "#d8c8b8", borderRadius: 6, padding: 7, alignItems: "center", paddingHorizontal: 10 }}
+        >
+          <TMono style={{ fontSize: 9, color: colors.inkFaint }}>停止监控</TMono>
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
+// ── Signal History Panel ──────────────────────────────────────────────────────
+
+function SignalHistoryPanel({ memoId }) {
+  const [outcomes, setOutcomes] = useState([]);
+  const [expanded, setExpanded] = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      setLoading(true);
+      const rows = await getSignalOutcomesForMemo(memoId).catch(() => []);
+      setOutcomes(rows);
+      setLoading(false);
+    })();
+  }, [memoId]);
+
+  if (outcomes.length === 0) return null;
+
+  const fmt = (pct) => pct != null ? `${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%` : "持有中";
+  const getColor = (outcome) => {
+    if (outcome.action_taken === "acted") {
+      if (outcome.forward_3m_pct == null) return colors.inkFaint;
+      return outcome.forward_3m_pct >= 0 ? "#2d5f3f" : "#a03434";
+    }
+    if (outcome.action_taken === "skipped") {
+      return outcome.forward_3m_pct > 0 ? "#8b6f47" : colors.inkFaint;
+    }
+    return colors.inkFaint;
+  };
+
+  return (
+    <View style={{ marginTop: 8 }}>
+      <Pressable onPress={() => setExpanded(x => !x)} style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 6 }}>
+        <Activity size={13} color={colors.inkFaint} />
+        <TMono style={{ fontSize: 10, color: colors.inkFaint }}>
+          信号历史 ({outcomes.length}) {expanded ? "▲" : "▼"}
+        </TMono>
+      </Pressable>
+      {expanded && (
+        <View style={{ gap: 6 }}>
+          {outcomes.map((o, i) => {
+            const firedDate = o.fired_at ? new Date(o.fired_at).toISOString().slice(0, 10) : "?";
+            const color = getColor(o);
+            const isSkipped = o.action_taken === "skipped";
+            const isPending = !o.action_taken;
+            const forward = o.forward_3m_pct != null ? fmt(o.forward_3m_pct) : null;
+            return (
+              <View key={i} style={{ backgroundColor: "#f7f3ea", borderRadius: 6, padding: 10, borderLeftWidth: 3, borderLeftColor: color }}>
+                <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 3 }}>
+                  <TMono style={{ fontSize: 10, color: colors.inkFaint }}>
+                    {firedDate}  触发@${o.event_trigger_price?.toFixed(2) ?? "?"}
+                  </TMono>
+                  {forward && (
+                    <TMono style={{ fontSize: 10, color }}>{forward} (3m)</TMono>
+                  )}
+                </View>
+                {isPending && <TMono style={{ fontSize: 10, color: colors.inkFaint }}>待记录…</TMono>}
+                {o.action_taken === "acted" && (
+                  <TMono style={{ fontSize: 10, color: "#2d5f3f" }}>
+                    买入 ${o.entry_price?.toFixed(2) ?? "?"}
+                  </TMono>
+                )}
+                {isSkipped && (
+                  <TMono style={{ fontSize: 10, color: "#8b6f47" }}>
+                    跳过{o.skip_reason ? `  (${o.skip_reason})` : ""}
+                    {forward != null && parseFloat(forward) > 0 ? `  ⚠ 错过 ${forward}` : ""}
+                  </TMono>
+                )}
+                {o.ai_debrief && (
+                  <TSerifItalic style={{ fontSize: 11, lineHeight: 16, color: colors.inkFaint, marginTop: 4 }}>
+                    {o.ai_debrief.slice(0, 120)}…
+                  </TSerifItalic>
+                )}
+              </View>
+            );
+          })}
+        </View>
+      )}
+    </View>
   );
 }
 
