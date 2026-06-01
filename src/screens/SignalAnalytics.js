@@ -3,7 +3,7 @@ import React, { useState, useEffect, useCallback } from "react";
 import { View, ScrollView, Pressable } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useNavigation } from "@react-navigation/native";
-import { ChevronLeft, BarChart2, TrendingUp, TrendingDown } from "lucide-react-native";
+import { ChevronLeft, BarChart2 } from "lucide-react-native";
 
 import { colors, fonts } from "../theme";
 import {
@@ -14,6 +14,8 @@ import {
 } from "../db";
 
 const TABS = ["总览", "信号列表", "标的分析", "策略校准"];
+
+const fmt = (pct) => pct != null ? `${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%` : "—";
 
 export default function SignalAnalyticsScreen() {
   const nav = useNavigation();
@@ -100,8 +102,7 @@ function OverviewTab({ stats, outcomes }) {
     );
   }
 
-  const fmt = (pct) => pct != null ? `${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%` : "—";
-  const winRate = stats.acted > 0 ? Math.round((stats.wins / stats.acted) * 100) : null;
+  const winRate = stats.winRate != null ? Math.round(stats.winRate) : null;
 
   const best = outcomes
     .filter(o => o.forward_3m_pct != null && o.action_taken === "acted")
@@ -162,7 +163,6 @@ function OverviewTab({ stats, outcomes }) {
 // ── Signal List Tab ───────────────────────────────────────────────────────────
 
 function SignalListTab({ outcomes }) {
-  const fmt = (pct) => pct != null ? `${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%` : "—";
   const sorted = [...outcomes].sort((a, b) => (b.fired_at || 0) - (a.fired_at || 0));
 
   if (sorted.length === 0) {
@@ -225,7 +225,6 @@ function ByTickerTab({ outcomes }) {
   }
 
   const tickers = Object.keys(byTicker).sort();
-  const fmt = (pct) => pct != null ? `${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%` : "—";
 
   if (tickers.length === 0) {
     return <TSerifItalic style={{ fontSize: 13, color: colors.inkFaint, marginTop: 32, textAlign: "center" }}>暂无记录</TSerifItalic>;
@@ -278,7 +277,6 @@ function CalibrationTab({ outcomes, stats }) {
   const skipped = outcomes.filter(o => o.action_taken === "skipped" && o.forward_3m_pct != null);
   const missedOpportunities = skipped.filter(o => o.forward_3m_pct > 0);
 
-  const fmt = (pct) => pct != null ? `${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%` : "—";
   const avg = (arr, key) => arr.length > 0 ? arr.reduce((s, o) => s + (o[key] ?? 0), 0) / arr.length : null;
 
   const avgDrawdown = avg(acted.filter(o => o.max_drawdown_3m != null), "max_drawdown_3m");

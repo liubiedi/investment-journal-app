@@ -18,7 +18,7 @@ import {
 } from "../components";
 import {
   getResearchVersion, listResearchVersions, listResearchRuleChecks,
-  confirmTrigger, getSignalOutcomesForMemo,
+  confirmTrigger, stopTrigger, getSignalOutcomesForMemo,
   newId,
 } from "../db";
 import {
@@ -751,8 +751,8 @@ function MonitoringPanel({ memo, ts, direction, onConfirmed }) {
   }
 
   const effectivePrice = priceOverride ?? triggerPrice;
-  const confidenceStars = { high: "✦✦✦", medium: "✦✦◇", low: "✦◇◇" }[confidence] ?? "";
-  const confidenceLabel = { high: "高", medium: "中", low: "低" }[confidence] ?? "";
+  const CONF_MAP = { high: ["高", "✦✦✦"], medium: ["中", "✦✦◇"], low: ["低", "✦◇◇"] };
+  const [confidenceLabel, confidenceStars] = CONF_MAP[confidence] ?? ["", ""];
 
   const handleConfirm = async (override = null) => {
     setConfirming(true);
@@ -903,7 +903,7 @@ function MonitoringPanel({ memo, ts, direction, onConfirmed }) {
       <View style={{ flexDirection: "row", gap: 8 }}>
         <Pressable
           onPress={async () => {
-            await confirmTrigger(memo.id, direction === "buy" ? "buy_stop" : "sell_stop", null).catch(() => {});
+            await stopTrigger(memo.id, direction).catch(() => {});
             onConfirmed?.();
           }}
           style={{ borderWidth: 1, borderColor: "#b8d8c4", borderRadius: 6, padding: 7, alignItems: "center", paddingHorizontal: 10 }}
@@ -912,7 +912,7 @@ function MonitoringPanel({ memo, ts, direction, onConfirmed }) {
         </Pressable>
         <Pressable
           onPress={async () => {
-            await confirmTrigger(memo.id, direction === "buy" ? "buy_stop" : "sell_stop", null).catch(() => {});
+            await stopTrigger(memo.id, direction).catch(() => {});
             onConfirmed?.();
           }}
           style={{ borderWidth: 1, borderColor: "#d8c8b8", borderRadius: 6, padding: 7, alignItems: "center", paddingHorizontal: 10 }}

@@ -471,10 +471,8 @@ function AppContent() {
   }), [philosophy, rules, weeklyNotes, monthlyReviews, trades, thoughts, holdings, prices]);
 
   const dismissSignals = useCallback(async (signalIds) => {
-    for (const id of (signalIds || [])) {
-      await db.acknowledgeSignal(id).catch(() => {});
-    }
-    if (signalIds) {
+    if (signalIds?.length) {
+      await Promise.all(signalIds.map(id => db.acknowledgeSignal(id).catch(() => {})));
       setActiveSignals(prev => prev.filter(s => !signalIds.includes(s.id)));
     } else {
       setActiveSignals([]);

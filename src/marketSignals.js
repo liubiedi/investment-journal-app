@@ -10,6 +10,7 @@ import * as SecureStore from "expo-secure-store";
 import {
   getCachedMarketSignals, saveMarketSignalsCache,
 } from "./db";
+import { todayIso } from "./utils";
 
 const YF_BASE = "https://query1.finance.yahoo.com";
 const YF_HEADERS = { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" };
@@ -100,7 +101,7 @@ export async function fetchFinnhubEarnings(ticker, key) {
 
 // Returns ISO date string for next earnings date, or null
 export async function fetchNextEarningsDate(ticker, key) {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayIso();
   const future = new Date(Date.now() + 90 * 86400000).toISOString().slice(0, 10);
   const data = await finnhubGet(
     `/calendar/earnings?from=${today}&to=${future}&symbol=${encodeURIComponent(ticker)}`, key
@@ -131,7 +132,7 @@ export async function fetchFinnhubAnalyst(ticker, key) {
 
 // Returns top 3: [{ headline, datetime, source }]
 export async function fetchFinnhubNews(ticker, key, daysBack = 14) {
-  const to = new Date().toISOString().slice(0, 10);
+  const to = todayIso();
   const from = new Date(Date.now() - daysBack * 86400000).toISOString().slice(0, 10);
   const data = await finnhubGet(
     `/company-news?symbol=${encodeURIComponent(ticker)}&from=${from}&to=${to}`, key
@@ -191,7 +192,7 @@ export async function fetchMarketSignals(ticker) {
 
 export function buildSignalsBlock({ ticker, snap, momentum, current, earnings, nextEarningsDate, analyst, news }) {
   if (!current && !momentum) return null;
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayIso();
   const fmt = (n, d = 1) => n != null ? n.toFixed(d) : "N/A";
   const lines = [`<market_signals ticker="${ticker}" as_of="${today}">`];
 

@@ -1323,27 +1323,24 @@ export async function getPendingForwardReturns() {
 
 export async function getAnalyticsStats() {
   const db = await getDb();
-  const total = await db.getFirstAsync("SELECT count(*) as n FROM signal_events");
-  const acted = await db.getFirstAsync(
-    "SELECT count(*) as n FROM signal_outcomes WHERE action_taken = 'acted'"
+  const row = await db.getFirstAsync(
+    `SELECT
+       count(distinct se.id) as total,
+       count(CASE WHEN so.action_taken = 'acted' THEN 1 END) as acted,
+       count(CASE WHEN so.action_taken = 'skipped' THEN 1 END) as skipped,
+       count(CASE WHEN so.action_taken = 'acted' AND so.forward_3m_pct > 0 THEN 1 END) as wins,
+       avg(CASE WHEN so.action_taken = 'acted' AND so.forward_3m_pct IS NOT NULL THEN so.forward_3m_pct END) as avg_return
+     FROM signal_events se
+     LEFT JOIN signal_outcomes so ON so.signal_event_id = se.id`
   );
-  const skipped = await db.getFirstAsync(
-    "SELECT count(*) as n FROM signal_outcomes WHERE action_taken = 'skipped'"
-  );
-  const wins = await db.getFirstAsync(
-    "SELECT count(*) as n FROM signal_outcomes WHERE action_taken = 'acted' AND forward_3m_pct > 0"
-  );
-  const avgReturn = await db.getFirstAsync(
-    "SELECT avg(forward_3m_pct) as avg FROM signal_outcomes WHERE action_taken = 'acted' AND forward_3m_pct IS NOT NULL"
-  );
-  const actedCount = acted?.n ?? 0;
-  const winsCount = wins?.n ?? 0;
+  const actedCount = row?.acted ?? 0;
+  const winsCount = row?.wins ?? 0;
   return {
-    total: total?.n ?? 0,
+    total: row?.total ?? 0,
     acted: actedCount,
-    skipped: skipped?.n ?? 0,
+    skipped: row?.skipped ?? 0,
     wins: winsCount,
-    avgReturn3m: avgReturn?.avg ?? null,
+    avgReturn3m: row?.avg_return ?? null,
     winRate: actedCount > 0 ? (winsCount / actedCount) * 100 : null,
   };
 }
@@ -1392,20 +1389,25 @@ export async function confirmTrigger(memoId, direction, priceOverride = null) {
       "UPDATE research_memos SET buy_trigger_confirmed = 1, buy_trigger_price_override = ? WHERE id = ?",
       [priceOverride ?? null, memoId]
     );
-  } else if (direction === "buy_stop") {
-    await db.runAsync(
-      "UPDATE research_memos SET buy_trigger_confirmed = 0, buy_trigger_price_override = NULL WHERE id = ?",
-      [memoId]
-    );
-  } else if (direction === "sell_stop") {
-    await db.runAsync(
-      "UPDATE research_memos SET sell_trim_confirmed = 0, sell_trim_price_override = NULL WHERE id = ?",
-      [memoId]
-    );
   } else {
     await db.runAsync(
       "UPDATE research_memos SET sell_trim_confirmed = 1, sell_trim_price_override = ? WHERE id = ?",
       [priceOverride ?? null, memoId]
+    );
+  }
+}
+
+export async function stopTrigger(memoId, direction) {
+  const db = await getDb();
+  if (direction === "buy") {
+    await db.runAsync(
+      "UPDATE research_memos SET buy_trigger_confirmed = 0, buy_trigger_price_override = NULL WHERE id = ?",
+      [memoId]
+    );
+  } else {
+    await db.runAsync(
+      "UPDATE research_memos SET sell_trim_confirmed = 0, sell_trim_price_override = NULL WHERE id = ?",
+      [memoId]
     );
   }
 }

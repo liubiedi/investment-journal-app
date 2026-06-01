@@ -79,6 +79,7 @@ const SYMBOL_MAP = {
   getUnacknowledgedSignals:     { src: "db.js", kind: "fn" },
   acknowledgeSignal:            { src: "db.js", kind: "fn" },
   confirmTrigger:               { src: "db.js", kind: "fn" },
+  stopTrigger:                  { src: "db.js", kind: "fn" },
   updateResearchMemoTriggers:   { src: "db.js", kind: "fn" },
   updateTriggerBacktest:        { src: "db.js", kind: "fn" },
   saveSignalOutcome:            { src: "db.js", kind: "fn" },

@@ -51,7 +51,7 @@ export default function ResearchScreen() {
       await db.updateSignalOutcome(existing.id, {
         actionTaken: "acted",
         entryPrice,
-        entryDate: new Date().toISOString().slice(0, 10),
+        entryDate: todayIso(),
       });
     } else {
       await saveSignalOutcome({
@@ -61,7 +61,7 @@ export default function ResearchScreen() {
         direction: signal.direction,
         actionTaken: "acted",
         entryPrice,
-        entryDate: new Date().toISOString().slice(0, 10),
+        entryDate: todayIso(),
       });
     }
     dismissSignals([signal.id]);

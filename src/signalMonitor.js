@@ -105,13 +105,24 @@ export async function computePendingForwardReturns() {
   const pending = await getPendingForwardReturns();
   if (pending.length === 0) return;
 
+  // Fetch all unique ticker histories in parallel to avoid redundant network calls
+  const uniqueTickers = [...new Set(
+    pending.map(o => (o.event_ticker || o.ticker)?.toUpperCase()).filter(Boolean)
+  )];
+  const priceDataMap = {};
+  await Promise.allSettled(
+    uniqueTickers.map(async ticker => {
+      try {
+        priceDataMap[ticker] = await fetchPriceHistory(ticker, "2y");
+      } catch { /* skip ticker */ }
+    })
+  );
+
   for (const outcome of pending) {
-    const ticker = outcome.event_ticker || outcome.ticker;
+    const ticker = (outcome.event_ticker || outcome.ticker)?.toUpperCase();
     if (!ticker || !outcome.entry_date) continue;
-    let priceData;
-    try {
-      priceData = await fetchPriceHistory(ticker, "2y");
-    } catch { continue; }
+    const priceData = priceDataMap[ticker];
+    if (!priceData) continue;
     const { closes, dates } = priceData;
     const entryIdx = dates.findIndex(d => d >= outcome.entry_date);
     if (entryIdx < 0 || !closes[entryIdx]) continue;
@@ -199,7 +210,9 @@ export async function generateSignalDebrief(outcome) {
       outcome.memo_id ?? null
     );
     await updateSignalOutcome(outcome.id, { debriefNotified: 1 });
-  } catch { /* non-fatal */ }
+  } catch (e) {
+    if (__DEV__) console.warn("[signalMonitor] generateSignalDebrief failed:", e);
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -208,7 +221,9 @@ export async function generateSignalDebrief(outcome) {
 
 export async function checkAllSignals() {
   // Run forward return computation first (no new API calls needed for most)
-  await computePendingForwardReturns().catch(() => {});
+  await computePendingForwardReturns().catch(e => {
+    if (__DEV__) console.warn("[signalMonitor] computePendingForwardReturns failed:", e);
+  });
 
   const memos = await getMonitoredMemos();
   if (memos.length === 0) return [];
@@ -217,6 +232,18 @@ export async function checkAllSignals() {
   const priceMap = await fetchLivePrices(tickers).catch(() => ({}));
 
   const fhKey = await getFinnhubKey().catch(() => null);
+
+  // Pre-fetch earnings for unique tickers that need it (avoids redundant Finnhub calls)
+  const earningsNeededTickers = fhKey
+    ? [...new Set(memos.filter(m => m.minEarningsSurprisePct).map(m => m.ticker.toUpperCase()))]
+    : [];
+  const earningsMap = {};
+  await Promise.allSettled(
+    earningsNeededTickers.map(async sym => {
+      earningsMap[sym] = await fetchFinnhubEarnings(sym, fhKey).catch(() => null);
+    })
+  );
+
   const fired = [];
 
   for (const memo of memos) {
@@ -224,11 +251,7 @@ export async function checkAllSignals() {
     const currentPrice = priceMap[sym]?.price;
     if (!currentPrice) continue;
 
-    // Fetch earnings if needed
-    let latestEarnings = null;
-    if (memo.minEarningsSurprisePct && fhKey) {
-      latestEarnings = await fetchFinnhubEarnings(sym, fhKey).catch(() => null);
-    }
+    const latestEarnings = earningsMap[sym] ?? null;
 
     // Check buy direction
     if (memo.buyTriggerConfirmed === 1 && memo.buyTriggerPrice) {
