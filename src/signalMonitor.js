@@ -120,16 +120,27 @@ export async function computePendingForwardReturns() {
 
   for (const outcome of pending) {
     const ticker = (outcome.event_ticker || outcome.ticker)?.toUpperCase();
-    if (!ticker || !outcome.entry_date) continue;
+    if (!ticker) continue;
     const priceData = priceDataMap[ticker];
     if (!priceData) continue;
     const { closes, dates } = priceData;
-    const entryIdx = dates.findIndex(d => d >= outcome.entry_date);
+
+    // Skipped outcomes use the signal's fired_at/fired_price as the observation baseline.
+    // Acted outcomes use the user's recorded entry_date/entry_price.
+    const isSkipped = outcome.action_taken === "skipped";
+    const referenceDate = isSkipped
+      ? (outcome.fired_at ? new Date(outcome.fired_at).toISOString().slice(0, 10) : null)
+      : outcome.entry_date;
+    if (!referenceDate) continue;
+
+    const entryIdx = dates.findIndex(d => d >= referenceDate);
     if (entryIdx < 0 || !closes[entryIdx]) continue;
-    const entryPrice = outcome.entry_price ?? closes[entryIdx];
+    const entryPrice = isSkipped
+      ? (outcome.fired_price ?? closes[entryIdx])
+      : (outcome.entry_price ?? closes[entryIdx]);
 
     const updates = {};
-    const daysElapsed = Math.round((Date.now() - new Date(outcome.entry_date).getTime()) / 86400000);
+    const daysElapsed = Math.round((Date.now() - new Date(referenceDate).getTime()) / 86400000);
 
     if (daysElapsed >= 30 && outcome.forward_1m_pct == null) {
       const idx = entryIdx + 22;
@@ -165,8 +176,8 @@ export async function computePendingForwardReturns() {
       await updateSignalOutcome(outcome.id, updates).catch(() => {});
     }
 
-    // Trigger AI debrief at 3-month mark
-    if (daysElapsed >= 90 && outcome.ai_debrief == null && outcome.forward_3m_pct != null) {
+    // Trigger AI debrief at 3-month mark — only for acted signals (not skipped)
+    if (!isSkipped && daysElapsed >= 90 && outcome.ai_debrief == null && outcome.forward_3m_pct != null) {
       generateSignalDebrief(outcome).catch(() => {});
     }
   }
@@ -281,6 +292,11 @@ export async function checkAllSignals() {
           const body = buildNotificationBody(memo, "buy", result);
           await scheduleSignalNotification(`📈 买入条件满足: ${sym}`, body, memo.id);
           fired.push({ ...event, memoId: memo.id });
+          // Stamp the earnings period so the same report doesn't re-fire
+          // after the 24-hour dedup window expires.
+          if (result.earningsPeriod) {
+            updateResearchMemoFields(memo.id, { lastCheckedEarningsPeriod: result.earningsPeriod }).catch(() => {});
+          }
         }
       }
     }
@@ -324,16 +340,19 @@ export async function checkAllSignals() {
 // Background task registration
 // ═══════════════════════════════════════════════════════════════
 
-export function registerSignalMonitorTask() {
-  TaskManager.defineTask(SIGNAL_MONITOR_TASK, async () => {
-    try {
-      await checkAllSignals();
-      return BackgroundTask.BackgroundTaskResult.Success;
-    } catch {
-      return BackgroundTask.BackgroundTaskResult.Failed;
-    }
-  });
+// defineTask must run at module-load time so a headless OS launch can
+// resolve the task handler before App.js fully initialises (same pattern
+// as src/research/background.js).
+TaskManager.defineTask(SIGNAL_MONITOR_TASK, async () => {
+  try {
+    await checkAllSignals();
+    return BackgroundTask.BackgroundTaskResult.Success;
+  } catch {
+    return BackgroundTask.BackgroundTaskResult.Failed;
+  }
+});
 
+export function registerSignalMonitorTask() {
   BackgroundTask.registerTaskAsync(SIGNAL_MONITOR_TASK, {
     minimumInterval: 12 * 60 * 60, // 12 hours (half-daily) — these are
     // not day-trading signals. minimumInterval is only a floor/hint; iOS

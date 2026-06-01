@@ -1052,6 +1052,7 @@ export async function updateResearchMemoFields(memoId, fields) {
     nextReviewDate: "next_review_date",
     currentVersionId: "current_version_id",
     holdingId: "holding_id",
+    lastCheckedEarningsPeriod: "last_checked_earnings_period",
   };
   const cols = [], vals = [];
   for (const [k, v] of Object.entries(fields)) {
@@ -1311,13 +1312,18 @@ export async function getAllSignalOutcomes() {
 
 export async function getPendingForwardReturns() {
   const db = await getDb();
+  // Include skipped outcomes using signal fired_at/fired_price as the observation point —
+  // this powers the CalibrationTab "missed opportunity" analysis.
   return await db.getAllAsync(
-    `SELECT so.*, se.ticker as event_ticker
+    `SELECT so.*, se.ticker as event_ticker, se.fired_at, se.fired_price
      FROM signal_outcomes so
      JOIN signal_events se ON so.signal_event_id = se.id
-     WHERE so.action_taken = 'acted'
-       AND so.entry_date IS NOT NULL
-       AND (so.forward_6m_pct IS NULL OR so.forward_3m_pct IS NULL OR so.forward_1m_pct IS NULL)`
+     WHERE (so.forward_6m_pct IS NULL OR so.forward_3m_pct IS NULL OR so.forward_1m_pct IS NULL)
+       AND (
+         (so.action_taken = 'acted' AND so.entry_date IS NOT NULL)
+         OR
+         so.action_taken = 'skipped'
+       )`
   );
 }
 
@@ -1434,6 +1440,13 @@ export function rowToResearchMemo(r) {
     status: r.status || null, confidence: r.confidence || null,
     createdAt: r.created_at || null, lastReviewedAt: r.last_reviewed_at || null,
     nextReviewDate: r.next_review_date || null, holdingId: r.holding_id || null,
+    // Snake-case aliases — screen code that predates this transformer uses these directly.
+    company_name: r.company_name || null,
+    current_version_id: r.current_version_id || null,
+    next_review_date: r.next_review_date || null,
+    holding_id: r.holding_id || null,
+    last_reviewed_at: r.last_reviewed_at || null,
+    created_at: r.created_at || null,
     buyTriggerPrice: r.buy_trigger_price ?? null,
     buyTriggerAnchors: safeJson(r.buy_trigger_anchors, []),
     buyTriggerConfidence: r.buy_trigger_confidence ?? null,
