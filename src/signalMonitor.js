@@ -1,7 +1,8 @@
 // signalMonitor.js — background signal evaluation and outcome tracking.
 //
-// Registered as an expo-background-task that runs every 15 minutes.
-// Also called on foreground resume via App.js AppState listener.
+// Registered as an expo-background-task with a 12-hour (half-daily) floor —
+// these are not day-trading signals. The primary trigger is the foreground
+// resume check via App.js AppState listener; this task is a backstop.
 
 import * as BackgroundTask from "expo-background-task";
 import * as TaskManager from "expo-task-manager";
@@ -311,6 +312,11 @@ export function registerSignalMonitorTask() {
   });
 
   BackgroundTask.registerTaskAsync(SIGNAL_MONITOR_TASK, {
-    minimumInterval: 15 * 60, // 15 minutes
+    minimumInterval: 12 * 60 * 60, // 12 hours (half-daily) — these are
+    // not day-trading signals. minimumInterval is only a floor/hint; iOS
+    // throttles background runs heavily regardless. The AppState "active"
+    // check in App.js (runs checkAllSignals on every app foreground) is the
+    // primary trigger; this background task is just a backstop for moves
+    // that happen while the app is closed.
   }).catch(() => {});
 }
