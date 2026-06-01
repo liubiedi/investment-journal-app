@@ -153,6 +153,63 @@ If a holding has a research memo, a small status dot appears on the holding row.
 
 When you ask any mentor about a stock that has a research memo, the mentor receives the current conclusion and its invalidation condition as context — without you needing to paste it in. The mentor knows what you already concluded and can challenge it, validate it, or update it.
 
+When a Finnhub API key is configured, the mentor also receives a live `<market_signals>` block: current price, month-to-date momentum, last earnings result, analyst ratings, and recent headlines. The mentor is required to use these specific numbers — not vague language like "if the stock weakens" but "MSFT is at $410, 2.5% above your buy trigger of $400."
+
+---
+
+## Part 4.6 · Signal Monitoring — Background Alerts for Part-Time Investors
+
+This feature is designed for an investor who cannot watch markets daily. You define the exact conditions that would trigger action on a stock — and the app watches for you.
+
+### Step 1 — Generate a Memo with Trigger Prices
+
+When you generate a research memo, the AI derives buy and sell trigger prices from the live market data it received. Every trigger price comes with **anchor evidence**: 2–3 specific data points that the AI used to derive it (e.g., "52-week low $368 × 1.085 ≈ $399 [Yahoo Finance]", "analyst bear-case target $395 [Finnhub]"). A **historical backtest** shows how often this trigger level was hit over the past year and what the average 3-month return was at those moments.
+
+### Step 2 — Confirm the Trigger
+
+Open the memo and scroll to **3–6 Month Strategy**. You'll see a `MonitoringPanel` showing the AI-suggested trigger price in a "待确认" (unconfirmed) state. Review the anchor evidence and historical backtest, then tap **确认并开始监控** — or tap **调整价格** to set your own price first.
+
+The app only monitors triggers you have explicitly confirmed. A newly generated memo never automatically starts sending you notifications.
+
+### Step 3 — Wait for the Signal
+
+The app checks conditions twice daily (12-hour background task) and every time you open it. When all conditions are met — price within 5% of trigger, and any earnings condition satisfied — a push notification fires with the ticker, direction, current price vs trigger, and your action plan prose.
+
+### Step 4 — Act or Skip
+
+When the **Signal Center banner** appears at the top of the Research screen:
+
+- **已买入** — tap to log your entry price (pre-filled with the current price). Confirm to save the outcome.
+- **跳过** — tap to select a skip reason (waiting for a better price, thesis uncertainty, insufficient funds, etc.). Confirm to dismiss.
+
+Both choices remove the signal from the banner. Unresolved signals stay visible until you decide.
+
+### Step 5 — Track the Outcome
+
+After you log a "acted" outcome, the app automatically tracks:
+- **Forward returns** at 1 month, 3 months, and 6 months, computed from Yahoo Finance historical data.
+- **Maximum drawdown** in the first 90 trading days.
+- **AI debrief** at the 3-month mark: a 3-paragraph Chinese analysis of whether the thesis played out, whether the entry timing was well-calibrated, and what to watch next. A push notification fires when the debrief is ready.
+
+### The Signal History Panel
+
+Scroll to the bottom of any research memo to find **信号历史** — a collapsible record of every past signal for that ticker: when it fired, what price, what you did, and the 3-month result. Green = acted, positive return. Red = acted, negative return. Amber = skipped but would have been profitable (the most important signal for calibration).
+
+### The Calibration Dashboard
+
+Tap **复盘 →** in the Research screen header to open the **Signal Analytics** screen:
+
+| Tab | What it shows |
+|-----|--------------|
+| 总览 | Total signals, acted/skipped counts, win rate, average 3-month return, best and worst outcomes |
+| 信号列表 | Full list of all signals with action taken, return, and debrief snippets |
+| 标的分析 | Per-ticker win rate and average return |
+| 策略校准 | Entry analysis (average return, max drawdown), skip analysis (how much you missed by skipping), calibration suggestions after 3+ outcomes |
+
+### Setup — Finnhub Key (Optional but Recommended)
+
+Price monitoring works without any API key. For earnings conditions (e.g., "trigger only if Q3 beat ≥10%"), analyst ratings, and news headlines in your mentor context, add a free Finnhub key in **Settings → Finnhub API Key** (register at finnhub.io). Without the key, earnings conditions are never satisfied and signals only fire on price.
+
 ---
 
 ## Part 5 · The Review Loop — Reflection as Craft
@@ -203,13 +260,27 @@ Access Settings via the **gear icon (⚙)** on the Home screen.
 
 ### DeepSeek API Key
 
-The app uses [DeepSeek](https://platform.deepseek.com) for all AI features — `deepseek-chat` for structured parsing, `deepseek-reasoner` for mentor responses. Both are billed to your own account.
+The app uses [DeepSeek](https://platform.deepseek.com) for all AI features — `deepseek-chat` for structured parsing, `deepseek-v4-pro` for mentor responses and research memos, `deepseek-v4-flash` for rules checks and signal debriefs. All are billed to your own account.
 
 1. Visit **platform.deepseek.com**, create an account, and generate a key starting with `sk-`
 2. Paste it into the **DeepSeek API Key** field and tap **保存 API Key**
 3. Status changes from red **未配置** to green **已配置**
 
 > **Cost:** Typical monthly usage runs $1–3 USD, with server-side prefix caching reducing repeated costs automatically.
+
+### Finnhub API Key
+
+Required for earnings-condition monitoring, analyst ratings, and news headlines in mentor context. Free to register.
+
+1. Visit **finnhub.io/register**, create a free account, copy your API key
+2. Paste it into the **Finnhub API Key** field and tap **保存 Finnhub Key**
+3. Status dot turns green: "已配置 — 财报与分析师数据已启用"
+
+Without this key, the app uses price data only. Earnings conditions in research memos will never trigger until the key is added.
+
+### Signal Notifications
+
+Toggle under **信号通知**. When off, the app still evaluates signal conditions and logs events, but does not fire push notifications. The Signal Center banner on the Research screen still appears on app open.
 
 ### Home Screen — Philosophy and Rules
 

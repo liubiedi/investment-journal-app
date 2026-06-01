@@ -18,10 +18,12 @@ investment-journal-app/
 │   └── splash.png            ← 启动画面（占位）
 └── src/
     ├── theme.js              ← 颜色、字体
-    ├── constants.js          ← 动作、情绪、7 位大师
+    ├── constants.js          ← 动作、情绪、9 位大师
     ├── utils.js              ← 日期、货币工具
     ├── db.js                 ← SQLite 数据层
     ├── api.js                ← DeepSeek + Yahoo Finance
+    ├── marketSignals.js      ← Yahoo Finance历史价格 + Finnhub + 信号块构建
+    ├── signalMonitor.js      ← 后台任务、条件评估、结果追踪
     ├── voice.js              ← 语音输入 hook
     ├── components.js         ← 共享 UI 组件
     └── screens/
@@ -30,8 +32,11 @@ investment-journal-app/
         ├── Monthly.js        ← 月评
         ├── Log.js            ← 交易 + 心念
         ├── Holdings.js       ← 持仓
+        ├── Research.js       ← 研究队列 + 信号中心横幅
+        ├── ResearchMemo.js   ← 研究备忘录（含监控面板、信号历史）
+        ├── SignalAnalytics.js ← 4标签复盘看板
         ├── Mentor.js         ← AI 导师对话
-        └── Settings.js       ← 设置
+        └── Settings.js       ← 设置（DeepSeek key + Finnhub key + 通知开关）
 ```
 
 ## 下一步：三条路，按难度从易到难
@@ -88,6 +93,13 @@ eas build -p android --profile preview
 2. 打开 app，进"设置"tab
 3. 粘贴 key，保存
 4. 回主页，开始用
+
+## 可选但推荐：配置 Finnhub API Key（信号监控用）
+
+1. 去 https://finnhub.io/register 免费注册，复制 API key
+2. 进"设置" → "Finnhub API Key" → 粘贴并保存
+3. 配置后，研究备忘录可监控**财报超预期条件**（如"Q3盈利超预期≥10%时才触发买入"）；导师对话也会包含最新财报、分析师评级和新闻
+4. 不配置也能用价格监控，只是财报条件永远不会满足
 
 ## 常见问题
 

@@ -9,8 +9,10 @@ Personal investment journal — Android app built with Expo / React Native.
 - 💼 Trade log with AI parsing from natural speech/text
 - 🤔 Thoughts / dilemmas (non-trade journaling)
 - 📊 Current holdings with live prices (Yahoo Finance)
-- 🎓 AI mentor chat, or consult investment masters (Peter Lynch, Buffett, Munger, Dalio, Marks, Graham)
+- 🎓 AI mentor chat, or consult investment masters (Peter Lynch, Buffett, Munger, Dalio, Marks, Graham, Taleb, Bogle, Cathie Wood)
 - 🔬 **Research module** — versioned, source-backed decision memos with AI-generated conditional status (Buy Setup / Watch / Reduce Risk / Avoid), bull/base/bear valuation, rules conflict check, and Yahoo Finance fundamental data enrichment
+- 🔔 **Signal monitoring** — set buy/sell trigger prices with anchor evidence; app monitors in the background and pushes alerts when all conditions are met (price + optional earnings beat). Trigger prices require explicit user confirmation before monitoring starts.
+- 📈 **Outcome tracking** — log "acted" or "skipped" at each signal; app auto-computes 1-month/3-month/6-month forward returns and generates an AI debrief at the 3-month mark. A calibration dashboard tracks your win rate, average return, and skip analysis over time.
 - 📓 **Export to Obsidian-compatible Markdown vault** — save anywhere (Google Drive, email, etc.)
 - 🔒 All data stored locally in SQLite — never leaves your device unless you explicitly export
 
@@ -18,7 +20,8 @@ Personal investment journal — Android app built with Expo / React Native.
 
 1. **Node.js** (>= 20 LTS) — https://nodejs.org
 2. **DeepSeek API key** for mentor features — https://platform.deepseek.com/api_keys
-3. For APK build: **Expo account** (free) — https://expo.dev
+3. **Finnhub API key** (optional, free) for earnings data + analyst ratings in signal monitoring — https://finnhub.io/register
+4. For APK build: **Expo account** (free) — https://expo.dev
 
 ## Setup
 
@@ -99,7 +102,7 @@ Uninstalling the app deletes all data. Back up first.
 
 ```
 investment-journal-app/
-├── App.js                          # root; fonts, splash, navigation
+├── App.js                          # root; fonts, splash, navigation, signal bootstrap
 ├── app.json                        # Expo config (package name, icon, permissions)
 ├── eas.json                        # build profiles
 ├── package.json
@@ -110,20 +113,24 @@ investment-journal-app/
 │   ├── utils.js                    # date/currency helpers
 │   ├── db.js                       # SQLite schema + CRUD
 │   ├── api.js                      # DeepSeek + Yahoo Finance
+│   ├── marketSignals.js            # Yahoo Finance price history + Finnhub data + signals block builder
+│   ├── signalMonitor.js            # background task, condition evaluation, outcome tracking, AI debriefs
 │   ├── voice.js                    # speech-to-text hook
 │   ├── components.js               # shared UI components
 │   ├── memory/                     # four-tier context system (HotCache, MemoryManager, DNA, FTS5 retrieval)
+│   ├── research/                   # research pipeline (generation, background task)
 │   └── screens/
 │       ├── Home.js
 │       ├── Weekly.js
 │       ├── Monthly.js
 │       ├── Log.js                  # trades + thoughts; "研究这个想法" on watch entries
 │       ├── Holdings.js             # "更新研究" CTA + status dot per holding row
-│       ├── Research.js             # 研究 tab — review queue + new-memo composer
-│       ├── ResearchMemo.js         # memo detail with versioning, rules check, attach-to-trade
+│       ├── Research.js             # 研究 tab — review queue + Signal Center banner
+│       ├── ResearchMemo.js         # memo detail with MonitoringPanel, SignalHistoryPanel
+│       ├── SignalAnalytics.js      # 4-tab outcome dashboard (总览/列表/标的/校准)
 │       ├── Roundtable.js
 │       ├── Mentor.js
-│       └── Settings.js
+│       └── Settings.js             # DeepSeek key + Finnhub key + signal notifications toggle
 └── assets/
     ├── icon.png
     └── splash.png
