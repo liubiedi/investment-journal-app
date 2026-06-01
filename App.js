@@ -270,11 +270,11 @@ function AppContent() {
       }).catch(() => {});
       // Sweep for orphaned "generating" memos that died with the app last time.
       resumeOrphanedMemos().catch(() => {});
-      // Check for new signals on resume
-      db.getUnacknowledgedSignals().then(sigs => {
+      // Check for new signals on resume — await the check before reading unacknowledged
+      // so signals fired by this check are visible in the banner immediately.
+      checkAllSignals().then(() => db.getUnacknowledgedSignals()).then(sigs => {
         if (sigs.length > 0) setActiveSignals(sigs);
       }).catch(() => {});
-      checkAllSignals().catch(() => {});
     });
     return () => sub.remove();
   }, [bootstrapped]);
@@ -303,9 +303,9 @@ function AppContent() {
       } catch { /* non-fatal — notifications are optional */ }
     })();
 
-    // Check for signals on cold start
-    checkAllSignals().catch(() => {});
-    db.getUnacknowledgedSignals().then(sigs => {
+    // Check for signals on cold start — await the check before reading unacknowledged
+    // so signals fired by this check are visible in the banner immediately.
+    checkAllSignals().then(() => db.getUnacknowledgedSignals()).then(sigs => {
       if (sigs.length > 0) setActiveSignals(sigs);
     }).catch(() => {});
 
