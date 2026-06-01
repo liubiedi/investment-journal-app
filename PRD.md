@@ -2,7 +2,7 @@
 
 ## 投资日志 · The Investor's Ledger
 
-**Version:** 1.8.1
+**Version:** 1.8.1 (changelog complete through PR #32)
 **Date:** 2026-06-01
 **Format:** Android mobile application
 **Target:** AI coding agents (single-source-of-truth for autonomous implementation)
@@ -29,6 +29,9 @@
 - **Signal analytics dashboard** (`src/screens/SignalAnalytics.js`, 4 tabs). Accessible via **复盘 →** in the Research screen header. Tab 1 (总览): total signals, acted/skipped counts, win rate, average 3-month return, best/worst outcomes. Tab 2 (信号列表): full sortable list with per-row debrief. Tab 3 (标的分析): per-ticker aggregated win rate and average return. Tab 4 (策略校准): entry analysis (average return, max drawdown), skip analysis (missed opportunities), calibration suggestions after 3+ outcomes.
 - **DB additions**. Three new tables: `signal_events`, `signal_outcomes`, `market_signals_cache`. Thirteen new columns on `research_memos` (all via idempotent `ALTER TABLE`): `buy_trigger_price`, `buy_trigger_anchors` (JSON), `buy_trigger_confidence`, `buy_trigger_confirmed`, `buy_trigger_price_override`, `min_earnings_surprise_pct`, `last_checked_earnings_period`, `sell_trim_price`, `sell_trigger_anchors` (JSON), `sell_trigger_confidence`, `sell_trim_confirmed`, `sell_trim_price_override`, `trigger_backtest` (JSON). `rowToResearchMemo` transformer updated to parse all JSON columns.
 - **New source files**: `src/marketSignals.js` (market data + signals block builder), `src/signalMonitor.js` (background task, condition evaluation, outcome tracking, debriefs), `src/screens/SignalAnalytics.js` (analytics dashboard).
+
+**v1.7.1 changelog** (2026-05-24, synthesis output fix — PR #28):
+- Fixed roundtable synthesis failing with "output truncated" when large committee transcripts generated responses that exceeded the 2000-token output cap. Raised `max_tokens` in `generateCommitteeSynthesis` from 2000 to 8000 (DeepSeek's practical output ceiling). Affected sessions with 5+ debate rounds or verbose master responses.
 
 **v1.7 changelog** (2026-05-18, Roundtable decision-tool turn):
 - **PEG ratio indicator on Holdings** (PR #22). Each holding row now shows a color-coded PEG chip (green < 1, amber 1–2, red ≥ 2) fetched from Yahoo Finance's `defaultKeyStatistics` module in parallel with the live-price refresh. Negative/zero PEG (declining-earnings stocks) is suppressed so misleading green never shows. The lightweight `fetchPEGRatios()` does up to 3 retries with exponential backoff + jitter on 429/5xx since Yahoo throttles bursty quote-summary calls.
