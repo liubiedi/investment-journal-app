@@ -15,6 +15,7 @@ import { episodicRetriever } from "./retrieval/EpisodicMemoryRetriever";
 import { InvestorDNA } from "./entities/InvestorDNA";
 import * as db from "../db";
 import { setDNA } from "./HotCache";
+import { fetchMarketSignals, buildSignalsBlock } from "../marketSignals";
 
 export const ContextDepth = {
   MINIMAL: "minimal",
@@ -199,6 +200,24 @@ export class MemoryManager {
             tokens: estimateTokens(lines),
             text: `<research_memos>\n${lines}\n</research_memos>`,
           });
+        }
+      } catch { /* non-fatal */ }
+    }
+
+    // Market signals for the discussed ticker (injected for STANDARD+)
+    if (ticker && depth !== ContextDepth.MINIMAL) {
+      try {
+        const signals = await fetchMarketSignals(ticker).catch(() => null);
+        if (signals) {
+          const sigText = buildSignalsBlock({ ticker, ...signals });
+          if (sigText) {
+            sections.push({
+              key: "marketSignals",
+              priority: 4.2,
+              tokens: estimateTokens(sigText),
+              text: sigText,
+            });
+          }
         }
       } catch { /* non-fatal */ }
     }

@@ -21,6 +21,8 @@ import {
   Anchor, FileText, Briefcase, RotateCcw, MessageCircle, Search,
 } from "lucide-react-native";
 
+import * as Notifications from "expo-notifications";
+
 import { AppCtx, useApp } from "./src/context";
 import { colors, fonts } from "./src/theme";
 import { DEFAULT_RULES } from "./src/constants";
@@ -31,6 +33,7 @@ import { memoryManager } from "./src/memory/MemoryManager";
 import { dreamJob } from "./src/memory/background/DreamJob";
 import { resumeOrphanedMemos } from "./src/research/pipeline";
 import { registerResearchBackgroundTask } from "./src/research/background";
+import { registerSignalMonitorTask, checkAllSignals } from "./src/signalMonitor";
 
 import HomeScreen from "./src/screens/Home";
 import LogScreen from "./src/screens/Log";
@@ -40,6 +43,7 @@ import MentorScreen from "./src/screens/Mentor";
 import SettingsScreen from "./src/screens/Settings";
 import ResearchScreen from "./src/screens/Research";
 import ResearchMemoScreen from "./src/screens/ResearchMemo";
+import SignalAnalyticsScreen from "./src/screens/SignalAnalytics";
 
 // Prevent splash from auto-hiding — must be called as early as possible.
 // Wrapped in try/catch because in some edge cases (e.g. module loaded before
@@ -186,6 +190,7 @@ function AppContent() {
   const [prices, setPrices] = useState({ data: {}, lastUpdated: null });
   const [apiKeyPresent, setApiKeyPresent] = useState(false);
   const [researchMemos, setResearchMemos] = useState([]);
+  const [activeSignals, setActiveSignals] = useState([]);
 
   // Bootstrap — split into fast path (renders Home) + lazy path (loads everything else).
   useEffect(() => {
@@ -264,9 +269,12 @@ function AppContent() {
         if (key) _runMemoryJobs(s.trades, s.weeklyNotes, s.monthlyReviews, key).catch(() => {});
       }).catch(() => {});
       // Sweep for orphaned "generating" memos that died with the app last time.
-      // resumeOrphanedMemos has its own freshness guard (skips memos < 2 min old)
-      // so this won't race the in-flight foreground pipeline.
       resumeOrphanedMemos().catch(() => {});
+      // Check for new signals on resume
+      db.getUnacknowledgedSignals().then(sigs => {
+        if (sigs.length > 0) setActiveSignals(sigs);
+      }).catch(() => {});
+      checkAllSignals().catch(() => {});
     });
     return () => sub.remove();
   }, [bootstrapped]);
@@ -277,6 +285,43 @@ function AppContent() {
     if (!bootstrapped) return;
     registerResearchBackgroundTask();
     resumeOrphanedMemos().catch(() => {});
+
+    // Set up local notifications + register signal monitor background task
+    (async () => {
+      try {
+        Notifications.setNotificationHandler({
+          handleNotification: async () => ({
+            shouldShowBanner: true,
+            shouldPlaySound: true,
+            shouldSetBadge: false,
+          }),
+        });
+        const { status } = await Notifications.requestPermissionsAsync();
+        if (status === "granted") {
+          registerSignalMonitorTask();
+        }
+      } catch { /* non-fatal — notifications are optional */ }
+    })();
+
+    // Check for signals on cold start
+    checkAllSignals().catch(() => {});
+    db.getUnacknowledgedSignals().then(sigs => {
+      if (sigs.length > 0) setActiveSignals(sigs);
+    }).catch(() => {});
+
+    // Handle notification taps (open the relevant memo)
+    const tapSub = Notifications.addNotificationResponseReceivedListener((response) => {
+      const memoId = response.notification.request.content.data?.memoId;
+      if (memoId) {
+        // Acknowledge all signals for this memo
+        db.getUnacknowledgedSignals().then(sigs => {
+          const forMemo = sigs.filter(s => s.memo_id === memoId);
+          forMemo.forEach(s => db.acknowledgeSignal(s.id).catch(() => {}));
+          setActiveSignals(prev => prev.filter(s => s.memo_id !== memoId));
+        }).catch(() => {});
+      }
+    });
+    return () => tapSub.remove();
   }, [bootstrapped]);
 
   // ---- action handlers ----
@@ -425,6 +470,17 @@ function AppContent() {
     philosophy, rules, weeklyNotes, monthlyReviews, trades, thoughts, holdings, prices,
   }), [philosophy, rules, weeklyNotes, monthlyReviews, trades, thoughts, holdings, prices]);
 
+  const dismissSignals = useCallback(async (signalIds) => {
+    for (const id of (signalIds || [])) {
+      await db.acknowledgeSignal(id).catch(() => {});
+    }
+    if (signalIds) {
+      setActiveSignals(prev => prev.filter(s => !signalIds.includes(s.id)));
+    } else {
+      setActiveSignals([]);
+    }
+  }, []);
+
   const ctx = {
     // state
     philosophy, rules, defaultMaster,
@@ -432,6 +488,7 @@ function AppContent() {
     weeklyNotes, monthlyReviews, prices,
     researchMemos,
     apiKeyPresent, setApiKeyPresent,
+    activeSignals, setActiveSignals, dismissSignals,
     profile,
     // handlers
     savePhilosophy, saveRules, saveDefaultMaster,
@@ -534,6 +591,12 @@ function AppInner({ ctx }) {
             options={{ tabBarButton: () => null }}
           >
             {() => <ResearchMemoScreen />}
+          </Tab.Screen>
+          <Tab.Screen
+            name="signalAnalytics"
+            options={{ tabBarButton: () => null }}
+          >
+            {() => <SignalAnalyticsScreen />}
           </Tab.Screen>
           <Tab.Screen
             name="settings"

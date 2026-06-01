@@ -5,10 +5,12 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useNavigation, useRoute } from "@react-navigation/native";
-import { ChevronRight, Clock } from "lucide-react-native";
+import { ChevronRight, Clock, Bell, TrendingUp, TrendingDown } from "lucide-react-native";
 
 import { useApp } from "../context";
 import { colors, fonts, spacing } from "../theme";
+import * as db from "../db";
+import { saveSignalOutcome, getSignalOutcome, updateSignalOutcome, newId } from "../db";
 import {
   TSerif, TSerifBold, TSerifItalic, TMono, Kicker,
   Masthead, Section, FilledButton, HR,
@@ -17,13 +19,12 @@ import {
 } from "../components";
 import { preWarmYFCrumb } from "../api";
 import { todayIso } from "../utils";
-import { newId } from "../db";
 import { startResearchGeneration, buildPlaceholder } from "../research/pipeline";
 
 export default function ResearchScreen() {
   const nav = useNavigation();
   const route = useRoute();
-  const { researchMemos, holdings, prices, rules, profile, saveResearchMemo, refreshResearchMemoById, apiKeyPresent } = useApp();
+  const { researchMemos, holdings, prices, rules, profile, saveResearchMemo, refreshResearchMemoById, apiKeyPresent, activeSignals, dismissSignals } = useApp();
 
   const [composerVisible, setComposerVisible] = useState(false);
   const [prefillTicker, setPrefillTicker] = useState(null);
@@ -43,6 +44,46 @@ export default function ResearchScreen() {
   const overdue = researchMemos.filter(m => m.next_review_date && m.next_review_date <= today);
   const active = researchMemos.filter(m => !m.next_review_date || m.next_review_date > today);
 
+  const handleSignalAct = useCallback(async (signal, entryPrice) => {
+    // Record acted outcome
+    const existing = await db.getSignalOutcome(signal.id);
+    if (existing) {
+      await db.updateSignalOutcome(existing.id, {
+        actionTaken: "acted",
+        entryPrice,
+        entryDate: new Date().toISOString().slice(0, 10),
+      });
+    } else {
+      await saveSignalOutcome({
+        id: newId("sout"),
+        signalEventId: signal.id,
+        ticker: signal.ticker,
+        direction: signal.direction,
+        actionTaken: "acted",
+        entryPrice,
+        entryDate: new Date().toISOString().slice(0, 10),
+      });
+    }
+    dismissSignals([signal.id]);
+  }, [dismissSignals]);
+
+  const handleSignalSkip = useCallback(async (signal, skipReason) => {
+    const existing = await db.getSignalOutcome(signal.id);
+    if (existing) {
+      await db.updateSignalOutcome(existing.id, { actionTaken: "skipped", skipReason });
+    } else {
+      await saveSignalOutcome({
+        id: newId("sout"),
+        signalEventId: signal.id,
+        ticker: signal.ticker,
+        direction: signal.direction,
+        actionTaken: "skipped",
+        skipReason: skipReason ?? null,
+      });
+    }
+    dismissSignals([signal.id]);
+  }, [dismissSignals]);
+
   const openComposer = useCallback((ticker = null, holdingId = null) => {
     setPrefillTicker(ticker);
     setPrefillHoldingId(holdingId);
@@ -57,7 +98,32 @@ export default function ResearchScreen() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
       <ScrollView contentContainerStyle={{ padding: spacing.lg, paddingBottom: 80 }}>
-        <Masthead kicker="个股研究" title="Research Queue" />
+        <View style={{ flexDirection: "row", alignItems: "flex-end", justifyContent: "space-between" }}>
+          <View style={{ flex: 1 }}>
+            <Masthead kicker="个股研究" title="Research Queue" />
+          </View>
+          <Pressable
+            onPress={() => nav.navigate("signalAnalytics")}
+            style={{ paddingBottom: 12, paddingLeft: 8 }}
+            hitSlop={10}
+          >
+            <TMono style={{ fontSize: 11, color: colors.inkFaint }}>复盘 →</TMono>
+          </Pressable>
+        </View>
+
+        {activeSignals && activeSignals.length > 0 && (
+          <SignalCenterBanner
+            signals={activeSignals}
+            researchMemos={researchMemos}
+            onAct={handleSignalAct}
+            onSkip={handleSignalSkip}
+            onDismissAll={() => dismissSignals(activeSignals.map(s => s.id))}
+            onOpenMemo={(memoId) => {
+              dismissSignals(activeSignals.filter(s => s.memo_id === memoId).map(s => s.id));
+              nav.navigate("researchMemo", { memoId });
+            }}
+          />
+        )}
 
         {researchMemos.length === 0 ? (
           <EmptyState />
@@ -144,6 +210,140 @@ function ResearchMemoCard({ memo, overdue, onPress }) {
         </View>
       </View>
     </Pressable>
+  );
+}
+
+// ── Signal Center banner ──────────────────────────────────────────────────────
+
+function SignalCenterBanner({ signals, researchMemos, onAct, onSkip, onDismissAll, onOpenMemo }) {
+  const [activeSheet, setActiveSheet] = useState(null); // signal being actioned
+  const [priceInput, setPriceInput] = useState("");
+  const [skipReason, setSkipReason] = useState(null);
+  const [sheetMode, setSheetMode] = useState(""); // "act" | "skip"
+
+  const openActSheet = (signal) => {
+    const memo = researchMemos.find(m => m.id === signal.memo_id);
+    const price = signal.fired_price?.toFixed(2) ?? "";
+    setPriceInput(price);
+    setSheetMode("act");
+    setActiveSheet(signal);
+  };
+  const openSkipSheet = (signal) => {
+    setSkipReason(null);
+    setSheetMode("skip");
+    setActiveSheet(signal);
+  };
+
+  return (
+    <View style={{ backgroundColor: "#1a1611", borderRadius: 10, marginBottom: 16, overflow: "hidden" }}>
+      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", padding: 12, paddingBottom: 8 }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+          <Bell size={13} color="#f5c842" />
+          <TMono style={{ fontSize: 10, color: "#f5c842", letterSpacing: 1 }}>信号中心 SIGNAL CENTER</TMono>
+        </View>
+        <Pressable onPress={onDismissAll} hitSlop={8}>
+          <TMono style={{ fontSize: 9, color: "#8b7d6a" }}>全部忽略</TMono>
+        </Pressable>
+      </View>
+      {signals.map((signal) => (
+        <View key={signal.id} style={{ borderTopWidth: 1, borderTopColor: "#2d2820", padding: 12 }}>
+          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+              {signal.direction === "buy"
+                ? <TrendingUp size={13} color="#5cba7a" />
+                : <TrendingDown size={13} color="#e07055" />}
+              <TMono style={{ fontSize: 12, color: "#f0ebe0", fontFamily: fonts.monoMed }}>{signal.ticker}</TMono>
+              <View style={{
+                backgroundColor: signal.direction === "buy" ? "#1a3d28" : "#3d1a1a",
+                borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1,
+              }}>
+                <TMono style={{ fontSize: 9, color: signal.direction === "buy" ? "#5cba7a" : "#e07055" }}>
+                  {signal.direction === "buy" ? "买入条件满足" : "减仓条件满足"}
+                </TMono>
+              </View>
+            </View>
+            <Pressable onPress={() => onOpenMemo(signal.memo_id)} hitSlop={8}>
+              <TMono style={{ fontSize: 9, color: "#8b7d6a" }}>查看备忘录 →</TMono>
+            </Pressable>
+          </View>
+          {signal.fired_price ? (
+            <TMono style={{ fontSize: 11, color: "#c8b89a", marginBottom: 8 }}>
+              触发价 ${signal.trigger_price?.toFixed(2) ?? "?"} | 当前 ${signal.fired_price.toFixed(2)}
+            </TMono>
+          ) : null}
+          <View style={{ flexDirection: "row", gap: 8 }}>
+            <Pressable
+              onPress={() => openActSheet(signal)}
+              style={{ flex: 1, backgroundColor: "#5cba7a22", borderWidth: 1, borderColor: "#5cba7a55", borderRadius: 6, padding: 7, alignItems: "center" }}
+            >
+              <TMono style={{ fontSize: 10, color: "#5cba7a" }}>
+                {signal.direction === "buy" ? "已买入 →" : "已减仓 →"}
+              </TMono>
+            </Pressable>
+            <Pressable
+              onPress={() => openSkipSheet(signal)}
+              style={{ flex: 1, backgroundColor: "#2d2820", borderWidth: 1, borderColor: "#3d3628", borderRadius: 6, padding: 7, alignItems: "center" }}
+            >
+              <TMono style={{ fontSize: 10, color: "#8b7d6a" }}>跳过 ↓</TMono>
+            </Pressable>
+          </View>
+        </View>
+      ))}
+
+      {/* Act confirmation sheet */}
+      <Modal visible={sheetMode === "act" && !!activeSheet} transparent animationType="slide">
+        <Pressable style={{ flex: 1, backgroundColor: "#00000060" }} onPress={() => setActiveSheet(null)}>
+          <View style={{ position: "absolute", bottom: 0, left: 0, right: 0, backgroundColor: "#f5f1e8", borderTopLeftRadius: 16, borderTopRightRadius: 16, padding: 24, gap: 14 }}>
+            <TSerifBold style={{ fontSize: 16 }}>记录{activeSheet?.direction === "buy" ? "买入" : "减仓"}</TSerifBold>
+            <View>
+              <TMono style={{ fontSize: 11, color: colors.inkFaint, marginBottom: 4 }}>成交价格</TMono>
+              <PaperInput
+                value={priceInput}
+                onChangeText={setPriceInput}
+                keyboardType="numeric"
+                placeholder="输入实际成交价"
+              />
+            </View>
+            <FilledButton
+              label="确认记录"
+              onPress={() => {
+                onAct(activeSheet, parseFloat(priceInput) || activeSheet?.fired_price);
+                setActiveSheet(null);
+              }}
+            />
+          </View>
+        </Pressable>
+      </Modal>
+
+      {/* Skip reason sheet */}
+      <Modal visible={sheetMode === "skip" && !!activeSheet} transparent animationType="slide">
+        <Pressable style={{ flex: 1, backgroundColor: "#00000060" }} onPress={() => setActiveSheet(null)}>
+          <View style={{ position: "absolute", bottom: 0, left: 0, right: 0, backgroundColor: "#f5f1e8", borderTopLeftRadius: 16, borderTopRightRadius: 16, padding: 24, gap: 12 }}>
+            <TSerifBold style={{ fontSize: 16 }}>跳过原因（可选）</TSerifBold>
+            {["等待更好的买入价格", "论文有不确定性", "资金暂时不足", "其他"].map(reason => (
+              <Pressable
+                key={reason}
+                onPress={() => setSkipReason(reason === skipReason ? null : reason)}
+                style={{ flexDirection: "row", alignItems: "center", gap: 10, padding: 10, borderRadius: 8,
+                  backgroundColor: skipReason === reason ? "#ede8db" : "transparent" }}
+              >
+                <View style={{ width: 16, height: 16, borderRadius: 8, borderWidth: 1.5,
+                  borderColor: skipReason === reason ? colors.ink : colors.inkFaint,
+                  backgroundColor: skipReason === reason ? colors.ink : "transparent" }} />
+                <TSerif style={{ fontSize: 14 }}>{reason}</TSerif>
+              </Pressable>
+            ))}
+            <FilledButton
+              label="确认跳过"
+              onPress={() => {
+                onSkip(activeSheet, skipReason);
+                setActiveSheet(null);
+              }}
+            />
+          </View>
+        </Pressable>
+      </Modal>
+    </View>
   );
 }
 

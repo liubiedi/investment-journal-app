@@ -3,7 +3,7 @@ import React, { useState, useEffect } from "react";
 import { View, ScrollView, Pressable, Alert, Linking } from "react-native";
 import { useSafeAreaInsets, SafeAreaView } from "react-native-safe-area-context";
 import {
-  Key, Download, Upload, Info, Trash2, ExternalLink, Check, Loader2, FileText, BookMarked,
+  Key, Download, Upload, Info, Trash2, ExternalLink, Check, Loader2, FileText, BookMarked, Bell,
 } from "lucide-react-native";
 import * as FileSystem from "expo-file-system/legacy";
 import * as Sharing from "expo-sharing";
@@ -13,6 +13,7 @@ import { colors, fonts } from "../theme";
 import { useApp } from "../context";
 import { useTransientMessage } from "../utils";
 import { getApiKey, setApiKey, clearApiKey } from "../api";
+import { getFinnhubKey, setFinnhubKey, clearFinnhubKey } from "../marketSignals";
 import * as db from "../db";
 import { exportToObsidianVault } from "../markdown-export";
 
@@ -30,6 +31,12 @@ export default function SettingsScreen() {
   const [keySaved, showKeySaved] = useTransientMessage(2000);
   const [hasKey, setHasKey] = useState(app.apiKeyPresent);
 
+  const [finnhubKeyInput, setFinnhubKeyInput] = useState("");
+  const [savingFinnhub, setSavingFinnhub] = useState(false);
+  const [finnhubSaved, showFinnhubSaved] = useTransientMessage(2000);
+  const [hasFinnhubKey, setHasFinnhubKey] = useState(false);
+  const [signalNotificationsEnabled, setSignalNotificationsEnabled] = useState(true);
+
   const [exportingVault, setExportingVault] = useState(false);
   const [exportingJson, setExportingJson] = useState(false);
   const [exportResult, setExportResult] = useState("");
@@ -39,8 +46,39 @@ export default function SettingsScreen() {
     (async () => {
       const key = await getApiKey();
       setHasKey(!!key);
+      const fk = await getFinnhubKey();
+      setHasFinnhubKey(!!fk);
+      const notifEnabled = await db.kvGet("signal_notifications_enabled");
+      setSignalNotificationsEnabled(notifEnabled !== 0 && notifEnabled !== false);
     })();
   }, []);
+
+  const handleSaveFinnhubKey = async () => {
+    if (!finnhubKeyInput.trim()) return;
+    setSavingFinnhub(true);
+    try {
+      await setFinnhubKey(finnhubKeyInput.trim());
+      setHasFinnhubKey(true);
+      setFinnhubKeyInput("");
+      showFinnhubSaved();
+    } catch { /* non-fatal */ }
+    finally { setSavingFinnhub(false); }
+  };
+
+  const handleClearFinnhubKey = async () => {
+    Alert.alert("清除 Finnhub Key", "确定要删除已保存的 Finnhub API key 吗？", [
+      { text: "取消", style: "cancel" },
+      { text: "清除", style: "destructive", onPress: async () => {
+        await clearFinnhubKey();
+        setHasFinnhubKey(false);
+      }},
+    ]);
+  };
+
+  const toggleSignalNotifications = async (val) => {
+    setSignalNotificationsEnabled(val);
+    await db.kvSet("signal_notifications_enabled", val ? 1 : 0);
+  };
 
   const handleSaveKey = async () => {
     if (!apiKeyInput.trim()) return;
@@ -211,6 +249,82 @@ export default function SettingsScreen() {
           <ExternalLink size={11} color={colors.inkMuted} />
           <TMono style={{ fontSize: 11 }}>前往 DeepSeek 平台获取 key</TMono>
         </Pressable>
+      </Section>
+
+      {/* Finnhub API Key */}
+      <Section label="Finnhub API Key" sub="财报超预期 · 分析师评级 · 新闻 (免费)">
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 10 }}>
+          <View style={{
+            width: 8, height: 8, borderRadius: 4,
+            backgroundColor: hasFinnhubKey ? colors.good : colors.inkFaint,
+          }} />
+          <TSerif style={{ fontSize: 13 }}>
+            {hasFinnhubKey ? "已配置 — 财报与分析师数据已启用" : "未配置 — 仅使用免费价格数据"}
+          </TSerif>
+        </View>
+
+        <PaperInput
+          value={finnhubKeyInput}
+          onChangeText={setFinnhubKeyInput}
+          placeholder={hasFinnhubKey ? "粘贴新 key 以替换现有的…" : "c_xxxxxxxxxxxxxxxx…"}
+          secureTextEntry
+          autoCapitalize="none"
+          autoCorrect={false}
+          style={{ fontFamily: fonts.mono, fontSize: 13 }}
+        />
+
+        <View style={{ flexDirection: "row", gap: 8, marginTop: 12 }}>
+          {hasFinnhubKey && (
+            <OutlineButton onPress={handleClearFinnhubKey}>清除</OutlineButton>
+          )}
+          <FilledButton
+            onPress={handleSaveFinnhubKey}
+            disabled={!finnhubKeyInput.trim() || savingFinnhub}
+            loading={savingFinnhub}
+            style={{ flex: 1 }}
+          >
+            {finnhubSaved ? (
+              <>
+                <Check size={14} color={colors.bg} strokeWidth={3} />
+                <TSerifBold style={{ color: colors.bg, fontSize: 15 }}>已保存</TSerifBold>
+              </>
+            ) : (
+              <TSerifBold style={{ color: colors.bg, fontSize: 15 }}>保存 Finnhub Key</TSerifBold>
+            )}
+          </FilledButton>
+        </View>
+
+        <Pressable onPress={() => Linking.openURL("https://finnhub.io/register")}
+          style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: 12 }}>
+          <ExternalLink size={11} color={colors.inkMuted} />
+          <TMono style={{ fontSize: 11 }}>免费注册 finnhub.io 获取 API key</TMono>
+        </Pressable>
+      </Section>
+
+      {/* Signal Notifications */}
+      <Section label="信号通知" sub="买入/卖出条件满足时推送">
+        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+          <View style={{ flex: 1, marginRight: 12 }}>
+            <TSerif style={{ fontSize: 13, lineHeight: 20 }}>触发价格通知</TSerif>
+            <TSerifItalic style={{ fontSize: 11, color: colors.inkFaint, marginTop: 2 }}>
+              当买入/减仓条件同时满足时，推送包含操作建议的通知
+            </TSerifItalic>
+          </View>
+          <Pressable
+            onPress={() => toggleSignalNotifications(!signalNotificationsEnabled)}
+            style={{
+              width: 44, height: 26, borderRadius: 13,
+              backgroundColor: signalNotificationsEnabled ? colors.good : colors.divider,
+              justifyContent: "center", paddingHorizontal: 3,
+            }}
+          >
+            <View style={{
+              width: 20, height: 20, borderRadius: 10,
+              backgroundColor: colors.bg,
+              transform: [{ translateX: signalNotificationsEnabled ? 18 : 0 }],
+            }} />
+          </Pressable>
+        </View>
       </Section>
 
       {/* Data Export */}

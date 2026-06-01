@@ -56,6 +56,40 @@ const SYMBOL_MAP = {
   startResearchGeneration: { src: "research/pipeline.js", kind: "fn" },
   buildPlaceholder:        { src: "research/pipeline.js", kind: "fn" },
   resumeOrphanedMemos:     { src: "research/pipeline.js", kind: "fn" },
+
+  // src/marketSignals.js
+  fetchMarketSignals:           { src: "marketSignals.js", kind: "fn" },
+  buildSignalsBlock:            { src: "marketSignals.js", kind: "fn" },
+  computeTriggerBacktest:       { src: "marketSignals.js", kind: "fn" },
+  getFinnhubKey:                { src: "marketSignals.js", kind: "fn" },
+  setFinnhubKey:                { src: "marketSignals.js", kind: "fn" },
+  clearFinnhubKey:              { src: "marketSignals.js", kind: "fn" },
+
+  // src/signalMonitor.js
+  checkAllSignals:              { src: "signalMonitor.js", kind: "fn" },
+  registerSignalMonitorTask:    { src: "signalMonitor.js", kind: "fn" },
+  generateSignalDebrief:        { src: "signalMonitor.js", kind: "fn" },
+  computePendingForwardReturns: { src: "signalMonitor.js", kind: "fn" },
+
+  // src/db.js — signal/monitoring additions
+  getCachedMarketSignals:       { src: "db.js", kind: "fn" },
+  saveMarketSignalsCache:       { src: "db.js", kind: "fn" },
+  getRecentSignalEvent:         { src: "db.js", kind: "fn" },
+  saveSignalEvent:              { src: "db.js", kind: "fn" },
+  getUnacknowledgedSignals:     { src: "db.js", kind: "fn" },
+  acknowledgeSignal:            { src: "db.js", kind: "fn" },
+  confirmTrigger:               { src: "db.js", kind: "fn" },
+  updateResearchMemoTriggers:   { src: "db.js", kind: "fn" },
+  updateTriggerBacktest:        { src: "db.js", kind: "fn" },
+  saveSignalOutcome:            { src: "db.js", kind: "fn" },
+  updateSignalOutcome:          { src: "db.js", kind: "fn" },
+  getSignalOutcome:             { src: "db.js", kind: "fn" },
+  getSignalOutcomesForMemo:     { src: "db.js", kind: "fn" },
+  getAllSignalOutcomes:          { src: "db.js", kind: "fn" },
+  getPendingForwardReturns:     { src: "db.js", kind: "fn" },
+  getAnalyticsStats:            { src: "db.js", kind: "fn" },
+  getSignalEventsForMemo:       { src: "db.js", kind: "fn" },
+  getMonitoredMemos:            { src: "db.js", kind: "fn" },
 };
 
 // The import alias each consumer file uses (for error messages).
@@ -66,6 +100,8 @@ const IMPORT_ALIAS = {
   "context.js":            "../context",
   "theme.js":              "../theme",
   "research/pipeline.js":  "../research/pipeline",
+  "marketSignals.js":      "../marketSignals",
+  "signalMonitor.js":      "../signalMonitor",
 };
 
 // Detect actual usage of a symbol (not inside import/require lines).
