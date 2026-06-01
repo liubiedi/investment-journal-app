@@ -1052,6 +1052,7 @@ export async function updateResearchMemoFields(memoId, fields) {
     nextReviewDate: "next_review_date",
     currentVersionId: "current_version_id",
     holdingId: "holding_id",
+    lastCheckedEarningsPeriod: "last_checked_earnings_period",
   };
   const cols = [], vals = [];
   for (const [k, v] of Object.entries(fields)) {
@@ -1439,6 +1440,13 @@ export function rowToResearchMemo(r) {
     status: r.status || null, confidence: r.confidence || null,
     createdAt: r.created_at || null, lastReviewedAt: r.last_reviewed_at || null,
     nextReviewDate: r.next_review_date || null, holdingId: r.holding_id || null,
+    // Snake-case aliases — screen code that predates this transformer uses these directly.
+    company_name: r.company_name || null,
+    current_version_id: r.current_version_id || null,
+    next_review_date: r.next_review_date || null,
+    holding_id: r.holding_id || null,
+    last_reviewed_at: r.last_reviewed_at || null,
+    created_at: r.created_at || null,
     buyTriggerPrice: r.buy_trigger_price ?? null,
     buyTriggerAnchors: safeJson(r.buy_trigger_anchors, []),
     buyTriggerConfidence: r.buy_trigger_confidence ?? null,

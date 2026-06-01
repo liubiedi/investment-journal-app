@@ -292,6 +292,11 @@ export async function checkAllSignals() {
           const body = buildNotificationBody(memo, "buy", result);
           await scheduleSignalNotification(`📈 买入条件满足: ${sym}`, body, memo.id);
           fired.push({ ...event, memoId: memo.id });
+          // Stamp the earnings period so the same report doesn't re-fire
+          // after the 24-hour dedup window expires.
+          if (result.earningsPeriod) {
+            updateResearchMemoFields(memo.id, { lastCheckedEarningsPeriod: result.earningsPeriod }).catch(() => {});
+          }
         }
       }
     }
@@ -335,16 +340,19 @@ export async function checkAllSignals() {
 // Background task registration
 // ═══════════════════════════════════════════════════════════════
 
-export function registerSignalMonitorTask() {
-  TaskManager.defineTask(SIGNAL_MONITOR_TASK, async () => {
-    try {
-      await checkAllSignals();
-      return BackgroundTask.BackgroundTaskResult.Success;
-    } catch {
-      return BackgroundTask.BackgroundTaskResult.Failed;
-    }
-  });
+// defineTask must run at module-load time so a headless OS launch can
+// resolve the task handler before App.js fully initialises (same pattern
+// as src/research/background.js).
+TaskManager.defineTask(SIGNAL_MONITOR_TASK, async () => {
+  try {
+    await checkAllSignals();
+    return BackgroundTask.BackgroundTaskResult.Success;
+  } catch {
+    return BackgroundTask.BackgroundTaskResult.Failed;
+  }
+});
 
+export function registerSignalMonitorTask() {
   BackgroundTask.registerTaskAsync(SIGNAL_MONITOR_TASK, {
     minimumInterval: 12 * 60 * 60, // 12 hours (half-daily) — these are
     // not day-trading signals. minimumInterval is only a floor/hint; iOS
