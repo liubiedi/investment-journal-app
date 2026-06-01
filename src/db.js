@@ -1311,13 +1311,18 @@ export async function getAllSignalOutcomes() {
 
 export async function getPendingForwardReturns() {
   const db = await getDb();
+  // Include skipped outcomes using signal fired_at/fired_price as the observation point —
+  // this powers the CalibrationTab "missed opportunity" analysis.
   return await db.getAllAsync(
-    `SELECT so.*, se.ticker as event_ticker
+    `SELECT so.*, se.ticker as event_ticker, se.fired_at, se.fired_price
      FROM signal_outcomes so
      JOIN signal_events se ON so.signal_event_id = se.id
-     WHERE so.action_taken = 'acted'
-       AND so.entry_date IS NOT NULL
-       AND (so.forward_6m_pct IS NULL OR so.forward_3m_pct IS NULL OR so.forward_1m_pct IS NULL)`
+     WHERE (so.forward_6m_pct IS NULL OR so.forward_3m_pct IS NULL OR so.forward_1m_pct IS NULL)
+       AND (
+         (so.action_taken = 'acted' AND so.entry_date IS NOT NULL)
+         OR
+         so.action_taken = 'skipped'
+       )`
   );
 }
 
