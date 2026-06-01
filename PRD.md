@@ -2,10 +2,33 @@
 
 ## 投资日志 · The Investor's Ledger
 
-**Version:** 1.7
-**Date:** 2026-05-18
+**Version:** 1.8.1
+**Date:** 2026-06-01
 **Format:** Android mobile application
 **Target:** AI coding agents (single-source-of-truth for autonomous implementation)
+
+**v1.8.1 changelog** (2026-06-01, bug fixes — PR #31):
+- Fixed `package-lock.json` out of sync with `expo-notifications` entry in `package.json`; `npm ci` on clean installs now works.
+- Fixed signal banner race condition on cold start and foreground resume: `checkAllSignals()` is now awaited before `getUnacknowledgedSignals()` so newly-fired signals appear in the Signal Center banner immediately on the same launch/resume that triggered them.
+- Fixed skipped signal outcomes never receiving forward returns: `getPendingForwardReturns()` now includes `action_taken='skipped'` rows, using `signal_events.fired_at`/`fired_price` as the observation baseline. `CalibrationTab`'s missed-opportunity analysis now receives real data.
+- Fixed `rowToResearchMemo` only returning camelCase fields while screen code (`Research.js`, `ResearchMemo.js`) read snake_case fields (`memo.next_review_date`, `memo.current_version_id`, `memo.company_name`, `memo.holding_id`); transformer now emits both forms.
+- Fixed `TaskManager.defineTask` called inside `registerSignalMonitorTask()` function instead of at module load time; headless OS background launches can now resolve the task handler (matches `research/background.js` pattern).
+- Fixed same earnings report re-triggering after the 24-hour dedup window: `checkAllSignals()` now stamps `last_checked_earnings_period` on the memo after a buy signal fires on an earnings condition. `updateResearchMemoFields` map extended with the new field.
+
+**v1.8 changelog** (2026-06-01, Signal Monitoring + Outcome Tracking):
+- **Signal monitoring with push alerts** (PR #29). Background task (`expo-background-task`, 12-hour floor) and on-foreground-resume check evaluate confirmed buy/sell trigger conditions for all research memos. When all conditions for a memo are met — price within 5% of trigger AND optional earnings beat threshold — a local push notification fires containing the full action plan prose. The background check is a backstop; the `AppState "active"` listener is the primary trigger for part-time investors who open the app daily.
+- **Trigger price trust chain**. AI-generated trigger prices are now backed by explicit evidence: `buy_trigger_anchors` (array of 1-3 strings, each citing a specific data point and source), `buy_trigger_confidence` (`"high"` if ≥2 anchors converge within 5%, `"medium"` if 1 anchor, `"low"` if weak), and `min_earnings_surprise_pct` (required if prose mentions an earnings condition). The `DEEP_SYSTEM` prompt now forbids fabricating trigger prices: all numeric trigger fields must derive from `<market_signals>` or snapshot data, or be set to `null`. A historical backtest (`computeTriggerBacktest`) uses 2-year Yahoo Finance data to show how often the trigger price was hit and the average 3-month forward return at those hits.
+- **User confirmation gate**. A newly generated memo's trigger prices start as `"待确认"` (unconfirmed). The background monitor ignores them until the user reads the anchor evidence and taps **确认并开始监控** or **调整价格**. The `MonitoringPanel` UI in `ResearchMemo.js` shows unconfirmed / confirmed / user-overridden states, with a collapsible **查看依据** section displaying the full anchor evidence trail.
+- **Live `<market_signals>` context block**. `src/marketSignals.js` fetches Yahoo Finance price history (free, no key) and Finnhub.io data (free API key: earnings, analyst ratings, news). Results are cached for 2 hours in `market_signals_cache`. A formatted `<market_signals>` XML block is injected into the AI context for research memo generation (`pipeline.js`), mentor chat, and roundtable (via `MemoryManager` at priority 4.2, STANDARD+ depth). The mentor system prompt now requires concrete numbers from this block — "MSFT is at $410, 2.5% above your buy trigger of $400" not "if the stock weakens."
+- **Finnhub API key in Settings**. New section in `Settings.js` with masked key input (same UX as DeepSeek key), save/clear, and a link to finnhub.io. A **signal notifications toggle** (`kv` key `signal_notifications_enabled`) lets the user suppress push notifications while still logging signal events.
+- **Signal Center banner on Research screen**. When unacknowledged signals exist, a dark banner appears at the top of the Research screen showing each triggered memo with ticker, direction (📈买入 / 📉减仓), current price vs trigger, and action plan prose. Each row has **已买入** and **跳过** buttons.
+- **Outcome tracking — Act or Skip**. Tapping **已买入** opens a price-entry sheet (pre-filled with current price); confirming saves a `signal_outcome` with `action_taken='acted'` and `entry_price`. Tapping **跳过** opens a reason picker (5 common reasons); confirming saves `action_taken='skipped'` with `skip_reason`. Unresolved signals remain in the banner.
+- **Auto-computed forward returns**. `computePendingForwardReturns()` runs in every `checkAllSignals()` call. For outcomes where `action_taken='acted'` and enough time has elapsed, it fetches 2-year Yahoo Finance history and computes `forward_1m_pct` (30d), `forward_3m_pct` (90d), `forward_6m_pct` (180d), and `max_drawdown_3m` (worst trough in first 90 trading days). Unique tickers are de-duplicated and fetched in parallel.
+- **AI post-trade debrief at 3 months**. When `forward_3m_pct` becomes available, `generateSignalDebrief()` makes a `callFlash` call producing a 3-paragraph Chinese debrief (150–200 words): entry result, trigger calibration review, next-step recommendation. Stored in `signal_outcomes.ai_debrief`. A push notification fires: "MSFT买入信号3个月复盘已生成".
+- **Per-memo signal history panel** (`SignalHistoryPanel` in `ResearchMemo.js`). A collapsible section below the strategy card shows every past signal for the memo's ticker — fired date, fired price, action (bought/skipped), 3-month return (colour-coded: green acted/positive, red acted/negative, amber skipped/would-have-been-positive), and a debrief snippet.
+- **Signal analytics dashboard** (`src/screens/SignalAnalytics.js`, 4 tabs). Accessible via **复盘 →** in the Research screen header. Tab 1 (总览): total signals, acted/skipped counts, win rate, average 3-month return, best/worst outcomes. Tab 2 (信号列表): full sortable list with per-row debrief. Tab 3 (标的分析): per-ticker aggregated win rate and average return. Tab 4 (策略校准): entry analysis (average return, max drawdown), skip analysis (missed opportunities), calibration suggestions after 3+ outcomes.
+- **DB additions**. Three new tables: `signal_events`, `signal_outcomes`, `market_signals_cache`. Thirteen new columns on `research_memos` (all via idempotent `ALTER TABLE`): `buy_trigger_price`, `buy_trigger_anchors` (JSON), `buy_trigger_confidence`, `buy_trigger_confirmed`, `buy_trigger_price_override`, `min_earnings_surprise_pct`, `last_checked_earnings_period`, `sell_trim_price`, `sell_trigger_anchors` (JSON), `sell_trigger_confidence`, `sell_trim_confirmed`, `sell_trim_price_override`, `trigger_backtest` (JSON). `rowToResearchMemo` transformer updated to parse all JSON columns.
+- **New source files**: `src/marketSignals.js` (market data + signals block builder), `src/signalMonitor.js` (background task, condition evaluation, outcome tracking, debriefs), `src/screens/SignalAnalytics.js` (analytics dashboard).
 
 **v1.7 changelog** (2026-05-18, Roundtable decision-tool turn):
 - **PEG ratio indicator on Holdings** (PR #22). Each holding row now shows a color-coded PEG chip (green < 1, amber 1–2, red ≥ 2) fetched from Yahoo Finance's `defaultKeyStatistics` module in parallel with the live-price refresh. Negative/zero PEG (declining-earnings stocks) is suppressed so misleading green never shows. The lightweight `fetchPEGRatios()` does up to 3 retries with exponential backoff + jitter on 429/5xx since Yahoo throttles bursty quote-summary calls.
@@ -39,6 +62,7 @@ A personal, offline-first investment journaling Android app that combines struct
 6. **Token-frugal AI** — feedback is on-demand (never auto-triggered), prompt caching reduces cost ~90% for chat.
 7. **华山论道 roundtable** — launch a multi-master AI investment committee discussion on any topic or holding; masters debate in structured rounds and the session closes with a **structured decision synthesis** (headline verdict, vote tally, axis of disagreement, decisive crux, IF/THEN trigger conditions, suggested next action) rendered as a dashboard — not a free-prose recap.
 8. **Research module (个股研究)** — versioned, source-backed decision memos for stocks being watched or held. AI generates conditional status (Buy Setup / Watch / Reduce Risk / Avoid) with bull/base/bear valuation, position sizing, rules conflict check, and full data provenance. Never imperative language. Every regeneration is a new immutable version. Integrated into the four-tier memory system so mentors always know the current research conclusion when a stock is discussed.
+9. **Signal monitoring + outcome tracking** — after confirming a trigger price (with anchor evidence and historical backtest), the app monitors conditions in the background and pushes alerts when buy/sell criteria are met. Users log "acted" or "skipped" at signal time; the app auto-computes 1m/3m/6m forward returns and generates an AI debrief at 3 months. A personal calibration dashboard tracks win rate, average return, and skip analysis over time.
 
 ---
 
@@ -57,6 +81,9 @@ A personal, offline-first investment journaling Android app that combines struct
 | Fonts | **@expo-google-fonts/fraunces**, **@expo-google-fonts/jetbrains-mono** | Editorial serif + technical mono |
 | AI API | **DeepSeek API direct** (fetch, OpenAI-compatible) | No backend; BYOK model; cost-effective vs Anthropic |
 | Price Data | **Yahoo Finance public endpoints** (`query1.finance.yahoo.com/v8/finance/chart/`) | Free, no API key, global coverage |
+| Market Data (optional) | **Finnhub.io** (`finnhub.io/api/v1`) | Free API key; provides earnings surprises, analyst ratings, company news; key stored in SecureStore |
+| Push Notifications | **expo-notifications ~0.29.13** | Local push alerts for signal triggers; permission requested at first use |
+| Background Tasks | **expo-background-task** | 12-hour-floor background signal monitoring; primary trigger is AppState foreground resume |
 | Date Picker | **@react-native-community/datetimepicker** | Native Android calendar dialog; Expo SDK 54 / EAS compatible; no Modal wrapper needed |
 | Build | **EAS Build** (cloud) with APK profile | Produces installable `.apk` without local Android Studio |
 
@@ -279,6 +306,65 @@ CREATE TABLE research_snapshot_cache (
 -- CREATE TRIGGER research_fts_au AFTER UPDATE ON research_versions ...
 -- CREATE TRIGGER research_fts_ad AFTER DELETE ON research_versions ...
 -- (source_type = 'research'; EpisodicMemoryRetriever._hydrate() handles this type)
+
+-- Signal monitoring (v1.8)
+
+-- One row per fired signal event (both buy and sell directions)
+CREATE TABLE IF NOT EXISTS signal_events (
+  id TEXT PRIMARY KEY,
+  ticker TEXT NOT NULL,
+  direction TEXT NOT NULL,          -- 'buy' | 'sell'
+  trigger_price REAL,               -- effective trigger at fire time
+  earnings_surprise REAL,           -- pct surprise if earnings condition triggered
+  fired_price REAL NOT NULL,        -- actual market price at fire time
+  memo_id TEXT,                     -- FK → research_memos.id
+  fired_at INTEGER NOT NULL,        -- ms epoch
+  acknowledged INTEGER DEFAULT 0,   -- 0 = unread, 1 = seen/dismissed
+  conditions_detail TEXT            -- JSON: { buyOk, sellOk, buyPriceDist, ... }
+);
+
+-- User's act/skip decision per signal + auto-computed forward returns
+CREATE TABLE IF NOT EXISTS signal_outcomes (
+  id TEXT PRIMARY KEY,
+  signal_event_id TEXT NOT NULL,    -- FK → signal_events.id
+  ticker TEXT NOT NULL,
+  direction TEXT NOT NULL,
+  action_taken TEXT,                -- 'acted' | 'skipped' | NULL (pending)
+  skip_reason TEXT,
+  entry_price REAL,
+  entry_date TEXT,                  -- ISO 'YYYY-MM-DD'
+  trade_id TEXT,                    -- optional FK to trade journal
+  forward_1m_pct REAL,              -- auto-computed 30d after entry
+  forward_3m_pct REAL,              -- auto-computed 90d after entry
+  forward_6m_pct REAL,              -- auto-computed 180d after entry
+  max_drawdown_3m REAL,             -- worst trough in first 90 trading days
+  forward_computed_at INTEGER,
+  ai_debrief TEXT,                  -- AI 3-paragraph debrief at 3-month mark
+  debrief_notified INTEGER DEFAULT 0,
+  reviewed INTEGER DEFAULT 0
+);
+
+-- 2-hour market data cache (Yahoo Finance + Finnhub)
+CREATE TABLE IF NOT EXISTS market_signals_cache (
+  ticker TEXT PRIMARY KEY,
+  data TEXT NOT NULL,               -- JSON blob of full signals object
+  fetched_at INTEGER NOT NULL
+);
+
+-- research_memos gets 13 new columns via idempotent ALTER TABLE (v1.8):
+--   buy_trigger_price REAL
+--   buy_trigger_anchors TEXT         -- JSON array of anchor strings (cited data points)
+--   buy_trigger_confidence TEXT      -- 'high'|'medium'|'low'
+--   buy_trigger_confirmed INTEGER    -- 0=unconfirmed, 1=monitoring active
+--   buy_trigger_price_override REAL  -- user-adjusted price (overrides AI suggestion)
+--   min_earnings_surprise_pct REAL   -- optional earnings condition (% beat required)
+--   last_checked_earnings_period TEXT
+--   sell_trim_price REAL
+--   sell_trigger_anchors TEXT        -- JSON array
+--   sell_trigger_confidence TEXT
+--   sell_trim_confirmed INTEGER
+--   sell_trim_price_override REAL
+--   trigger_backtest TEXT            -- JSON: { hitCount, avgForward3m, hitDates }
 ```
 
 **Default KV values on first launch:**
@@ -520,6 +606,12 @@ Two screens: Research Home (queue) and Research Memo detail. `researchMemo` is a
 #### Research Home (`src/screens/Research.js`)
 
 ```
+[复盘 →]  ← header button, navigates to SignalAnalytics screen
+
+SignalCenterBanner  ← shown when activeSignals.length > 0 (from App context)
+  Per-signal row: ticker + direction badge (📈买入 / 📉减仓) + price vs trigger
+  Buttons: [已买入] → price entry sheet  |  [跳过] → reason picker
+
 Masthead kicker="个股研究" title="Research Queue"
 
 Section "需要复盘 Review Due"  ← next_review_date ≤ today
@@ -555,9 +647,19 @@ EmptyState if no memos  ← hint: "在「持仓」或「记录」中点击「深
 | Deep Research Checklist | collapsed | items with evidence-quality tags |
 | Valuation Check | expanded | multiples (P/E, P/B, PEG, EV/EBITDA), scenarios (bull/base/bear), fair-value band, assumptions |
 | Position Sizing | expanded | current % / max % / first tranche, add/trim/invalidation conditions |
-| 3–6 Month Strategy | collapsed | watch items, buy/sell triggers, review date, batch plan |
+| 3–6 Month Strategy | collapsed | `MonitoringPanel` (v1.8, see below) + watch items, review date, batch plan |
 | Rules Conflict Check | expanded | pass/fail/n/a per rule; override note required for fails |
 | Sources | collapsed | `SourceCard` per source with data-tier badge + timestamp |
+
+**MonitoringPanel** (v1.8, within 3–6 Month Strategy section):
+
+Shown for any memo that has a `buy_trigger_price` or `sell_trim_price`.
+
+*Unconfirmed state* (`confirmed = 0`): shows AI-suggested price, confidence stars, collapsible anchor evidence ("依据"), historical backtest line ("历史回测: N次触发 | 3个月均 +X%"), earnings condition if set, and prose. Buttons: **[确认并开始监控]** (calls `confirmTrigger`) and **[调整价格]** (inline price edit + confirm).
+
+*Confirmed state* (`confirmed = 1`): shows green "监控中" badge, effective trigger price (with "AI建议 $X, 已手动调整" note if user overrode), earnings condition status, prose, and collapsible anchor evidence. Buttons: **[修改价格]** (resets to unconfirmed so user re-confirms) and **[停止监控]** (calls `stopTrigger`).
+
+**SignalHistoryPanel** (v1.8, below Strategy section): collapsible list of all past signal_outcomes for this memo's ticker. Each row: fired date, fired price, action taken (买入/跳过 with reason), 3-month forward return (colour-coded), debrief snippet. Hidden when no outcomes exist.
 
 **`DisclaimerBlock`** always visible at bottom: "decision support, not investment advice."
 
@@ -594,7 +696,16 @@ Accessible via the ⚙ gear icon in the 心法 (Home) masthead. Not shown in the
    - Password-masked input (`sk-…` format). "保存" button calls `setApiKey(value)` (SecureStore).
    - "清除" button for deletion.
    - Link to `https://platform.deepseek.com/api_keys`.
-2. **语音输入 · Voice Input**:
+2. **Finnhub API Key** (v1.8):
+   - Password-masked input. "保存" button calls `setFinnhubKey(value)` (SecureStore).
+   - "清除" button for deletion.
+   - Status dot: green if key present ("已配置 — 财报与分析师数据已启用"), grey if absent ("未配置 — 仅使用免费价格数据").
+   - Link to `https://finnhub.io/register`.
+   - Without this key: signal monitoring works on price-only conditions; earnings conditions are never satisfied (signals deferred until key added).
+3. **信号通知 · Signal Notifications** (v1.8):
+   - Toggle switch. Stored in `kv` as `signal_notifications_enabled` (default on).
+   - When off: `checkAllSignals()` still evaluates conditions and logs `signal_events` but skips `scheduleSignalNotification`. Signal Center banner on Research screen still works.
+4. **语音输入 · Voice Input**:
    - Informational only (no toggles or credentials).
    - Hint: "为获得更好的中文语音识别，建议安装讯飞输入法或搜狗输入法。在任意输入框中，可以点击键盘上的麦克风按钮进行语音输入；或点击 App 内的麦克风图标快捷录入。"
    - Links to Play Store pages for 讯飞输入法 / 搜狗输入法 (optional; can be plain text).
